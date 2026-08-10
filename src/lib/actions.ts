@@ -7,6 +7,7 @@ import { db } from "@/db";
 import { workflows } from "@/db/schema";
 import { runWorkflow } from "@/lib/executor";
 import type { DeliverTarget } from "@/lib/read-only";
+import { requireOwner } from "@/lib/auth/require-owner";
 
 function slugify(name: string) {
   return name
@@ -36,6 +37,7 @@ function parseWorkflowForm(formData: FormData) {
 }
 
 export async function createWorkflow(formData: FormData) {
+  await requireOwner();
   const parsed = parseWorkflowForm(formData);
   const slug = slugify(parsed.name);
 
@@ -46,6 +48,7 @@ export async function createWorkflow(formData: FormData) {
 }
 
 export async function updateWorkflow(id: string, formData: FormData) {
+  await requireOwner();
   const parsed = parseWorkflowForm(formData);
 
   await db
@@ -59,17 +62,20 @@ export async function updateWorkflow(id: string, formData: FormData) {
 }
 
 export async function toggleWorkflow(id: string, enabled: boolean) {
+  await requireOwner();
   await db.update(workflows).set({ enabled, updatedAt: new Date() }).where(eq(workflows.id, id));
   revalidatePath("/workflows");
 }
 
 export async function deleteWorkflow(id: string) {
+  await requireOwner();
   await db.delete(workflows).where(eq(workflows.id, id));
   revalidatePath("/workflows");
   redirect("/workflows");
 }
 
 export async function runWorkflowNow(id: string) {
+  await requireOwner();
   const [workflow] = await db.select().from(workflows).where(eq(workflows.id, id));
   if (!workflow) throw new Error("workflow not found");
 

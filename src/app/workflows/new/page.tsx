@@ -1,7 +1,12 @@
 import { createWorkflow } from "@/lib/actions";
 import { WorkflowForm } from "@/components/workflow-form";
+import { requireOwner } from "@/lib/auth/require-owner";
 
-export default function NewWorkflowPage() {
+export const dynamic = "force-dynamic";
+
+export default async function NewWorkflowPage() {
+  await requireOwner();
+
   return (
     <main className="mx-auto max-w-2xl px-6 py-16">
       <h1 className="text-xl font-medium tracking-tight text-foreground">New workflow</h1>

@@ -5,6 +5,7 @@ import { workflows } from "@/db/schema";
 import { updateWorkflow, deleteWorkflow } from "@/lib/actions";
 import { WorkflowForm } from "@/components/workflow-form";
 import type { DeliverTarget } from "@/lib/read-only";
+import { requireOwner } from "@/lib/auth/require-owner";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,8 @@ export default async function EditWorkflowPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireOwner();
+
   const { id } = await params;
   const [workflow] = await db.select().from(workflows).where(eq(workflows.id, id));
   if (!workflow) notFound();

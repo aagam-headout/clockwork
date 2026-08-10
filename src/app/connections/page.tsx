@@ -1,4 +1,5 @@
 import { listConnectedAccounts, TOOLKITS, type Toolkit } from "@/lib/composio";
+import { requireOwner } from "@/lib/auth/require-owner";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,8 @@ const TOOLKIT_LABELS: Record<Toolkit, string> = {
 };
 
 export default async function ConnectionsPage() {
+  await requireOwner();
+
   let accounts: Awaited<ReturnType<typeof listConnectedAccounts>> = [];
   let loadError: string | null = null;
   try {

@@ -4,6 +4,7 @@ import { CronExpressionParser } from "cron-parser";
 import { db } from "@/db";
 import { workflows } from "@/db/schema";
 import { toggleWorkflow, runWorkflowNow, deleteWorkflow } from "@/lib/actions";
+import { requireOwner } from "@/lib/auth/require-owner";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,8 @@ function nextRunAt(cron: string, timezone: string): string {
 }
 
 export default async function WorkflowsPage() {
+  await requireOwner();
+
   const rows = await db.select().from(workflows).orderBy(desc(workflows.createdAt));
 
   return (

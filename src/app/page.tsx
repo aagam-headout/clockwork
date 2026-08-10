@@ -2,10 +2,13 @@ import Link from "next/link";
 import { desc, eq, and, gte } from "drizzle-orm";
 import { db } from "@/db";
 import { outputs, runs, workflows } from "@/db/schema";
+import { requireOwner } from "@/lib/auth/require-owner";
 
 export const dynamic = "force-dynamic";
 
 export default async function TodayPage() {
+  await requireOwner();
+
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 

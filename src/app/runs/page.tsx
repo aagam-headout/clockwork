@@ -2,6 +2,7 @@ import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, workflows } from "@/db/schema";
+import { requireOwner } from "@/lib/auth/require-owner";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,8 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export default async function RunsPage() {
+  await requireOwner();
+
   const rows = await db
     .select({
       id: runs.id,

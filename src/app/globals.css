@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@neondatabase/auth-ui/tailwind";
 
 /*
  * Vercel/Geist-derived neutral scale. Kept intentionally minimal: a

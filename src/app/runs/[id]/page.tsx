@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, runSteps, outputs, workflows } from "@/db/schema";
+import { requireOwner } from "@/lib/auth/require-owner";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,8 @@ export default async function RunDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireOwner();
+
   const { id } = await params;
 
   const [run] = await db
