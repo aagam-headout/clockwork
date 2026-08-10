@@ -96,11 +96,16 @@ export function deliverToolkits(deliver: DeliverTarget[]): string[] {
  * `denyTools` removes slugs outright. Both accept a trailing `*` wildcard.
  * Narrowing matters beyond safety: a toolkit can expose hundreds of tools,
  * and every schema loaded is prompt tokens spent on every step.
+ *
+ * `readOnly: false` drops only the read/write gate — a workflow the owner has
+ * explicitly opted out of read-only may call any tool its toolkits expose,
+ * still subject to the allow and deny lists.
  */
 export function buildToolFilter(
   deliver: DeliverTarget[],
   allowTools: string[] = [],
   denyTools: string[] = [],
+  readOnly = true,
 ) {
   const allowedWriteSlugs = new Set(
     deliver
@@ -115,6 +120,7 @@ export function buildToolFilter(
       !allowTools.some((p) => matchesPattern(slug, p))
     )
       return false;
+    if (!readOnly) return true;
     return isReadOnlyToolSlug(slug) || allowedWriteSlugs.has(slug);
   };
 }

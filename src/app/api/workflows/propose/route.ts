@@ -6,6 +6,7 @@ import { isOwner } from "@/lib/auth/require-owner";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
 import { getModelCatalog } from "@/lib/models";
 import { formatUsd, type ModelInfo } from "@/lib/model-tiers";
+import { DEFAULT_BUILDER_MODEL, isBuilderModel } from "@/lib/builder-models";
 
 export const maxDuration = 60;
 
@@ -142,8 +143,15 @@ export async function POST(req: NextRequest) {
     const offered = modelChoices(catalog);
     const modelIds = offered.map((m) => m.id);
 
+    // The model the *builder itself* thinks with — separate from the model it
+    // picks for the workflow. Validated against the shortlist rather than
+    // trusted, so the body can't point the call at an arbitrary model.
+    const builderModel = isBuilderModel(body.builderModel)
+      ? body.builderModel
+      : DEFAULT_BUILDER_MODEL;
+
     const { object } = await generateObject({
-      model: gateway(DEFAULT_MODEL),
+      model: gateway(builderModel),
       schema: buildProposalSchema(toolkitSlugs, modelIds),
       system: systemPrompt(toolkitSlugs, offered, body.current),
       messages: history,

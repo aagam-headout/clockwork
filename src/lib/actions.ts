@@ -65,6 +65,9 @@ function parseWorkflowForm(formData: FormData) {
   const timezone = field(formData, "timezone", "Asia/Kolkata");
   const model = field(formData, "model", "anthropic/claude-sonnet-5");
   const maxSteps = Number(formData.get("maxSteps") ?? 15);
+  // Read-only is the default, so the form ships the opt-out ("allowWrites")
+  // rather than the flag itself — an absent checkbox then means "stay safe".
+  const readOnly = formData.get("allowWrites") !== "on";
   const toolkits = formData.getAll("toolkits").map(String);
   const eventTriggers = formData
     .getAll("eventTriggers")
@@ -96,6 +99,7 @@ function parseWorkflowForm(formData: FormData) {
     timezone,
     model,
     maxSteps,
+    readOnly,
     toolkits,
     eventTriggers,
     allowTools,

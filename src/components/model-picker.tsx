@@ -238,16 +238,17 @@ export function ModelPicker({
               aria-label="Choose a model"
               className="rise rounded-container border-border bg-surface shadow-pop relative flex max-h-[76vh] w-full max-w-3xl flex-col overflow-hidden border"
             >
-              <div className="border-border flex items-center gap-2 border-b px-3 py-2.5">
+              <div className="border-border flex h-14 shrink-0 items-center gap-3 border-b px-4">
                 <Search className="text-subtle h-4 w-4 shrink-0" />
                 {/* The dialog itself is the focus surface — a ring around the bare
-                  search field just boxes in the whole header. */}
+                  search field just boxes in the whole header and collides with
+                  the icon beside it. */}
                 <input
                   autoFocus
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search models…"
-                  className="text-foreground placeholder:text-subtle w-full border-0 bg-transparent text-[13px] shadow-none outline-none focus:outline-none focus-visible:outline-none"
+                  className="text-foreground placeholder:text-subtle min-w-0 flex-1 border-0 bg-transparent text-sm shadow-none outline-none focus:outline-none focus-visible:outline-none"
                 />
                 {loading && (
                   <LoaderCircle className="text-subtle h-4 w-4 shrink-0 animate-spin" />
@@ -255,14 +256,16 @@ export function ModelPicker({
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="rounded-control border-border text-muted hover:border-border-strong hover:bg-surface-hover hover:text-foreground flex h-8 shrink-0 cursor-pointer items-center gap-1.5 border px-2.5 text-xs font-medium transition-colors"
+                  aria-label="Close"
+                  className="rounded-control border-border text-muted hover:border-border-strong hover:bg-surface-hover hover:text-foreground flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center border transition-colors"
                 >
-                  <X className="h-3.5 w-3.5" />
-                  Close
+                  <X className="h-4 w-4" />
                 </button>
               </div>
 
-              <div className="border-border flex flex-wrap items-center gap-1.5 border-b px-3 py-2">
+              {/* Same px-4 gutter as the search row and the result rows, so the
+                  dialog reads as one column top to bottom. */}
+              <div className="border-border flex flex-wrap items-center gap-1.5 border-b px-4 py-2.5">
                 {FILTERS.map((f) => {
                   const active = filter === f.key;
                   const count =
@@ -281,7 +284,7 @@ export function ModelPicker({
                           ? TIER_HINTS[f.key as ModelTier]
                           : undefined
                       }
-                      className={`h-7 cursor-pointer rounded-full border px-3 text-xs font-medium transition-colors ${
+                      className={`h-8 cursor-pointer rounded-full border px-3.5 text-xs font-medium transition-colors ${
                         active
                           ? "border-border-strong bg-surface-2 text-foreground"
                           : "border-border text-muted hover:border-border-strong hover:text-foreground"
@@ -300,7 +303,7 @@ export function ModelPicker({
                   aria-label="Filter by provider"
                   value={activeProvider ?? ""}
                   onChange={(e) => setProvider(e.target.value || null)}
-                  className="border-border bg-surface text-muted h-7 cursor-pointer rounded-full border px-2 text-xs font-medium sm:hidden"
+                  className="border-border bg-surface text-muted h-8 cursor-pointer rounded-full border px-2.5 text-xs font-medium sm:hidden"
                 >
                   <option value="">All providers ({tierCounts.all})</option>
                   {providers.map((p) => (
@@ -355,7 +358,7 @@ export function ModelPicker({
                                 setSelectedId(model.id);
                                 setOpen(false);
                               }}
-                              className={`border-border flex w-full cursor-pointer items-start gap-3 border-b px-3 py-2.5 text-left transition-colors last:border-b-0 ${
+                              className={`border-border flex w-full cursor-pointer items-start gap-3 border-b px-4 py-3 text-left transition-colors last:border-b-0 ${
                                 isSelected
                                   ? "bg-surface-2"
                                   : "hover:bg-surface-hover"
@@ -418,7 +421,7 @@ export function ModelPicker({
                 </div>
               </div>
 
-              <p className="border-border bg-bg-subtle text-subtle border-t px-3 py-2 text-[11px]">
+              <p className="border-border bg-bg-subtle text-subtle shrink-0 border-t px-4 py-2.5 text-[11px]">
                 Live gateway pricing · per run ≈{" "}
                 {(TYPICAL_RUN.inputTokens / 1000).toFixed(0)}k in /{" "}
                 {(TYPICAL_RUN.outputTokens / 1000).toFixed(0)}k out

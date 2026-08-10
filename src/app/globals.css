@@ -384,74 +384,97 @@ body {
   background-clip: content-box;
 }
 
-/* One focus treatment for everything interactive: a foreground ring, the way
-   Geist does it — not a colored halo. */
-:where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--fg);
-  outline-offset: 2px;
-  border-radius: var(--radius-control);
+/*
+ * These live in Tailwind's own layers rather than unlayered, and that placement
+ * is load-bearing: unlayered CSS beats everything inside `@layer utilities`, so
+ * as plain rules they silently outranked the utilities meant to adjust them —
+ * `focus-visible:outline-none` on the model-picker search field did nothing (the
+ * 2px ring drew straight through the search icon and the Close button), and
+ * `.input { width: 100% }` overrode any `w-*`/`ml-*` put on a field.
+ */
+@layer base {
+  /* One focus treatment for everything interactive: a foreground ring, the way
+     Geist does it — not a colored halo. */
+  :where(
+    a,
+    button,
+    input,
+    textarea,
+    select,
+    summary,
+    [tabindex]
+  ):focus-visible {
+    outline: 2px solid var(--fg);
+    outline-offset: 2px;
+    border-radius: var(--radius-control);
+  }
 }
 
 /* ---------- form controls ---------- */
 
-.input {
-  width: 100%;
-  border-radius: var(--radius-control);
-  border: 1px solid var(--border);
-  background: var(--bg);
-  padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
-  line-height: 1.4;
-  color: var(--fg);
-  transition:
-    border-color 150ms ease,
-    box-shadow 150ms ease,
-    background 150ms ease;
+@layer components {
+  .input {
+    width: 100%;
+    border-radius: var(--radius-control);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    line-height: 1.4;
+    color: var(--fg);
+    transition:
+      border-color 150ms ease,
+      box-shadow 150ms ease,
+      background 150ms ease;
+  }
+
+  .input::placeholder {
+    color: var(--fg-subtle);
+  }
+
+  .input:hover:not(:focus):not(:disabled) {
+    border-color: var(--border-strong);
+  }
+
+  .input:focus {
+    outline: none;
+    border-color: var(--fg-subtle);
+    box-shadow: 0 0 0 3px var(--ring);
+  }
+
+  .input:disabled {
+    background: var(--surface-2);
+    color: var(--fg-subtle);
+    cursor: not-allowed;
+  }
+
+  select.input {
+    appearance: none;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--fg-subtle) 50%),
+      linear-gradient(135deg, var(--fg-subtle) 50%, transparent 50%);
+    background-position:
+      calc(100% - 15px) calc(50% + 1px),
+      calc(100% - 10px) calc(50% + 1px);
+    background-size:
+      5px 5px,
+      5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 2rem;
+  }
+
+  textarea.input {
+    resize: vertical;
+    min-height: 5rem;
+  }
 }
 
-.input::placeholder {
-  color: var(--fg-subtle);
-}
-
-.input:hover:not(:focus):not(:disabled) {
-  border-color: var(--border-strong);
-}
-
-.input:focus {
-  outline: none;
-  border-color: var(--fg-subtle);
-  box-shadow: 0 0 0 3px var(--ring);
-}
-
-.input:disabled {
-  background: var(--surface-2);
-  color: var(--fg-subtle);
-  cursor: not-allowed;
-}
-
-select.input {
-  appearance: none;
-  background-image:
-    linear-gradient(45deg, transparent 50%, var(--fg-subtle) 50%),
-    linear-gradient(135deg, var(--fg-subtle) 50%, transparent 50%);
-  background-position:
-    calc(100% - 15px) calc(50% + 1px),
-    calc(100% - 10px) calc(50% + 1px);
-  background-size:
-    5px 5px,
-    5px 5px;
-  background-repeat: no-repeat;
-  padding-right: 2rem;
-}
-
-textarea.input {
-  resize: vertical;
-  min-height: 5rem;
-}
-
-/* lucide ships at stroke-width 2, which reads heavy next to Geist's icon set. */
-svg.lucide {
-  stroke-width: 1.5px;
+/* lucide ships at stroke-width 2, which reads heavy next to Geist's icon set.
+   Layered so a one-off can still dial it back up with a utility. */
+@layer base {
+  svg.lucide {
+    stroke-width: 1.5px;
+  }
 }
 
 /* ---------- animation ---------- */

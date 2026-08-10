@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { CronExpressionParser } from "cron-parser";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
@@ -8,13 +9,72 @@ import { buttonClass } from "@/components/ui";
 import { ToolkitLogo } from "@/components/toolkit-logo";
 import { ModelPicker } from "@/components/model-picker";
 import type { ModelInfo } from "@/lib/model-tiers";
-import { Check, Globe, Plus } from "lucide-react";
+import {
+  Check,
+  Globe,
+  SlidersHorizontal,
+  FileText,
+  CalendarClock,
+  Wrench,
+  Cpu,
+  Send,
+  Filter,
+} from "lucide-react";
 
 const CRON_PRESETS: Array<{ label: string; value: string }> = [
   { label: "Weekdays 8am", value: "0 8 * * 1-5" },
   { label: "Daily 9am", value: "0 9 * * *" },
   { label: "Hourly", value: "0 * * * *" },
   { label: "Fridays 5pm", value: "0 17 * * 5" },
+];
+
+/*
+ * A fixed zone list rather than `Intl.supportedValuesOf("timeZone")`: that call
+ * returns whatever ICU the runtime shipped with, so Node and the browser can
+ * disagree and hydration mismatches. These cover every common offset; the saved
+ * value is spliced in below if it isn't here.
+ */
+const TIMEZONES = [
+  "UTC",
+  "Africa/Cairo",
+  "Africa/Johannesburg",
+  "Africa/Lagos",
+  "America/Anchorage",
+  "America/Bogota",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Mexico_City",
+  "America/New_York",
+  "America/Sao_Paulo",
+  "America/Toronto",
+  "Asia/Bangkok",
+  "Asia/Dubai",
+  "Asia/Hong_Kong",
+  "Asia/Jakarta",
+  "Asia/Jerusalem",
+  "Asia/Kolkata",
+  "Asia/Manila",
+  "Asia/Seoul",
+  "Asia/Shanghai",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Australia/Melbourne",
+  "Australia/Perth",
+  "Australia/Sydney",
+  "Europe/Amsterdam",
+  "Europe/Berlin",
+  "Europe/Dublin",
+  "Europe/Istanbul",
+  "Europe/Lisbon",
+  "Europe/London",
+  "Europe/Madrid",
+  "Europe/Moscow",
+  "Europe/Paris",
+  "Europe/Warsaw",
+  "Europe/Zurich",
+  "Pacific/Auckland",
+  "Pacific/Honolulu",
 ];
 
 /** Web search needs no auth, so it's always offered. */
@@ -38,6 +98,7 @@ export type WorkflowFormValues = {
   eventTriggers: string[];
   model: string;
   maxSteps: number;
+  readOnly: boolean;
   toolkits: string[];
   allowTools: string[];
   denyTools: string[];
@@ -57,10 +118,17 @@ export function WorkflowForm({
   availableToolkits = [],
   models = [],
   fillHeight = false,
+  title,
 }: {
   action: (formData: FormData) => void;
   defaultValues?: Partial<WorkflowFormValues>;
   submitLabel: string;
+  /**
+   * Optional card header. Set it when the form sits beside another card (the
+   * builder) so both panes start on the same baseline; standalone pages already
+   * have a page header and don't need a second one.
+   */
+  title?: string;
   /** Connected toolkits, straight from Composio — not a hardcoded list. */
   availableToolkits?: ToolkitOption[];
   /** Model catalog from AI Gateway; the picker refreshes it on open. */
@@ -83,25 +151,54 @@ export function WorkflowForm({
     new Set(defaultValues?.eventTriggers ?? []),
   );
   const [triggerTypes, setTriggerTypes] = useState<TriggerTypeOption[]>([]);
-  const [extraSlug, setExtraSlug] = useState("");
-  // Slugs typed in by hand (e.g. an app connected in another tab) plus any the
-  // workflow already had but that isn't currently connected — never drop those
-  // silently on save.
-  const [extraToolkits, setExtraToolkits] = useState<ToolkitOption[]>(() => {
-    const known = new Set([
-      ...availableToolkits.map((t) => t.slug),
-      WEB_SEARCH.slug,
-    ]);
-    return (defaultValues?.toolkits ?? [])
-      .filter((slug) => !known.has(slug))
-      .map((slug) => ({ slug, name: TOOLKIT_LABELS[slug] ?? slug }));
-  });
 
-  const options: ToolkitOption[] = [
-    WEB_SEARCH,
-    ...availableToolkits,
-    ...extraToolkits,
-  ];
+  const [timezone, setTimezone] = useState(
+    defaultValues?.timezone ?? "Asia/Kolkata",
+  );
+  // Mirrored in state so the footer can say what the run will actually be
+  // allowed to do.
+  const [allowWrites, setAllowWrites] = useState(
+    defaultValues?.readOnly === false,
+  );
+
+  // Same parser the dispatcher schedules with, so what the field says about an
+  // expression is what the ticker will actually do with it.
+  const cronPreview = useMemo(() => {
+    if (!cron.trim()) return { next: undefined, error: undefined };
+    try {
+      const next = CronExpressionParser.parse(cron, { tz: timezone })
+        .next()
+        .toDate();
+      return {
+        next: `Next: ${next.toLocaleString(undefined, {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+          timeZone: timezone,
+        })}`,
+        error: undefined,
+      };
+    } catch {
+      return { next: undefined, error: "Not a valid cron expression." };
+    }
+  }, [cron, timezone]);
+
+  // A workflow saved with a zone outside the list still has to round-trip.
+  const saved = defaultValues?.timezone;
+  const timezoneOptions =
+    saved && !TIMEZONES.includes(saved)
+      ? [saved, ...TIMEZONES].sort()
+      : TIMEZONES;
+
+  // Only what Composio reports as ACTIVE right now, plus web search. A toolkit
+  // the workflow was saved with but that is no longer connected can't be picked
+  // — it rides along as a hidden input so saving doesn't silently drop it.
+  const options: ToolkitOption[] = [WEB_SEARCH, ...availableToolkits];
+  const offline = (defaultValues?.toolkits ?? []).filter(
+    (slug) => !options.some((o) => o.slug === slug),
+  );
 
   const toolkitKey = [...selectedToolkits].sort().join(",");
 
@@ -140,22 +237,6 @@ export function WorkflowForm({
     });
   }
 
-  function addExtraToolkit() {
-    const slug = extraSlug
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_]/g, "_");
-    if (!slug) return;
-    if (!options.some((o) => o.slug === slug)) {
-      setExtraToolkits((prev) => [
-        ...prev,
-        { slug, name: TOOLKIT_LABELS[slug] ?? slug },
-      ]);
-    }
-    setSelectedToolkits((prev) => new Set(prev).add(slug));
-    setExtraSlug("");
-  }
-
   return (
     // `overflow-clip` rather than `hidden` in the page-scroll case: it still clips
     // the section corners but doesn't become a scroll container, which would kill
@@ -167,12 +248,24 @@ export function WorkflowForm({
         fillHeight ? "lg:h-full lg:min-h-0" : ""
       }`}
     >
+      {title && (
+        <div className="border-border bg-surface flex h-12 shrink-0 items-center gap-2 border-b px-5">
+          <span className="rounded-control border-border bg-bg-subtle text-foreground flex h-7 w-7 items-center justify-center border">
+            <SlidersHorizontal className="h-4 w-4" />
+          </span>
+          <span className="heading-14 text-foreground">{title}</span>
+        </div>
+      )}
+
       <div
-        className={`bg-border flex flex-col gap-px ${
+        // Hairlines come from `divide-y`, not a gray backdrop showing through
+        // 1px gaps — that backdrop was also what the scroll port painted below
+        // the last section, so a short form ended in a slab of border gray.
+        className={`divide-border bg-surface flex flex-col divide-y ${
           fillHeight ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
         }`}
       >
-        <Section title="Basics">
+        <Section title="Basics" icon={FileText}>
           <Field label="Name">
             <input
               name="name"
@@ -183,7 +276,7 @@ export function WorkflowForm({
             />
           </Field>
 
-          <Field label="Goal" hint="The entire prompt the agent runs on.">
+          <Field label="Goal">
             <textarea
               name="goal"
               required
@@ -195,69 +288,86 @@ export function WorkflowForm({
           </Field>
         </Section>
 
-        <Section title="Trigger">
+        <Section title="Trigger" icon={CalendarClock}>
           <input type="hidden" name="triggerType" value={triggerType} />
 
-          <div className="flex gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
             {(
               [
                 { value: "cron", label: "On a schedule" },
                 { value: "event", label: "On an event" },
               ] as const
             ).map((mode) => (
-              <button
+              <Pill
                 key={mode.value}
-                type="button"
+                selected={triggerType === mode.value}
                 onClick={() => setTriggerType(mode.value)}
-                className={`h-8 cursor-pointer rounded-full border px-3.5 text-xs font-medium transition-colors ${
-                  triggerType === mode.value
-                    ? "border-foreground bg-surface-2 text-foreground"
-                    : "border-border text-muted hover:border-border-strong hover:text-foreground"
-                }`}
               >
                 {mode.label}
-              </button>
+              </Pill>
             ))}
           </div>
 
           {triggerType === "cron" ? (
             <>
-              <div className="grid gap-4 @sm:grid-cols-2">
-                <Field label="Cron">
+              {/* Presets first: picking one is the common path, and the fields
+                  below it are the correction — not the other way round. */}
+              <div className="flex flex-wrap gap-1.5">
+                {CRON_PRESETS.map((preset) => (
+                  <Pill
+                    key={preset.value}
+                    selected={cron === preset.value}
+                    onClick={() => setCron(preset.value)}
+                  >
+                    {preset.label}
+                  </Pill>
+                ))}
+              </div>
+
+              <div className="grid gap-4 @lg:grid-cols-2">
+                <Field
+                  label="Cron"
+                  hint={
+                    cronPreview.error ? (
+                      <span className="text-danger-text">
+                        {cronPreview.error}
+                      </span>
+                    ) : (
+                      // Next-run text is relative to "now", so server and
+                      // client disagree by design.
+                      <span suppressHydrationWarning>{cronPreview.next}</span>
+                    )
+                  }
+                >
                   <input
                     name="cron"
                     required
                     value={cron}
                     onChange={(e) => setCron(e.target.value)}
-                    className="input font-mono"
+                    aria-invalid={Boolean(cronPreview.error)}
+                    className={`input font-mono ${
+                      cronPreview.error
+                        ? "border-danger-line focus:border-danger"
+                        : ""
+                    }`}
                   />
                 </Field>
 
                 <Field label="Timezone">
-                  <input
+                  <select
                     name="timezone"
                     required
-                    defaultValue={defaultValues?.timezone ?? "Asia/Kolkata"}
+                    value={timezone}
+                    onChange={(e) => setTimezone(e.target.value)}
                     className="input font-mono"
-                  />
-                </Field>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5">
-                {CRON_PRESETS.map((preset) => (
-                  <button
-                    key={preset.value}
-                    type="button"
-                    onClick={() => setCron(preset.value)}
-                    className={`h-7 cursor-pointer rounded-full border px-3 text-xs font-medium transition-colors ${
-                      cron === preset.value
-                        ? "border-foreground bg-surface-2 text-foreground"
-                        : "border-border text-muted hover:border-border-strong hover:text-foreground"
-                    }`}
                   >
-                    {preset.label}
-                  </button>
-                ))}
+                    {timezoneOptions.map((tz) => (
+                      <option key={tz} value={tz}>
+                        {tz}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
               </div>
             </>
           ) : (
@@ -269,14 +379,16 @@ export function WorkflowForm({
           )}
         </Section>
 
-        <Section title="Tools">
+        <Section title="Tools" icon={Wrench}>
           <div className="grid grid-cols-1 gap-2 @md:grid-cols-2">
             {options.map((toolkit) => {
               const on = selectedToolkits.has(toolkit.slug);
               return (
                 <label
                   key={toolkit.slug}
-                  className={`rounded-control relative flex cursor-pointer items-center gap-2 border px-2 py-1.5 text-[13px] font-medium transition-colors ${
+                  // The real checkbox is sr-only, so the label carries the
+                  // focus ring — otherwise keyboard users see nothing move.
+                  className={`rounded-control has-[:focus-visible]:outline-foreground relative flex h-11 cursor-pointer items-center gap-2 border px-2 text-[13px] font-medium transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 ${
                     on
                       ? "border-foreground bg-surface-2 text-foreground"
                       : "border-border text-muted hover:border-border-strong hover:text-foreground"
@@ -292,7 +404,7 @@ export function WorkflowForm({
                   />
                   {toolkit.slug === WEB_SEARCH.slug ? (
                     <span className="rounded-control border-border bg-surface-2 text-subtle flex h-7 w-7 shrink-0 items-center justify-center border">
-                      <Globe className="h-3.5 w-3.5" />
+                      <Globe className="h-4 w-4" />
                     </span>
                   ) : (
                     <ToolkitLogo
@@ -302,7 +414,7 @@ export function WorkflowForm({
                     />
                   )}
                   <span className="truncate">{toolkit.name}</span>
-                  {on && <Check className="ml-auto h-3.5 w-3.5 shrink-0" />}
+                  {on && <Check className="ml-auto h-4 w-4 shrink-0" />}
                 </label>
               );
             })}
@@ -321,34 +433,31 @@ export function WorkflowForm({
             </p>
           )}
 
-          <div className="flex items-center gap-2">
-            <input
-              value={extraSlug}
-              onChange={(e) => setExtraSlug(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addExtraToolkit();
-                }
-              }}
-              placeholder="Add by slug — linear, jira…"
-              className="input h-9"
-              aria-label="Add a toolkit by slug"
-            />
-            <button
-              type="button"
-              onClick={addExtraToolkit}
-              disabled={!extraSlug.trim()}
-              className={buttonClass("outline", "sm")}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add
-            </button>
-          </div>
+          {offline.length > 0 && (
+            <p className="text-subtle text-xs leading-relaxed">
+              Kept but not connected:{" "}
+              <span className="font-mono">
+                {offline.map((s) => TOOLKIT_LABELS[s] ?? s).join(", ")}
+              </span>{" "}
+              —{" "}
+              <Link
+                href="/connections"
+                className="text-accent-text underline underline-offset-2"
+              >
+                reconnect
+              </Link>{" "}
+              to use them again.
+              {offline.map((slug) => (
+                <input key={slug} type="hidden" name="toolkits" value={slug} />
+              ))}
+            </p>
+          )}
         </Section>
 
-        <Section title="Model">
-          <div className="grid gap-4 @sm:grid-cols-2">
+        <Section title="Model" icon={Cpu}>
+          {/* Stacked, not side by side: model names are long enough that the
+              picker wants the full width, and the step count needs none of it. */}
+          <div className="flex flex-col gap-4">
             <Field label="Model">
               <ModelPicker
                 defaultValue={defaultValues?.model}
@@ -356,7 +465,20 @@ export function WorkflowForm({
               />
             </Field>
 
-            <Field label="Max steps">
+            <Field label="Permissions">
+              <Checkbox
+                name="allowWrites"
+                checked={allowWrites}
+                onChange={setAllowWrites}
+                label="Allow write tools"
+                hint="Off (default): the agent reads, and only writes what a delivery target needs. On: any tool its toolkits expose."
+              />
+            </Field>
+
+            <Field
+              label="Max steps"
+              hint="One step = one model call plus its tool calls. Hit the cap and the run is marked truncated, keeping whatever it had."
+            >
               <input
                 type="number"
                 name="maxSteps"
@@ -369,7 +491,7 @@ export function WorkflowForm({
           </div>
         </Section>
 
-        <Section title="Delivery">
+        <Section title="Delivery" icon={Send}>
           <div className="flex flex-col gap-2">
             <Checkbox checked disabled label="Dashboard" hint="Always on." />
             <Checkbox
@@ -414,8 +536,10 @@ export function WorkflowForm({
           </p>
         </Section>
 
-        <Section title="Tool filters">
-          <div className="grid gap-4 @sm:grid-cols-2">
+        <Section title="Tool filters" icon={Filter}>
+          {/* Comma-separated tool globs need width; two columns only earn their
+              keep once the card is genuinely wide. */}
+          <div className="grid gap-4 @2xl:grid-cols-2">
             <Field
               label="Allow only"
               hint="Optional whitelist. Trailing * works: GITHUB_LIST_*"
@@ -436,11 +560,6 @@ export function WorkflowForm({
               />
             </Field>
           </div>
-          <p className="text-subtle text-xs leading-relaxed">
-            A toolkit can expose hundreds of tools, and every schema loaded is
-            prompt tokens spent on every step. Narrow it when a workflow only
-            ever needs two or three.
-          </p>
         </Section>
       </div>
 
@@ -449,11 +568,18 @@ export function WorkflowForm({
           form is taller than it, so the save action is never a scroll away. */}
       <div
         className={`border-border bg-bg-subtle/90 flex items-center justify-between gap-3 border-t px-5 py-3 backdrop-blur-md ${
-          fillHeight ? "lg:shrink-0" : "sticky bottom-0"
+          // Below lg the card is part of the page scroll even in fillHeight
+          // mode, so the save bar sticks there too and only becomes the card's
+          // last row once the pane owns its own height.
+          fillHeight
+            ? "sticky bottom-0 lg:static lg:shrink-0"
+            : "sticky bottom-0"
         }`}
       >
-        <p className="text-subtle text-xs">
-          Read-only — the agent never writes.
+        <p className="text-subtle min-w-0 truncate text-xs">
+          {allowWrites
+            ? "Write tools allowed — the agent can change things in connected apps."
+            : "Read-only — the agent never writes."}
         </p>
         <FormSubmitButton>{submitLabel}</FormSubmitButton>
       </div>
@@ -502,7 +628,7 @@ function EventTriggerPicker({
             return (
               <label
                 key={option.slug}
-                className={`border-border flex cursor-pointer items-start gap-2.5 border-b px-3 py-2.5 transition-colors last:border-b-0 ${
+                className={`border-border has-[:focus-visible]:outline-foreground flex cursor-pointer items-start gap-2.5 border-b px-3 py-2.5 transition-colors last:border-b-0 has-[:focus-visible]:outline-2 has-[:focus-visible]:-outline-offset-2 ${
                   on ? "bg-surface-2" : "hover:bg-surface-hover"
                 }`}
               >
@@ -512,8 +638,9 @@ function EventTriggerPicker({
                   value={option.slug}
                   checked={on}
                   onChange={() => onToggle(option.slug)}
-                  className="mt-0.5 h-3.5 w-3.5 accent-[var(--solid)]"
+                  className="sr-only"
                 />
+                <CheckBox on={on} />
                 <span className="min-w-0">
                   <span className="text-foreground block font-mono text-[12px] font-medium">
                     {option.slug}
@@ -560,15 +687,20 @@ function TargetWithInput({
   return (
     <div className="flex flex-col gap-2">
       <label
-        className={`rounded-control border-border hover:border-border-strong flex cursor-pointer items-start gap-2.5 border px-3 py-2.5 transition-colors`}
+        className={`rounded-control has-[:focus-visible]:outline-foreground flex cursor-pointer items-start gap-2.5 border px-3 py-2.5 transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 ${
+          on
+            ? "border-border-strong bg-surface-2"
+            : "border-border hover:border-border-strong"
+        }`}
       >
         <input
           type="checkbox"
           name={name}
           checked={on}
           onChange={(e) => setOn(e.target.checked)}
-          className="mt-0.5 h-3.5 w-3.5 accent-[var(--solid)]"
+          className="sr-only"
         />
+        <CheckBox on={on} />
         <span className="min-w-0">
           <span className="text-foreground block text-[13px] font-medium">
             {label}
@@ -577,33 +709,98 @@ function TargetWithInput({
         </span>
       </label>
       {on && (
-        <input
-          name={inputName}
-          type={type}
-          required
-          defaultValue={defaultValue}
-          placeholder={placeholder}
-          className="input ml-6 h-9"
-          aria-label={`${label} destination`}
-        />
+        // Indented to the label text above it (12px padding + 14px box + 10px
+        // gap). The pad lives on a wrapper because `.input` is width:100% and
+        // an `ml-*` on the field itself pushed it past the card edge.
+        <div className="pl-9">
+          <input
+            name={inputName}
+            type={type}
+            required
+            defaultValue={defaultValue}
+            placeholder={placeholder}
+            className="input h-9"
+            aria-label={`${label} destination`}
+          />
+        </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The box a checkbox actually shows. The native control paints a solid black
+ * square through `accent-color`, which reads as a filled blob at 14px next to
+ * everything else here — this is the same lucide `Check` the toolkit tiles use,
+ * on a bordered chip. The real <input> stays in the DOM, sr-only, so form
+ * submission and screen readers are unchanged.
+ */
+function CheckBox({
+  on,
+  disabled = false,
+}: {
+  on: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <span
+      aria-hidden
+      className={`mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border transition-colors ${
+        on
+          ? "border-foreground bg-solid text-solid-fg"
+          : "border-border bg-bg text-transparent"
+      } ${disabled ? "opacity-60" : ""}`}
+    >
+      {/* Utility beats the base-layer 1.5 stroke — a check this small needs weight. */}
+      <Check className="h-3 w-3 [stroke-width:2.75px]" />
+    </span>
+  );
+}
+
+/** One pill shape for every toggle chip in the form — same height, same ring. */
+function Pill({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className={`h-8 cursor-pointer rounded-full border px-3.5 text-xs font-medium transition-colors ${
+        selected
+          ? "border-foreground bg-surface-2 text-foreground"
+          : "border-border text-muted hover:border-border-strong hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
 function Section({
   title,
   description,
+  icon: Icon,
   children,
 }: {
   title: string;
   description?: string;
+  icon?: React.ComponentType<{ className?: string }>;
   children: React.ReactNode;
 }) {
   return (
-    <section className="bg-surface grid gap-x-8 gap-y-4 px-5 py-5 @xl:grid-cols-[180px_1fr] @xl:py-6">
-      <div>
-        <h2 className="heading-14 text-foreground">{title}</h2>
+    <section className="bg-surface grid gap-x-8 gap-y-3 px-5 py-5 @xl:grid-cols-[168px_minmax(0,1fr)] @xl:gap-y-4 @xl:py-6">
+      <div className="@xl:self-start">
+        <h2 className="heading-14 text-foreground flex items-center gap-2">
+          {Icon && <Icon className="text-subtle h-4 w-4 shrink-0" />}
+          {title}
+        </h2>
         {description && (
           <p className="text-subtle mt-1 hidden text-xs leading-relaxed @xl:block">
             {description}
@@ -634,7 +831,7 @@ function Field({
   children,
 }: {
   label: string;
-  hint?: string;
+  hint?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -653,6 +850,7 @@ function Checkbox({
   checked,
   defaultChecked,
   disabled,
+  onChange,
 }: {
   label: string;
   hint?: string;
@@ -660,10 +858,16 @@ function Checkbox({
   checked?: boolean;
   defaultChecked?: boolean;
   disabled?: boolean;
+  /** Pass with `checked` to drive the row from parent state. */
+  onChange?: (checked: boolean) => void;
 }) {
+  // Uncontrolled rows still need the box to react to a click, so the visual
+  // state is mirrored locally and the input stays the source of truth.
+  const [on, setOn] = useState(Boolean(checked ?? defaultChecked));
+
   return (
     <label
-      className={`rounded-control border-border flex items-start gap-2.5 border px-3 py-2.5 transition-colors ${
+      className={`rounded-control border-border has-[:focus-visible]:outline-foreground flex items-start gap-2.5 border px-3 py-2.5 transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 ${
         disabled
           ? "cursor-not-allowed opacity-70"
           : "hover:border-border-strong cursor-pointer"
@@ -675,9 +879,14 @@ function Checkbox({
         checked={checked}
         defaultChecked={defaultChecked}
         disabled={disabled}
-        readOnly={checked !== undefined}
-        className="mt-0.5 h-3.5 w-3.5 accent-[var(--solid)]"
+        readOnly={checked !== undefined && !onChange}
+        onChange={(e) => {
+          setOn(e.target.checked);
+          onChange?.(e.target.checked);
+        }}
+        className="sr-only"
       />
+      <CheckBox on={checked ?? on} disabled={disabled} />
       <span className="min-w-0">
         <span className="text-foreground block text-[13px] font-medium">
           {label}

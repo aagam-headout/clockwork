@@ -190,6 +190,7 @@ export async function executeRun(runId: string): Promise<RunResult> {
       deliver,
       workflow.allowTools,
       workflow.denyTools,
+      workflow.readOnly,
     );
     const tools: ToolSet = Object.fromEntries(
       Object.entries(allTools).filter(([slug]) => isAllowed(slug)),

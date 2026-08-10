@@ -10,16 +10,18 @@ import {
   Badge,
   Card,
   EmptyState,
+  Mono,
   PageHeader,
   PageShell,
   SectionLabel,
   buttonClass,
+  iconButtonClass,
 } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { ConnectorBrowser } from "@/components/connector-browser";
 import { ToolkitLogo } from "@/components/toolkit-logo";
 import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
-import { Plug, Unplug, RefreshCw } from "lucide-react";
+import { Plug, Trash2, RefreshCw, ArrowDown } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +33,18 @@ type ConnectedRow = {
   logo?: string;
   createdAt?: string;
 };
+
+/** "3d ago" / "Jan 4" — connections are dated, not timed, at this density. */
+function since(iso?: string) {
+  if (!iso) return null;
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return null;
+  const days = Math.floor((Date.now() - then.getTime()) / 86_400_000);
+  if (days < 1) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days}d ago`;
+  return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 export default async function ConnectionsPage() {
   await requireOwner();
@@ -71,31 +85,46 @@ export default async function ConnectionsPage() {
       };
     })
     .filter((row) => row.slug)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    // Anything not ACTIVE needs the user's attention, so it sorts to the top.
+    .sort(
+      (a, b) =>
+        Number(a.status === "ACTIVE") - Number(b.status === "ACTIVE") ||
+        a.name.localeCompare(b.name),
+    );
 
   const activeCount = connected.filter((c) => c.status === "ACTIVE").length;
+  const attentionCount = connected.length - activeCount;
 
   return (
     <PageShell>
       <PageHeader
         title="Connections"
-        subtitle="Any app in the Composio catalog."
+        subtitle="Link any app in the Composio catalog, then use its tools in a workflow."
         actions={
-          <Badge tone={activeCount > 0 ? "success" : "warn"} dot>
-            {activeCount} active
-          </Badge>
+          <>
+            <Badge tone={activeCount > 0 ? "success" : "warn"} dot>
+              {activeCount} active
+            </Badge>
+            {attentionCount > 0 && (
+              <Badge tone="warn" dot>
+                {attentionCount} pending
+              </Badge>
+            )}
+          </>
         }
       />
 
       {loadError && (
-        <div className="mt-6">
+        <div className="rise mt-6">
           <Alert tone="danger" title="Composio request failed">
             {loadError}
           </Alert>
         </div>
       )}
 
-      <section className="rise mt-6">
+      {/* No stat tiles here: the counts they carried are the same two numbers
+          the header badges already show, and each card states its own status. */}
+      <section className="rise mt-8">
         <SectionLabel count={connected.length || undefined}>
           Connected
         </SectionLabel>
@@ -104,67 +133,93 @@ export default async function ConnectionsPage() {
           <EmptyState
             icon={Plug}
             title="Nothing connected yet"
-            description="Search below to link your first app."
+            description="Connect an app and its tools become available to every workflow."
+            action={
+              <a href="#add" className={buttonClass("primary", "sm")}>
+                <ArrowDown className="h-4 w-4" />
+                Browse connectors
+              </a>
+            }
           />
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {connected.map((row) => {
               const active = row.status === "ACTIVE";
+              const added = since(row.createdAt);
               return (
                 <Card
                   key={row.id}
                   interactive
-                  className="flex items-center gap-3 p-3"
+                  className="flex flex-col gap-3 p-3.5"
                 >
-                  <ToolkitLogo
-                    slug={row.slug}
-                    name={row.name}
-                    logo={row.logo}
-                    size="lg"
-                    connected={active}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="heading-14 text-foreground truncate">
-                      {row.name}
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={`font-mono text-[11px] ${active ? "text-success-text" : "text-warn-text"}`}
-                      >
-                        {row.status.toLowerCase()}
-                      </span>
-                      <span className="text-subtle truncate font-mono text-[11px]">
+                  <div className="flex items-start gap-3">
+                    <ToolkitLogo
+                      slug={row.slug}
+                      name={row.name}
+                      logo={row.logo}
+                      size="lg"
+                      connected={active}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="heading-14 text-foreground truncate">
+                        {row.name}
+                      </div>
+                      <div className="text-subtle mt-0.5 truncate font-mono text-[11px]">
                         {row.slug}
-                      </span>
+                      </div>
                     </div>
+                    <Badge tone={active ? "success" : "warn"} dot>
+                      {row.status.toLowerCase()}
+                    </Badge>
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-1">
-                    <a
-                      href={`/api/connections/${row.slug}/connect`}
-                      title="Reconnect"
-                      aria-label={`Reconnect ${row.name}`}
-                      className={buttonClass("ghost", "sm", "w-8 px-0")}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    </a>
-                    <form
-                      action={async () => {
-                        "use server";
-                        await disconnectToolkit(row.id);
-                      }}
-                    >
-                      <SubmitButton
-                        pendingLabel="…"
-                        variant="ghost"
-                        icon={Unplug}
-                        iconOnly
-                        danger
-                        title={`Disconnect ${row.name}`}
+                  <div className="border-border flex items-center gap-2 border-t pt-2.5">
+                    <span className="text-subtle truncate text-[11px]">
+                      {added ? `Added ${added}` : " "}
+                    </span>
+                    <div className="flex-1" />
+                    {/*
+                     * Icon-only, but real buttons: 32px squares with a border,
+                     * always visible. The previous pass had them as 14px glyphs
+                     * in borderless controls that only faded in on hover, which
+                     * is what made them unreadable — the size and the frame are
+                     * doing the work here, not the label.
+                     */}
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <a
+                        href={`/api/connections/${row.slug}/connect`}
+                        title={active ? "Reconnect" : "Finish connecting"}
+                        aria-label={`Reconnect ${row.name}`}
+                        className={iconButtonClass(
+                          active ? "outline" : "primary",
+                        )}
                       >
-                        Disconnect
-                      </SubmitButton>
-                    </form>
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </a>
+                      <form
+                        action={async () => {
+                          "use server";
+                          await disconnectToolkit(row.id);
+                        }}
+                      >
+                        {/* Disconnect deletes the connected account, so the
+                            trash glyph says what actually happens — `Unplug`
+                            and `Unlink` both read as "temporarily detached". */}
+                        {/* The `danger` flag layers text-danger-text over the
+                            outline variant's text-foreground — same specificity,
+                            so which wins is down to stylesheet order. The danger
+                            variant states it once, unambiguously. */}
+                        <SubmitButton
+                          pendingLabel="Removing…"
+                          variant="danger"
+                          icon={<Trash2 className="h-3.5 w-3.5" />}
+                          iconOnly
+                          title={`Disconnect ${row.name}`}
+                        >
+                          Disconnect
+                        </SubmitButton>
+                      </form>
+                    </div>
                   </div>
                 </Card>
               );
@@ -173,9 +228,21 @@ export default async function ConnectionsPage() {
         )}
       </section>
 
-      <section className="rise mt-10">
-        <SectionLabel>Add a connector</SectionLabel>
+      <section id="add" className="rise mt-10 scroll-mt-8">
+        {/* The heading travels with the search field and chips — the browser
+            keeps them together in one sticky block. */}
         <ConnectorBrowser
+          header={
+            <SectionLabel
+              action={
+                <span className="text-subtle hidden text-[11px] sm:inline">
+                  Press <Mono>/</Mono> to search
+                </span>
+              }
+            >
+              Add a connector
+            </SectionLabel>
+          }
           connectedSlugs={connected
             .filter((c) => c.status === "ACTIVE")
             .map((c) => c.slug)}

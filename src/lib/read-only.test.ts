@@ -69,6 +69,18 @@ describe("buildToolFilter", () => {
     expect(allowed("GITHUB_GET_REPO")).toBe(false);
   });
 
+  it("allows any tool when read-only is off", () => {
+    const allowed = buildToolFilter(slackDm, [], [], false);
+    expect(allowed("SLACK_DELETE_MESSAGE")).toBe(true);
+    expect(allowed("GITHUB_CREATE_ISSUE")).toBe(true);
+  });
+
+  it("still honours the deny list with read-only off", () => {
+    const allowed = buildToolFilter([], [], ["SLACK_*"], false);
+    expect(allowed("SLACK_DELETE_MESSAGE")).toBe(false);
+    expect(allowed("GITHUB_CREATE_ISSUE")).toBe(true);
+  });
+
   it("lets the deny list win over everything", () => {
     const allowed = buildToolFilter(
       slackDm,

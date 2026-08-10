@@ -91,23 +91,26 @@ export type ToolkitSummary = {
 
 /*
  * Composio's toolkit list endpoint has no search parameter, so the whole
- * catalog (~hundreds of entries) is paged in once and filtered in memory.
- * It changes rarely, so it's memoized for an hour per server instance —
- * without this, every keystroke in the connector search would re-page it.
+ * catalog is filtered in memory. It changes rarely, so it's memoized for an
+ * hour per server instance — without this, every keystroke in the connector
+ * search would re-fetch it.
+ *
+ * `toolkits.get(query)` (the SDK's list overload) returns the matched
+ * toolkits as a plain array capped at `limit` — there is no `{items,
+ * nextCursor}` wrapper and no cursor in the response to page through, so a
+ * single request with the server's max limit is the only way to get the
+ * full catalog (server caps `limit` at 1000, which comfortably covers it).
  */
-type ToolkitListPage = {
-  items?: Array<{
-    slug: string;
-    name: string;
-    noAuth?: boolean;
-    meta?: {
-      description?: string;
-      logo?: string;
-      toolsCount?: number;
-      categories?: Array<{ slug: string; name: string }>;
-    };
-  }>;
-  nextCursor?: string | null;
+type ToolkitListItem = {
+  slug: string;
+  name: string;
+  noAuth?: boolean;
+  meta?: {
+    description?: string;
+    logo?: string;
+    toolsCount?: number;
+    categories?: Array<{ slug: string; name: string }>;
+  };
 };
 
 const CATALOG_TTL_MS = 60 * 60 * 1000;
@@ -118,34 +121,22 @@ export async function getToolkitCatalog(): Promise<ToolkitSummary[]> {
     return catalogCache.items;
   }
 
-  const items: ToolkitSummary[] = [];
-  let cursor: string | undefined;
+  // `toolkits.get` is overloaded (slug → one toolkit, query → a list); the
+  // list shape is asserted here because TS resolves to the slug overload.
+  const res = (await composio.toolkits.get({
+    limit: 1000,
+    sortBy: "usage",
+  })) as unknown as ToolkitListItem[];
 
-  // Bounded loop: the catalog is finite, but never trust a cursor to end.
-  for (let page = 0; page < 20; page++) {
-    // `toolkits.get` is overloaded (slug → one toolkit, query → a page); the
-    // list shape is asserted here because TS resolves to the slug overload.
-    const res = (await composio.toolkits.get({
-      limit: 100,
-      cursor,
-      sortBy: "usage",
-    })) as unknown as ToolkitListPage;
-
-    for (const item of res.items ?? []) {
-      items.push({
-        slug: item.slug,
-        name: item.name,
-        description: item.meta?.description,
-        logo: item.meta?.logo,
-        categories: (item.meta?.categories ?? []).map((c) => c.name),
-        toolsCount: item.meta?.toolsCount,
-        noAuth: Boolean(item.noAuth),
-      });
-    }
-    const next = res.nextCursor;
-    if (!next) break;
-    cursor = next;
-  }
+  const items: ToolkitSummary[] = res.map((item) => ({
+    slug: item.slug,
+    name: item.name,
+    description: item.meta?.description,
+    logo: item.meta?.logo,
+    categories: (item.meta?.categories ?? []).map((c) => c.name),
+    toolsCount: item.meta?.toolsCount,
+    noAuth: Boolean(item.noAuth),
+  }));
 
   catalogCache = { at: Date.now(), items };
   return items;

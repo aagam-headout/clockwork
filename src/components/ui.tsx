@@ -111,6 +111,28 @@ export const BUTTON_SIZES = {
   lg: "h-12 px-5 text-sm",
 } as const;
 
+/*
+ * Icon-only buttons are their own size, not a text size with the padding
+ * cancelled. Appending `px-0` to `buttonClass(…, "sm")` looks like it works and
+ * doesn't: `px-0` and `px-3` have equal specificity, so the winner is whichever
+ * Tailwind emits last — and it emits `px-3` last. The padding survived, the
+ * 32px box had ~6px of content left, and the 16px glyph inside got squeezed to
+ * 6–8px wide. These strings carry no horizontal padding to begin with.
+ */
+export const ICON_BUTTON_SIZES = {
+  sm: "h-8 w-8",
+  md: "h-10 w-10",
+  lg: "h-12 w-12",
+} as const;
+
+export function iconButtonClass(
+  variant: keyof typeof BUTTON_VARIANTS = "outline",
+  size: keyof typeof ICON_BUTTON_SIZES = "sm",
+  className = "",
+) {
+  return `${BUTTON_BASE} ${BUTTON_VARIANTS[variant]} ${ICON_BUTTON_SIZES[size]} ${className}`;
+}
+
 export const BUTTON_VARIANTS = {
   /* The primary action is the inverted one — black on white, white on black. */
   primary: "bg-solid text-solid-fg hover:bg-solid-hover",

@@ -96,7 +96,7 @@ export default async function EditWorkflowPage({
             >
               <SubmitButton
                 pendingLabel="Running…"
-                icon={Play}
+                icon={<Play className="h-3.5 w-3.5" />}
                 variant="outline"
                 size="sm"
               >
@@ -108,7 +108,7 @@ export default async function EditWorkflowPage({
                 pendingLabel="Deleting…"
                 variant="ghost"
                 size="sm"
-                icon={Trash2}
+                icon={<Trash2 className="h-3.5 w-3.5" />}
                 danger
               >
                 Delete
@@ -133,6 +133,7 @@ export default async function EditWorkflowPage({
             eventTriggers: workflow.eventTriggers,
             model: workflow.model,
             maxSteps: workflow.maxSteps,
+            readOnly: workflow.readOnly,
             toolkits: workflow.toolkits,
             allowTools: workflow.allowTools,
             denyTools: workflow.denyTools,

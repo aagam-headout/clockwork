@@ -172,7 +172,7 @@ export default async function WorkflowsPage() {
                     >
                       <SubmitButton
                         pendingLabel="Running…"
-                        icon={Play}
+                        icon={<Play className="h-3.5 w-3.5" />}
                         variant="outline"
                       >
                         Run now
@@ -187,7 +187,13 @@ export default async function WorkflowsPage() {
                     >
                       <SubmitButton
                         pendingLabel="…"
-                        icon={wf.enabled ? Pause : Play}
+                        icon={
+                          wf.enabled ? (
+                            <Pause className="h-3.5 w-3.5" />
+                          ) : (
+                            <Play className="h-3.5 w-3.5" />
+                          )
+                        }
                         variant="ghost"
                         iconOnly
                         title={
@@ -207,7 +213,7 @@ export default async function WorkflowsPage() {
                       <SubmitButton
                         pendingLabel="…"
                         variant="ghost"
-                        icon={Trash2}
+                        icon={<Trash2 className="h-3.5 w-3.5" />}
                         iconOnly
                         danger
                         title="Delete workflow"

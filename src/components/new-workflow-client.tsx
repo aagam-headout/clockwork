@@ -30,8 +30,10 @@ export function NewWorkflowClient({
   );
 
   return (
-    <div className="grid h-full min-h-0 gap-6 max-lg:items-start lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
-      <div className="h-[440px] min-h-0 lg:h-full">
+    // The rail is fixed rather than a fraction: the settings column has a
+    // natural width, and the chat should absorb everything else.
+    <div className="grid h-full min-h-0 gap-5 max-lg:items-start lg:grid-cols-[minmax(0,1fr)_400px] xl:grid-cols-[minmax(0,1fr)_448px] xl:gap-6">
+      <div className="h-[min(62vh,520px)] min-h-0 lg:h-full">
         <WorkflowAgentChat onPropose={setProposal} />
       </div>
 
@@ -47,6 +49,7 @@ export function NewWorkflowClient({
           defaultValues={proposal ?? undefined}
           availableToolkits={availableToolkits}
           models={models}
+          title="Settings"
           fillHeight
         />
       </div>

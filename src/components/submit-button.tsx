@@ -2,7 +2,12 @@
 
 import { useFormStatus } from "react-dom";
 import { LoaderCircle } from "lucide-react";
-import { buttonClass, BUTTON_SIZES, BUTTON_VARIANTS } from "@/components/ui";
+import {
+  buttonClass,
+  iconButtonClass,
+  BUTTON_SIZES,
+  BUTTON_VARIANTS,
+} from "@/components/ui";
 
 /**
  * Form-aware button. `iconOnly` collapses to a square icon control while
@@ -13,7 +18,7 @@ export function SubmitButton({
   pendingLabel,
   variant = "outline",
   size = "sm",
-  icon: Icon,
+  icon,
   iconOnly = false,
   danger = false,
   title,
@@ -22,7 +27,7 @@ export function SubmitButton({
   pendingLabel: string;
   variant?: keyof typeof BUTTON_VARIANTS;
   size?: keyof typeof BUTTON_SIZES;
-  icon?: React.ComponentType<{ className?: string }>;
+  icon?: React.ReactNode;
   iconOnly?: boolean;
   danger?: boolean;
   title?: string;
@@ -37,21 +42,19 @@ export function SubmitButton({
       aria-label={
         iconOnly && typeof children === "string" ? children : undefined
       }
-      className={buttonClass(
+      className={(iconOnly ? iconButtonClass : buttonClass)(
         variant,
+        // Icon-only has its own padding-free size scale; cancelling the text
+        // size's px-* with a later utility does not work (see ui.tsx).
         size,
-        `disabled:cursor-wait ${iconOnly ? "w-8 px-0" : ""} ${
+        `disabled:cursor-wait ${
           danger
             ? "text-danger-text hover:bg-danger-soft hover:text-danger-text"
             : ""
         }`,
       )}
     >
-      {pending ? (
-        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-      ) : (
-        Icon && <Icon className="h-3.5 w-3.5" />
-      )}
+      {pending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : icon}
       {!iconOnly && (pending ? pendingLabel : children)}
     </button>
   );
