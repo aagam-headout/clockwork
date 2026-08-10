@@ -9,7 +9,7 @@ export default async function NewWorkflowPage() {
   await requireOwner();
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-16">
+    <main className="mx-auto max-w-3xl px-8 py-12">
       <Link href="/workflows" className="text-xs text-muted hover:text-foreground">
         ← Workflows
       </Link>

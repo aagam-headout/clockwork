@@ -1,5 +1,7 @@
 import { listConnectedAccounts, TOOLKITS, type Toolkit } from "@/lib/composio";
 import { requireOwner } from "@/lib/auth/require-owner";
+import { cardClass } from "@/lib/card-class";
+import { ConnectionsIcon } from "@/components/icons";
 
 export const dynamic = "force-dynamic";
 
@@ -29,53 +31,53 @@ export default async function ConnectionsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-16">
-      <h1 className="text-xl font-medium tracking-tight text-foreground">
-        Connections
-      </h1>
-      <p className="mt-1 text-sm text-muted">
-        Connect the apps your workflows can read from.
-      </p>
+    <main className="mx-auto max-w-3xl px-8 py-12">
+      <h1 className="text-xl font-medium tracking-tight text-foreground">Connections</h1>
+      <p className="mt-1 text-sm text-muted">Connect the apps your workflows can read from.</p>
 
       {loadError && (
-        <p className="mt-6 rounded-md border border-red-900/40 bg-red-950/30 px-4 py-3 text-sm text-red-400">
+        <p className="mt-6 rounded-xl border border-red-900/40 bg-red-950/30 px-4 py-3 text-sm text-red-400">
           Couldn&apos;t load connection status: {loadError}
         </p>
       )}
 
-      <ul className="mt-8 divide-y divide-border rounded-lg border border-border">
+      <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {TOOLKITS.map((toolkit) => {
           const status = statusByToolkit.get(toolkit);
           const active = status === "ACTIVE";
           return (
-            <li
-              key={toolkit}
-              className="flex items-center justify-between px-4 py-3"
-            >
-              <div>
-                <div className="text-sm font-medium text-foreground">
-                  {TOOLKIT_LABELS[toolkit]}
+            <div key={toolkit} className={cardClass()}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-chip">
+                    <ConnectionsIcon className="h-4 w-4 text-muted" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-foreground">
+                      {TOOLKIT_LABELS[toolkit]}
+                    </div>
+                    <div className="text-xs text-muted">
+                      {active ? "Connected" : status ? status.toLowerCase() : "Not connected"}
+                    </div>
+                  </div>
                 </div>
-                <div className="text-xs text-muted">
-                  {active ? "Connected" : status ? status.toLowerCase() : "Not connected"}
-                </div>
+                {active ? (
+                  <span className="shrink-0 rounded-full bg-emerald-950/50 px-2.5 py-1 text-xs font-medium text-emerald-400">
+                    Active
+                  </span>
+                ) : (
+                  <a
+                    href={`/api/connections/${toolkit}/connect`}
+                    className="shrink-0 cursor-pointer rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-85"
+                  >
+                    Connect
+                  </a>
+                )}
               </div>
-              {active ? (
-                <span className="rounded-full bg-emerald-950/50 px-2.5 py-1 text-xs font-medium text-emerald-400">
-                  Active
-                </span>
-              ) : (
-                <a
-                  href={`/api/connections/${toolkit}/connect`}
-                  className="rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-85"
-                >
-                  Connect
-                </a>
-              )}
-            </li>
+            </div>
           );
         })}
-      </ul>
+      </div>
     </main>
   );
 }

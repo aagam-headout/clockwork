@@ -4,6 +4,7 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, runSteps, outputs, workflows } from "@/db/schema";
 import { requireOwner } from "@/lib/auth/require-owner";
+import { cardClass } from "@/lib/card-class";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +46,7 @@ export default async function RunDetailPage({
   const [output] = await db.select().from(outputs).where(eq(outputs.runId, id));
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-16">
+    <main className="mx-auto max-w-3xl px-8 py-12">
       <Link href="/runs" className="text-xs text-muted hover:text-foreground">
         ← Runs
       </Link>
@@ -61,7 +62,7 @@ export default async function RunDetailPage({
       </p>
 
       {run.error && (
-        <pre className="mt-6 whitespace-pre-wrap rounded-md border border-red-900/40 bg-red-950/30 px-4 py-3 text-xs text-red-400">
+        <pre className="mt-6 whitespace-pre-wrap rounded-xl border border-red-900/40 bg-red-950/30 px-4 py-3 text-xs text-red-400">
           {run.error}
         </pre>
       )}
@@ -69,7 +70,7 @@ export default async function RunDetailPage({
       {output && (
         <section className="mt-8">
           <h2 className="text-sm font-medium text-foreground">Output</h2>
-          <div className="mt-2 whitespace-pre-wrap rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground">
+          <div className={`mt-2 whitespace-pre-wrap text-sm text-foreground ${cardClass()}`}>
             {output.body}
           </div>
           <p className="mt-1 text-xs text-muted">Delivered to: {output.deliveredTo.join(", ")}</p>
@@ -78,9 +79,9 @@ export default async function RunDetailPage({
 
       <section className="mt-8">
         <h2 className="text-sm font-medium text-foreground">Steps ({steps.length})</h2>
-        <ol className="mt-2 flex flex-col gap-2">
+        <div className="mt-2 flex flex-col gap-2">
           {steps.map((step) => (
-            <li key={step.id} className="rounded-lg border border-border px-4 py-3">
+            <div key={step.id} className={cardClass()}>
               {step.type === "tool" ? (
                 <>
                   <div className="flex items-center justify-between">
@@ -97,18 +98,16 @@ export default async function RunDetailPage({
                       {JSON.stringify({ args: step.argsJson, result: step.resultJson }, null, 2)}
                     </pre>
                   </details>
-                  {step.error && (
-                    <p className="mt-2 text-xs text-danger">{step.error}</p>
-                  )}
+                  {step.error && <p className="mt-2 text-xs text-danger">{step.error}</p>}
                 </>
               ) : (
                 <p className="whitespace-pre-wrap text-sm text-foreground">
                   {(step.resultJson as { text?: string } | null)?.text}
                 </p>
               )}
-            </li>
+            </div>
           ))}
-        </ol>
+        </div>
       </section>
     </main>
   );

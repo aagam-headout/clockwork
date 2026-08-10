@@ -11,7 +11,8 @@
   --foreground: #0a0a0a;
   --muted: #666666;
   --border: #eaeaea;
-  --card: #fafafa;
+  --card: #fbfbfb;
+  --chip: #f0f1f3;
   --accent: #0070f3;
   --danger: #e5484d;
   --success: #17c964;
@@ -23,6 +24,7 @@
   --color-muted: var(--muted);
   --color-border: var(--border);
   --color-card: var(--card);
+  --color-chip: var(--chip);
   --color-accent: var(--accent);
   --color-danger: var(--danger);
   --color-success: var(--success);
@@ -37,6 +39,7 @@
     --muted: #888888;
     --border: #262626;
     --card: #111111;
+    --chip: #1c1e21;
     --accent: #3291ff;
     --danger: #ff6166;
     --success: #45d483;

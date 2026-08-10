@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import type { WorkflowFormValues } from "@/components/workflow-form";
+import { SendIcon } from "@/components/icons";
+import { cardClass } from "@/lib/card-class";
 
 type Proposal = WorkflowFormValues & { rationale: string };
 
@@ -36,7 +38,7 @@ export function WorkflowAgentChat({ onPropose }: { onPropose: (values: Proposal)
   }
 
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-4">
+    <div className={cardClass()}>
       <p className="text-xs font-medium text-foreground">Describe it, I&apos;ll fill the form</p>
       <form onSubmit={handleSubmit} className="mt-2 flex gap-2">
         <input
@@ -49,9 +51,16 @@ export function WorkflowAgentChat({ onPropose }: { onPropose: (values: Proposal)
         <button
           type="submit"
           disabled={loading || !description.trim()}
-          className="shrink-0 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"
+          className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {loading ? "Thinking…" : "Generate"}
+          {loading ? (
+            "Thinking…"
+          ) : (
+            <>
+              <SendIcon className="h-3.5 w-3.5" />
+              Generate
+            </>
+          )}
         </button>
       </form>
       {error && <p className="mt-2 text-xs text-danger">{error}</p>}

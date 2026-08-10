@@ -15,7 +15,7 @@ export default function ForbiddenPage() {
           await authClient.signOut();
           window.location.href = "/auth/sign-in";
         }}
-        className="mt-2 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-foreground"
+        className="mt-2 cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-foreground"
       >
         Sign out and try a different account
       </button>

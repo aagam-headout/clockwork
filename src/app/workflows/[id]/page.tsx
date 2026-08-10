@@ -6,6 +6,7 @@ import { workflows } from "@/db/schema";
 import { updateWorkflow, deleteWorkflow } from "@/lib/actions";
 import { WorkflowForm } from "@/components/workflow-form";
 import { SubmitButton } from "@/components/submit-button";
+import { TrashIcon } from "@/components/icons";
 import type { DeliverTarget } from "@/lib/read-only";
 import { requireOwner } from "@/lib/auth/require-owner";
 
@@ -29,7 +30,7 @@ export default async function EditWorkflowPage({
   const boundDelete = deleteWorkflow.bind(null, id);
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-16">
+    <main className="mx-auto max-w-3xl px-8 py-12">
       <Link href="/workflows" className="text-xs text-muted hover:text-foreground">
         ← Workflows
       </Link>
@@ -38,7 +39,7 @@ export default async function EditWorkflowPage({
           Edit {workflow.name}
         </h1>
         <form action={boundDelete}>
-          <SubmitButton pendingLabel="Deleting…" variant="danger">
+          <SubmitButton pendingLabel="Deleting…" variant="danger" icon={TrashIcon}>
             Delete
           </SubmitButton>
         </form>

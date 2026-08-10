@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useFormStatus } from "react-dom";
 import { TOOLKITS, type Toolkit } from "@/lib/toolkits";
+import { cardClass } from "@/lib/card-class";
 
 const TOOLKIT_LABELS: Record<Toolkit, string> = {
   googlecalendar: "Google Calendar",
@@ -59,7 +60,7 @@ export function WorkflowForm({
   }
 
   return (
-    <form action={action} className="flex flex-col gap-6">
+    <form action={action} className={`flex flex-col gap-6 ${cardClass()}`}>
       <Field label="Name">
         <input
           name="name"
@@ -173,11 +174,11 @@ export function WorkflowForm({
       </div>
 
       <Field label="Delivery">
-        <label className="flex items-center gap-2 text-sm text-foreground">
+        <label className="flex cursor-not-allowed items-center gap-2 text-sm text-foreground">
           <input type="checkbox" checked disabled className="accent-foreground" />
           Dashboard (always on)
         </label>
-        <label className="flex items-center gap-2 text-sm text-foreground">
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
           <input
             type="checkbox"
             name="deliverSlack"
@@ -199,7 +200,7 @@ function FormSubmitButton({ children }: { children: React.ReactNode }) {
     <button
       type="submit"
       disabled={pending}
-      className="mt-2 w-fit rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-50"
+      className="mt-2 w-fit cursor-pointer rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-85 disabled:cursor-wait disabled:opacity-50"
     >
       {pending ? "Saving…" : children}
     </button>

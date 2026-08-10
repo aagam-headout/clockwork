@@ -3,6 +3,7 @@ import { desc, eq, and, gte } from "drizzle-orm";
 import { db } from "@/db";
 import { outputs, runs, workflows } from "@/db/schema";
 import { requireOwner } from "@/lib/auth/require-owner";
+import { cardClass } from "@/lib/card-class";
 
 export const dynamic = "force-dynamic";
 
@@ -29,29 +30,33 @@ export default async function TodayPage() {
     .orderBy(desc(outputs.createdAt));
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-16">
+    <main className="mx-auto max-w-3xl px-8 py-12">
       <h1 className="text-xl font-medium tracking-tight text-foreground">Today</h1>
       <p className="mt-1 text-sm text-muted">
-        {feed.length === 0 ? "Nothing has run yet today." : `${feed.length} digest${feed.length === 1 ? "" : "s"} so far`}
+        {feed.length === 0
+          ? "Nothing has run yet today."
+          : `${feed.length} digest${feed.length === 1 ? "" : "s"} so far`}
       </p>
 
       {feed.length === 0 && (
-        <p className="mt-10 text-sm text-muted">
-          Set up a workflow at{" "}
-          <Link href="/workflows/new" className="text-accent underline">
-            /workflows/new
-          </Link>{" "}
-          or check{" "}
-          <Link href="/runs" className="text-accent underline">
-            past runs
-          </Link>
-          .
-        </p>
+        <div className="mt-10 rounded-xl border border-dashed border-border px-6 py-14 text-center">
+          <p className="text-sm text-muted">
+            Set up a workflow at{" "}
+            <Link href="/workflows/new" className="text-accent underline">
+              /workflows/new
+            </Link>{" "}
+            or check{" "}
+            <Link href="/runs" className="text-accent underline">
+              past runs
+            </Link>
+            .
+          </p>
+        </div>
       )}
 
-      <div className="mt-8 flex flex-col gap-6">
+      <div className="mt-8 flex flex-col gap-3">
         {feed.map((item) => (
-          <article key={item.outputId} className="rounded-lg border border-border px-5 py-4">
+          <article key={item.outputId} className={cardClass()}>
             <div className="flex items-center justify-between">
               <Link
                 href={`/runs/${item.runId}`}
