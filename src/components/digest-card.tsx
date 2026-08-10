@@ -37,7 +37,8 @@ export function DigestCard({
 
   useEffect(() => {
     if (!expanded) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setExpanded(false);
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" && setExpanded(false);
     window.addEventListener("keydown", onKey);
     // Body scroll fights the dialog's own scroll otherwise — a long digest
     // behind a short one would scroll the page instead of the panel.

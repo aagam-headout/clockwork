@@ -158,7 +158,10 @@ export default async function ConnectionsPage({
       {/* No stat tiles here: the counts they carried are the same two numbers
           the header badges already show, and each card states its own status. */}
       <section className="rise mt-8">
-        <SectionLabel count={connected.length || undefined}>
+        <SectionLabel
+          count={connected.length || undefined}
+          headingClassName="heading-16"
+        >
           Connected
         </SectionLabel>
 
@@ -183,9 +186,9 @@ export default async function ConnectionsPage({
                 <Card
                   key={row.id}
                   interactive
-                  className="flex flex-col gap-3 p-3.5"
+                  className="flex flex-col gap-2 p-3"
                 >
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-start gap-2.5">
                     <ToolkitLogo
                       slug={row.slug}
                       name={row.name}
@@ -206,17 +209,17 @@ export default async function ConnectionsPage({
                     </Badge>
                   </div>
 
-                  <div className="border-border flex items-center gap-2 border-t pt-2.5">
+                  <div className="flex items-center gap-2">
                     <span className="text-subtle truncate text-[11px]">
                       {added ? `Added ${added}` : " "}
                     </span>
                     <div className="flex-1" />
                     {/*
-                     * Icon-only, but real buttons: 32px squares with a border,
+                     * Icon-only, but real buttons: 24px squares with a border,
                      * always visible. The previous pass had them as 14px glyphs
                      * in borderless controls that only faded in on hover, which
-                     * is what made them unreadable — the size and the frame are
-                     * doing the work here, not the label.
+                     * is what made them unreadable — the frame is doing the
+                     * work here, not the label.
                      */}
                     <div className="flex shrink-0 items-center gap-1.5">
                       <a
@@ -225,9 +228,10 @@ export default async function ConnectionsPage({
                         aria-label={`Reconnect ${row.name}`}
                         className={iconButtonClass(
                           active ? "outline" : "primary",
+                          "xs",
                         )}
                       >
-                        <RefreshCw className="h-3.5 w-3.5" />
+                        <RefreshCw className="h-3 w-3" />
                       </a>
                       <form
                         action={async () => {
@@ -244,8 +248,10 @@ export default async function ConnectionsPage({
                         <ConfirmSubmitButton
                           pendingLabel="Removing…"
                           confirmLabel={`Disconnect ${row.name}?`}
-                          icon={<Trash2 className="h-3.5 w-3.5" />}
+                          icon={<Trash2 className="h-3 w-3" />}
                           title={`Disconnect ${row.name}`}
+                          size="xs"
+                          variant="danger"
                         >
                           {`Disconnect ${row.name}`}
                         </ConfirmSubmitButton>
@@ -265,6 +271,7 @@ export default async function ConnectionsPage({
         <ConnectorBrowser
           header={
             <SectionLabel
+              headingClassName="heading-16"
               action={
                 <span className="text-subtle hidden text-[11px] sm:inline">
                   Press <Mono>/</Mono> to search

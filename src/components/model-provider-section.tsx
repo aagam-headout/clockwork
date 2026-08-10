@@ -8,7 +8,7 @@ import { getModelCatalog } from "@/lib/models";
 import { PROVIDERS, providerRoutes } from "@/lib/providers";
 import { switchProvider } from "@/app/settings/actions";
 import { SubmitButton } from "@/components/submit-button";
-import { Alert, Badge, Card, Mono } from "@/components/ui";
+import { Alert, ListBox, Mono } from "@/components/ui";
 
 /**
  * Which SDK provider serves every model call this account makes — workflow
@@ -47,72 +47,78 @@ export async function ModelProviderSection({ email }: { email: string }) {
       <div>
         <h2 className="heading-16 text-foreground">Model provider</h2>
         <p className="text-muted mt-1.5 text-sm leading-relaxed">
-          Every model call your account makes — workflow runs and the builder
-          assistant alike — goes through the provider selected here, and the
-          model picker only offers what that provider serves. Scheduled runs use
-          the provider of whoever created the workflow. Keys are read from the
-          environment; a provider without one can&apos;t be selected.
+          Routes every model call on your account — workflow runs and the
+          builder assistant alike. Keys come from the environment; a provider
+          without one can&apos;t be selected.
         </p>
 
-        <ul className="mt-4 grid gap-3">
+        <ListBox as="ul" className="mt-4">
           {PROVIDERS.map((p) => {
             const isActive = p.id === active;
             const configured = providerConfigured(p.id);
             return (
-              <Card as="li" key={p.id}>
-                <div className="flex flex-wrap items-start gap-x-4 gap-y-3 p-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-foreground text-[14px] font-medium">
-                        {p.label}
-                      </span>
-                      {isActive && <Badge tone="accent">Active</Badge>}
-                      {!configured && <Badge tone="warn">No key</Badge>}
-                    </div>
-                    <p className="text-muted mt-1 text-[13px] leading-relaxed">
-                      {p.description}
-                    </p>
-                    <p className="text-subtle mt-2 flex items-center gap-1.5 text-[11.5px]">
-                      <KeyRound className="h-3 w-3 shrink-0" />
-                      <Mono>{p.envVar}</Mono>
-                      <span>
-                        {configured ? "is set" : "is missing from the env"}
-                      </span>
-                    </p>
-                    {isActive && (
-                      <p className="text-subtle mt-1 text-[11.5px]">
-                        {catalog.length} model
-                        {catalog.length === 1 ? "" : "s"} available
-                      </p>
-                    )}
-                  </div>
+              <li
+                key={p.id}
+                className="flex flex-wrap items-center gap-3 px-4 py-3.5"
+              >
+                <span
+                  className={`rounded-control flex h-9 w-9 shrink-0 items-center justify-center border ${
+                    isActive
+                      ? "border-accent/25 bg-accent-soft text-accent-text"
+                      : configured
+                        ? "border-border bg-surface-2 text-subtle"
+                        : "border-warn-line bg-warn-soft text-warn-text"
+                  }`}
+                >
+                  <KeyRound className="h-4 w-4" />
+                </span>
 
-                  <div className="shrink-0">
-                    {isActive ? (
-                      <span className="text-muted inline-flex items-center gap-1.5 text-[13px]">
-                        <Check className="h-4 w-4" />
-                        In use
-                      </span>
-                    ) : configured ? (
-                      <form action={switchProvider}>
-                        <input type="hidden" name="provider" value={p.id} />
-                        <SubmitButton pendingLabel="Switching…">
-                          Use {p.label}
-                        </SubmitButton>
-                      </form>
-                    ) : (
-                      // No key means nothing to switch to — a live button here
-                      // would only ever bounce off the action's own check.
-                      <span className="text-subtle text-[12.5px]">
-                        Set the key to enable
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-foreground text-sm font-medium">
+                      {p.label}
+                    </span>
+                  </div>
+                  <p className="text-subtle mt-1 flex items-center gap-1.5 text-[12px]">
+                    {/* `!` forces it: `text-[11px]` is baked into Mono's own
+                        class list, and Tailwind's utility order (not source
+                        order) decides the tie otherwise. */}
+                    <Mono className="text-[9px]!">{p.envVar}</Mono>
+                    <span>{configured ? "set" : "missing"}</span>
+                    {isActive && (
+                      <span>
+                        · {catalog.length} model
+                        {catalog.length === 1 ? "" : "s"}
                       </span>
                     )}
-                  </div>
+                  </p>
                 </div>
-              </Card>
+
+                <div className="shrink-0">
+                  {isActive ? (
+                    <span className="text-muted inline-flex items-center gap-1.5 text-[13px]">
+                      <Check className="h-4 w-4" />
+                      In use
+                    </span>
+                  ) : configured ? (
+                    <form action={switchProvider}>
+                      <input type="hidden" name="provider" value={p.id} />
+                      <SubmitButton pendingLabel="Switching…">
+                        Use {p.label}
+                      </SubmitButton>
+                    </form>
+                  ) : (
+                    // No key means nothing to switch to — a live button here
+                    // would only ever bounce off the action's own check.
+                    <span className="text-subtle text-[12.5px]">
+                      Set the key to enable
+                    </span>
+                  )}
+                </div>
+              </li>
             );
           })}
-        </ul>
+        </ListBox>
       </div>
 
       {stranded.length > 0 && (

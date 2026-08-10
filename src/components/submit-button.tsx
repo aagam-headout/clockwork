@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { LoaderCircle, Trash2 } from "lucide-react";
+import { LoaderCircle, Trash2, X } from "lucide-react";
 import {
   buttonClass,
   iconButtonClass,
   BUTTON_SIZES,
   BUTTON_VARIANTS,
+  ICON_BUTTON_SIZES,
 } from "@/components/ui";
 
 /**
@@ -80,6 +81,8 @@ export function ConfirmSubmitButton({
   pendingLabel,
   icon,
   title,
+  size = "sm",
+  variant = "ghost",
 }: {
   /** Accessible name in the resting state; also the tooltip. */
   children: string;
@@ -88,6 +91,10 @@ export function ConfirmSubmitButton({
   pendingLabel: string;
   icon?: React.ReactNode;
   title?: string;
+  /** Resting-state icon button size. The armed (labelled) state stays "sm". */
+  size?: keyof typeof ICON_BUTTON_SIZES;
+  /** Resting-state icon button variant. The armed (labelled) state stays "danger". */
+  variant?: keyof typeof BUTTON_VARIANTS;
 }) {
   const { pending } = useFormStatus();
   const [armed, setArmed] = useState(false);
@@ -114,29 +121,43 @@ export function ConfirmSubmitButton({
    */
   if (armed) {
     return (
-      <button
-        key="armed"
-        type="submit"
-        disabled={pending}
-        // Focused so Enter confirms and Escape cancels. Deliberately *not*
-        // disarmed on blur: in a browser window that doesn't hold OS focus the
-        // element blurs the instant it mounts, which cancelled the confirm
-        // before it could be read. The timeout is the only auto-cancel.
-        autoFocus
-        onKeyDown={(e) => e.key === "Escape" && setArmed(false)}
-        className={buttonClass(
-          "danger",
-          "sm",
-          "border-danger-line bg-danger-soft disabled:cursor-wait",
+      <span key="armed" className="inline-flex items-center gap-1.5">
+        <button
+          type="submit"
+          disabled={pending}
+          // Focused so Enter confirms and Escape cancels. Deliberately *not*
+          // disarmed on blur: in a browser window that doesn't hold OS focus the
+          // element blurs the instant it mounts, which cancelled the confirm
+          // before it could be read. The timeout is the only auto-cancel.
+          autoFocus
+          onKeyDown={(e) => e.key === "Escape" && setArmed(false)}
+          className={buttonClass(
+            "danger",
+            "sm",
+            "border-danger-line bg-danger-soft disabled:cursor-wait",
+          )}
+        >
+          {pending ? (
+            <LoaderCircle className="h-4 w-4 animate-spin" />
+          ) : (
+            <Trash2 className="h-3.5 w-3.5" />
+          )}
+          {pending ? pendingLabel : confirmLabel}
+        </button>
+        {/* Escape and the auto-disarm timeout both cancel already, but
+            neither is discoverable — a visible close button is. */}
+        {!pending && (
+          <button
+            type="button"
+            onClick={() => setArmed(false)}
+            aria-label="Cancel"
+            title="Cancel"
+            className={iconButtonClass("ghost", "sm")}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         )}
-      >
-        {pending ? (
-          <LoaderCircle className="h-4 w-4 animate-spin" />
-        ) : (
-          <Trash2 className="h-3.5 w-3.5" />
-        )}
-        {pending ? pendingLabel : confirmLabel}
-      </button>
+      </span>
     );
   }
 
@@ -152,9 +173,15 @@ export function ConfirmSubmitButton({
       }}
       title={title ?? children}
       aria-label={children}
-      className={iconButtonClass("ghost", "sm", "text-danger-text")}
+      className={iconButtonClass(
+        variant,
+        size,
+        // "ghost" carries no color of its own; every other variant already
+        // sets one (danger's red, outline's neutral foreground, etc).
+        variant === "ghost" ? "text-danger-text" : "",
+      )}
     >
-      {icon ?? <Trash2 className="h-3.5 w-3.5" />}
+      {icon ?? <Trash2 className={size === "xs" ? "h-3 w-3" : "h-3.5 w-3.5"} />}
     </button>
   );
 }

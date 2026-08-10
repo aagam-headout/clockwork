@@ -10,10 +10,14 @@ export async function GET(req: NextRequest) {
   }
 
   const query = req.nextUrl.searchParams.get("q") ?? "";
+  const offset = Number(req.nextUrl.searchParams.get("offset") ?? 0) || 0;
+  const limit = 24;
 
   try {
-    const items = await searchToolkits(query);
-    return NextResponse.json({ items });
+    const items = await searchToolkits(query, limit, offset);
+    // A full page back means there may be more — cheaper than a second
+    // count query, and off by at most one "Load more" click at the tail.
+    return NextResponse.json({ items, hasMore: items.length === limit });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },

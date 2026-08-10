@@ -313,6 +313,64 @@
   border-color: var(--border);
 }
 
+/*
+ * @neondatabase/auth-ui ships its own Tailwind preflight, wrapped in
+ * `@layer neon-auth` (its `dist/theme.css`), which *also* resets
+ * `border-color` on `*` — globally, not scoped to `.auth-surface`. Layers are
+ * ordered by first appearance across the whole stylesheet; its import is the
+ * first thing after `@import "tailwindcss"` above, so `neon-auth` ends up
+ * declared after our own `@layer utilities` and outranks it regardless of
+ * specificity. Every tone border utility (`border-warn-line`,
+ * `border-danger-line`, `border-success-line`, `border-accent-line`, ...)
+ * compiled fine but rendered as plain grey `--border` everywhere — Badge,
+ * Alert, Card, form errors, all of it, not just inside the auth screens.
+ *
+ * Same fix as the shadcn token bridge below: restate the ones this app
+ * actually uses unlayered, so — like that bridge — they beat `@layer
+ * neon-auth` too. (`*` above stays unlayered rather than moving into
+ * `@layer base`, for the same reason: a tone class needs to out-specify it,
+ * not lose to it by virtue of living in a lower layer.)
+ */
+.border-border {
+  border-color: var(--border);
+}
+.border-border-strong {
+  border-color: var(--border-strong);
+}
+.border-accent-line {
+  border-color: var(--accent-line);
+}
+.border-success-line {
+  border-color: var(--success-line);
+}
+.border-success\/25 {
+  border-color: color-mix(in oklab, var(--success) 25%, transparent);
+}
+.border-danger-line {
+  border-color: var(--danger-line);
+}
+.border-danger-soft {
+  border-color: var(--danger-soft);
+}
+.border-warn-line {
+  border-color: var(--warn-line);
+}
+.border-warn-soft {
+  border-color: var(--warn-soft);
+}
+.hover\:border-border-strong:hover {
+  border-color: var(--border-strong);
+}
+.hover\:border-danger-line:hover {
+  border-color: var(--danger-line);
+}
+.focus\:border-danger:focus {
+  border-color: var(--danger);
+}
+.focus-within\:border-border-strong:focus-within {
+  border-color: var(--border-strong);
+}
+
 html {
   color-scheme: light dark;
 }

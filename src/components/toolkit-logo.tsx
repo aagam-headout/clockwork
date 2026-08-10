@@ -14,12 +14,19 @@ export function ToolkitLogo({
   logo,
   size = "md",
   connected = false,
+  connectedTone = "neutral",
+  className = "",
 }: {
   slug: string;
   name: string;
   logo?: string;
   size?: "md" | "lg";
   connected?: boolean;
+  /** "neutral" just emphasizes the box (the /connections page already has a
+   *  status badge alongside it); "accent" is the catalog's own "shown here"
+   *  tint (the connector browser) and doesn't carry account-status meaning. */
+  connectedTone?: "accent" | "neutral";
+  className?: string;
 }) {
   const box = size === "lg" ? "h-9 w-9" : "h-8 w-8";
   const glyph = size === "lg" ? "h-4.5 w-4.5" : "h-4 w-4";
@@ -30,9 +37,15 @@ export function ToolkitLogo({
       title={name}
       className={`rounded-control flex ${box} shrink-0 items-center justify-center overflow-hidden border ${
         connected
-          ? "border-success/25 bg-success-soft text-success-text"
+          ? connectedTone === "accent"
+            ? // Bare `accent` is special-cased in globals.css to a neutral
+              // hover-gray in dark mode (for better-auth-ui compatibility), so
+              // `border-accent/25` silently loses its color there — `-line`
+              // isn't touched by that override and stays blue in both themes.
+              "border-accent-line bg-accent-soft text-accent-text"
+            : "border-border-strong bg-surface-2 text-foreground"
           : "border-border bg-surface-2 text-subtle"
-      }`}
+      } ${className}`}
     >
       {logo ? (
         // eslint-disable-next-line @next/next/no-img-element

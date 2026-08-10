@@ -129,6 +129,7 @@ export const BUTTON_SIZES = {
  * 6–8px wide. These strings carry no horizontal padding to begin with.
  */
 export const ICON_BUTTON_SIZES = {
+  xs: "h-6 w-6",
   sm: "h-8 w-8",
   md: "h-10 w-10",
   lg: "h-12 w-12",
@@ -331,18 +332,20 @@ export function SectionLabel({
   count,
   action,
   icon: Icon,
+  headingClassName = "heading-14",
 }: {
   children: React.ReactNode;
   count?: number;
   action?: React.ReactNode;
   icon?: React.ComponentType<{ className?: string }>;
+  headingClassName?: string;
 }) {
   return (
     // The row is 32px tall whether or not it carries an action, so a section
     // with a trailing button doesn't sit lower than the ones without.
     <div className="mb-3 flex min-h-8 items-center gap-2">
       {Icon && <Icon className="text-subtle h-4 w-4 shrink-0" />}
-      <h2 className="heading-14 text-foreground">{children}</h2>
+      <h2 className={`${headingClassName} text-foreground`}>{children}</h2>
       {count != null && (
         <span className="border-border bg-surface-2 text-muted rounded-chip min-w-5 border px-1.5 text-center text-[11px] leading-[18px] font-medium tabular-nums">
           {count}

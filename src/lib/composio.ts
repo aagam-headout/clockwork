@@ -157,14 +157,20 @@ export async function getToolkitCatalog(): Promise<ToolkitSummary[]> {
   return items;
 }
 
-/** Case-insensitive match on slug, name, and description. */
+/**
+ * Case-insensitive match on slug, name, and description, paged with
+ * `offset`/`limit` — the full catalog can run past a thousand toolkits, and
+ * without paging the browser could only ever reach whichever `limit` came
+ * first.
+ */
 export async function searchToolkits(
   query: string,
   limit = 24,
+  offset = 0,
 ): Promise<ToolkitSummary[]> {
   const catalog = await getToolkitCatalog();
   const q = query.trim().toLowerCase();
-  if (!q) return catalog.slice(0, limit);
+  if (!q) return catalog.slice(offset, offset + limit);
 
   const scored = catalog
     .map((toolkit) => {
@@ -180,7 +186,7 @@ export async function searchToolkits(
     .filter((r) => r.score >= 0)
     .sort((a, b) => a.score - b.score);
 
-  return scored.slice(0, limit).map((r) => r.toolkit);
+  return scored.slice(offset, offset + limit).map((r) => r.toolkit);
 }
 
 /**

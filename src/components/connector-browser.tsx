@@ -10,7 +10,7 @@ import {
   X,
   Wrench,
 } from "lucide-react";
-import { buttonClass, Badge, Skeleton } from "@/components/ui";
+import { iconButtonClass, Badge, Skeleton } from "@/components/ui";
 import { fetchJson } from "@/lib/fetch-json";
 import { ToolkitLogo } from "@/components/toolkit-logo";
 
@@ -47,6 +47,8 @@ export function ConnectorBrowser({
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<ToolkitSummary[]>(initialItems);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [category, setCategory] = useState<string | null>(null);
   const requestId = useRef(0);
@@ -59,14 +61,16 @@ export function ConnectorBrowser({
         setLoading(true);
         setError(null);
         try {
-          const data = await fetchJson<{ items?: ToolkitSummary[] }>(
-            `/api/toolkits?q=${encodeURIComponent(query)}`,
-          );
+          const data = await fetchJson<{
+            items?: ToolkitSummary[];
+            hasMore?: boolean;
+          }>(`/api/toolkits?q=${encodeURIComponent(query)}`);
           // Ignore responses that a newer keystroke has already superseded.
           if (id === requestId.current) {
             // A 200 with a malformed body would otherwise put `undefined` in
             // state, and the grid maps over it on the next render.
             setItems(Array.isArray(data.items) ? data.items : []);
+            setHasMore(Boolean(data.hasMore));
             // A category picked from the old result set may not exist in the
             // new one, which would render an empty grid with no explanation.
             setCategory(null);
@@ -84,6 +88,32 @@ export function ConnectorBrowser({
 
     return () => clearTimeout(timer);
   }, [query]);
+
+  // Fetches the next page for the current search and appends it — the
+  // catalog can run past a thousand toolkits, so nothing here refetches or
+  // replaces what's already on screen.
+  async function loadMore() {
+    const id = ++requestId.current;
+    setLoadingMore(true);
+    try {
+      const data = await fetchJson<{
+        items?: ToolkitSummary[];
+        hasMore?: boolean;
+      }>(`/api/toolkits?q=${encodeURIComponent(query)}&offset=${items.length}`);
+      if (id !== requestId.current) return;
+      setItems((prev) => [
+        ...prev,
+        ...(Array.isArray(data.items) ? data.items : []),
+      ]);
+      setHasMore(Boolean(data.hasMore));
+    } catch (err) {
+      if (id === requestId.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      if (id === requestId.current) setLoadingMore(false);
+    }
+  }
 
   // "/" focuses the field from anywhere on the page, as long as the user isn't
   // already typing somewhere else.
@@ -203,26 +233,24 @@ export function ConnectorBrowser({
       )}
 
       {firstLoad ? (
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <div
               key={i}
-              className="rounded-container border-border bg-surface border p-3.5"
+              className="rounded-container border-border bg-surface flex items-start gap-2.5 border p-3"
             >
-              <div className="flex items-center gap-3">
-                <Skeleton className="rounded-control h-9 w-9" />
-                <div className="flex-1 space-y-1.5">
-                  <Skeleton className="h-3.5 w-1/2" />
-                  <Skeleton className="h-3 w-2/3" />
-                </div>
+              <Skeleton className="rounded-control h-8 w-8 shrink-0" />
+              <div className="flex-1 space-y-1.5">
+                <Skeleton className="h-3.5 w-1/2" />
+                <Skeleton className="h-3 w-2/3" />
               </div>
-              <Skeleton className="mt-3 h-3 w-full" />
+              <Skeleton className="h-8 w-8 shrink-0" />
             </div>
           ))}
         </div>
       ) : (
         <div
-          className={`mt-4 grid grid-cols-1 gap-3 transition-opacity duration-150 sm:grid-cols-2 xl:grid-cols-3 ${
+          className={`mt-4 grid grid-cols-1 gap-4 transition-opacity duration-150 sm:grid-cols-2 xl:grid-cols-3 ${
             loading ? "opacity-55" : ""
           }`}
         >
@@ -231,72 +259,100 @@ export function ConnectorBrowser({
             return (
               <div
                 key={toolkit.slug}
-                className={`rounded-container flex flex-col gap-3 border p-3.5 transition-[border-color,background] duration-150 ${
+                className={`rounded-container bg-surface flex items-center gap-2.5 border p-3 transition-colors duration-150 ${
                   isConnected
-                    ? "border-success-line bg-success-soft/35"
-                    : "border-border bg-surface hover:border-border-strong"
+                    ? "border-accent-line"
+                    : "border-border hover:border-border-strong"
                 }`}
               >
-                <div className="flex items-start gap-3">
-                  <ToolkitLogo
-                    slug={toolkit.slug}
-                    name={toolkit.name}
-                    logo={toolkit.logo}
-                    size="lg"
-                    connected={isConnected}
-                  />
+                <ToolkitLogo
+                  slug={toolkit.slug}
+                  name={toolkit.name}
+                  logo={toolkit.logo}
+                  size="md"
+                  connected={isConnected}
+                  connectedTone="accent"
+                  className="self-start"
+                />
 
-                  <div className="min-w-0 flex-1">
-                    <div className="heading-14 text-foreground truncate">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="heading-14 text-foreground truncate">
                       {toolkit.name}
-                    </div>
-                    <p className="text-subtle mt-0.5 line-clamp-2 text-[11px] leading-4">
-                      {toolkit.description ?? toolkit.slug}
-                    </p>
+                    </span>
+                    {toolkit.toolsCount != null && (
+                      // A bare glyph and a number told nobody what was being
+                      // counted; the title and the screen-reader text do.
+                      <span
+                        title={`${toolkit.toolsCount} tools`}
+                        className="text-subtle inline-flex shrink-0 items-center gap-0.5 text-[11px] tabular-nums"
+                      >
+                        <Wrench className="h-3 w-3" />
+                        {toolkit.toolsCount}
+                        <span className="sr-only"> tools</span>
+                      </span>
+                    )}
+                    {toolkit.noAuth && (
+                      <Badge tone="neutral" className="shrink-0">
+                        no auth
+                      </Badge>
+                    )}
                   </div>
+                  <p className="text-subtle mt-0.5 line-clamp-2 text-[11px] leading-4">
+                    {toolkit.description ?? toolkit.slug}
+                  </p>
                 </div>
 
-                <div className="border-border/70 flex items-center gap-1.5 border-t pt-2.5">
-                  {toolkit.toolsCount != null && (
-                    // A bare glyph and a number told nobody what was being
-                    // counted; the title and the screen-reader text do.
-                    <span
-                      title={`${toolkit.toolsCount} tools`}
-                      className="text-subtle inline-flex items-center gap-1 text-[11px] tabular-nums"
-                    >
-                      <Wrench className="h-3 w-3" />
-                      {toolkit.toolsCount}
-                      <span className="sr-only"> tools</span>
-                    </span>
-                  )}
-                  {toolkit.noAuth && <Badge tone="neutral">no auth</Badge>}
-                  <div className="flex-1" />
-                  {isConnected ? (
-                    <span className="text-success-text inline-flex shrink-0 items-center gap-1 text-xs font-medium">
-                      <Check className="h-4 w-4" />
-                      Linked
-                    </span>
-                  ) : toolkit.noAuth ? (
-                    /* Composio rejects an auth config for these outright
-                       ("does not require authentication"), so offering Connect
-                       only produced a 400. Their tools are already usable. */
-                    <span className="text-subtle shrink-0 text-xs">
-                      Ready to use
-                    </span>
-                  ) : (
-                    <a
-                      href={`/api/connections/${toolkit.slug}/connect`}
-                      aria-label={`Connect ${toolkit.name}`}
-                      className={buttonClass("outline", "sm")}
-                    >
-                      <Plus className="h-4 w-4" />
-                      Connect
-                    </a>
-                  )}
-                </div>
+                {isConnected ? (
+                  <span
+                    title="Linked"
+                    className="text-accent-text flex h-6 w-6 shrink-0 items-center justify-center self-start"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                  </span>
+                ) : toolkit.noAuth ? (
+                  /* Composio rejects an auth config for these outright
+                     ("does not require authentication"), so offering Connect
+                     only produced a 400. Their tools are already usable. */
+                  <span
+                    title="Ready to use — no connection needed"
+                    className="text-subtle flex h-6 w-6 shrink-0 items-center justify-center self-start"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                  </span>
+                ) : (
+                  <a
+                    href={`/api/connections/${toolkit.slug}/connect`}
+                    aria-label={`Connect ${toolkit.name}`}
+                    title={`Connect ${toolkit.name}`}
+                    className={iconButtonClass(
+                      "outline",
+                      "xs",
+                      "shrink-0 self-start",
+                    )}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </a>
+                )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {!firstLoad && hasMore && (
+        <div className="mt-4 flex justify-center">
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="rounded-control border-border bg-surface text-muted hover:border-border-strong hover:text-foreground inline-flex h-9 cursor-pointer items-center gap-1.5 border px-4 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-55"
+          >
+            {loadingMore && (
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            )}
+            {loadingMore ? "Loading…" : "Load more"}
+          </button>
         </div>
       )}
     </div>
