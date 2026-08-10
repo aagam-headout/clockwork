@@ -1,9 +1,11 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { workflows } from "@/db/schema";
 import { updateWorkflow, deleteWorkflow } from "@/lib/actions";
 import { WorkflowForm } from "@/components/workflow-form";
+import { SubmitButton } from "@/components/submit-button";
 import type { DeliverTarget } from "@/lib/read-only";
 import { requireOwner } from "@/lib/auth/require-owner";
 
@@ -28,14 +30,17 @@ export default async function EditWorkflowPage({
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-16">
-      <div className="flex items-center justify-between">
+      <Link href="/workflows" className="text-xs text-muted hover:text-foreground">
+        ← Workflows
+      </Link>
+      <div className="mt-2 flex items-center justify-between">
         <h1 className="text-xl font-medium tracking-tight text-foreground">
           Edit {workflow.name}
         </h1>
         <form action={boundDelete}>
-          <button className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-danger transition-colors hover:border-danger">
+          <SubmitButton pendingLabel="Deleting…" variant="danger">
             Delete
-          </button>
+          </SubmitButton>
         </form>
       </div>
 

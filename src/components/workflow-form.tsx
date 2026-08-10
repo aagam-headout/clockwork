@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useFormStatus } from "react-dom";
 import { TOOLKITS, type Toolkit } from "@/lib/toolkits";
 
 const TOOLKIT_LABELS: Record<Toolkit, string> = {
@@ -187,13 +188,21 @@ export function WorkflowForm({
         </label>
       </Field>
 
-      <button
-        type="submit"
-        className="mt-2 w-fit rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-85"
-      >
-        {submitLabel}
-      </button>
+      <FormSubmitButton>{submitLabel}</FormSubmitButton>
     </form>
+  );
+}
+
+function FormSubmitButton({ children }: { children: React.ReactNode }) {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="mt-2 w-fit rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-50"
+    >
+      {pending ? "Saving…" : children}
+    </button>
   );
 }
 

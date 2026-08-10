@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
@@ -45,7 +46,10 @@ export default async function RunDetailPage({
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
-      <h1 className="text-xl font-medium tracking-tight text-foreground">
+      <Link href="/runs" className="text-xs text-muted hover:text-foreground">
+        ← Runs
+      </Link>
+      <h1 className="mt-2 text-xl font-medium tracking-tight text-foreground">
         {run.workflowName ?? "(deleted workflow)"}
       </h1>
       <p className="mt-1 text-sm text-muted">
