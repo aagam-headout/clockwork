@@ -75,7 +75,22 @@ export async function listConnectedAccounts() {
 }
 
 export async function disconnectAccount(connectedAccountId: string) {
-  await composio.connectedAccounts.delete(connectedAccountId);
+  try {
+    await composio.connectedAccounts.delete(connectedAccountId);
+  } catch (err) {
+    // The SDK's own `message` on an HTTP failure is just the status code
+    // ("403"); everything actionable — including the "grant write access to
+    // this key" hint — sits in the response body it hangs off the error.
+    throw new Error(composioErrorMessage(err));
+  }
+}
+
+/** Digs the human-readable message out of a Composio SDK error. */
+export function composioErrorMessage(err: unknown): string {
+  const body = (err as { error?: { error?: { message?: string } } })?.error
+    ?.error;
+  if (body?.message) return body.message;
+  return err instanceof Error ? err.message : String(err);
 }
 
 /** A toolkit as the UI needs it — flattened out of Composio's nested meta. */
@@ -166,6 +181,16 @@ export async function searchToolkits(
     .sort((a, b) => a.score - b.score);
 
   return scored.slice(0, limit).map((r) => r.toolkit);
+}
+
+/**
+ * True for toolkits Composio serves without a connected account (its own
+ * `composio` toolkit, most public APIs). Creating an auth config for one is a
+ * hard 400 — `Auth_Config_NoAuthApp` — so the connect flow has to check first.
+ */
+export async function toolkitIsNoAuth(slug: string): Promise<boolean> {
+  const catalog = await getToolkitCatalog();
+  return Boolean(catalog.find((t) => t.slug === slug)?.noAuth);
 }
 
 export async function toolkitExists(slug: string): Promise<boolean> {

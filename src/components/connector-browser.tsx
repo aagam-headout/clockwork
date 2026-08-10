@@ -269,6 +269,13 @@ export function ConnectorBrowser({
                       <Check className="h-4 w-4" />
                       Linked
                     </span>
+                  ) : toolkit.noAuth ? (
+                    /* Composio rejects an auth config for these outright
+                       ("does not require authentication"), so offering Connect
+                       only produced a 400. Their tools are already usable. */
+                    <span className="text-subtle shrink-0 text-xs">
+                      Ready to use
+                    </span>
                   ) : (
                     <a
                       href={`/api/connections/${toolkit.slug}/connect`}

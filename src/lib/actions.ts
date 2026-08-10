@@ -118,19 +118,36 @@ function splitList(value: string): string[] {
 /**
  * Registering the trigger with Composio is best-effort: the workflow is
  * already saved and correct, and a Composio hiccup shouldn't lose the edit.
- * A trigger that failed to register simply never fires — the failure is
- * logged, and re-saving the workflow retries it.
+ * A trigger that failed to register simply never fires, which is invisible
+ * from the workflow list — so the reason comes back as a string for the
+ * caller to show. Re-saving the workflow retries it.
  */
-async function registerTriggers(eventTriggers: string[], triggerType: string) {
-  if (triggerType !== "event" || eventTriggers.length === 0) return;
+async function registerTriggers(
+  eventTriggers: string[],
+  triggerType: string,
+): Promise<string | null> {
+  if (triggerType !== "event" || eventTriggers.length === 0) return null;
   try {
     const results = await syncEventTriggers(eventTriggers);
-    for (const r of results.filter((r) => !r.ok)) {
+    const failed = results.filter((r) => !r.ok);
+    for (const r of failed) {
       console.error(`[triggers] failed to register ${r.slug}: ${r.error}`);
     }
+    if (failed.length === 0) return null;
+    // The console line above is invisible to the person who just hit Save;
+    // this string rides back to /workflows as a warning banner.
+    return failed.map((r) => `${r.slug}: ${r.error}`).join(" · ");
   } catch (err) {
     console.error("[triggers] registration failed", err);
+    return err instanceof Error ? err.message : String(err);
   }
+}
+
+/** `/workflows`, plus the trigger warning when registration didn't take. */
+function workflowsPath(triggerError: string | null) {
+  return triggerError
+    ? `/workflows?triggerError=${encodeURIComponent(triggerError)}`
+    : "/workflows";
 }
 
 export async function createWorkflow(formData: FormData) {
@@ -139,10 +156,13 @@ export async function createWorkflow(formData: FormData) {
   const slug = slugify(parsed.name);
 
   await db.insert(workflows).values({ ...parsed, slug });
-  await registerTriggers(parsed.eventTriggers, parsed.triggerType);
+  const triggerError = await registerTriggers(
+    parsed.eventTriggers,
+    parsed.triggerType,
+  );
 
   revalidatePath("/workflows");
-  redirect("/workflows");
+  redirect(workflowsPath(triggerError));
 }
 
 export async function updateWorkflow(id: string, formData: FormData) {
@@ -153,11 +173,14 @@ export async function updateWorkflow(id: string, formData: FormData) {
     .update(workflows)
     .set({ ...parsed, updatedAt: new Date() })
     .where(eq(workflows.id, id));
-  await registerTriggers(parsed.eventTriggers, parsed.triggerType);
+  const triggerError = await registerTriggers(
+    parsed.eventTriggers,
+    parsed.triggerType,
+  );
 
   revalidatePath("/workflows");
   revalidatePath(`/workflows/${id}`);
-  redirect("/workflows");
+  redirect(workflowsPath(triggerError));
 }
 
 export async function toggleWorkflow(id: string, enabled: boolean) {
@@ -178,7 +201,20 @@ export async function deleteWorkflow(id: string) {
 
 export async function disconnectToolkit(connectedAccountId: string) {
   await requireOwner();
-  await disconnectAccount(connectedAccountId);
+  try {
+    await disconnectAccount(connectedAccountId);
+  } catch (err) {
+    /*
+     * A Composio failure here — most commonly a 403 because the API key only
+     * has read access to `connected_accounts` — used to bubble out of the
+     * action and replace the whole page with Next's generic "This page
+     * couldn't load". The message is the only thing that tells the user what
+     * to fix, so it rides back on the URL and renders as an alert.
+     */
+    const message = err instanceof Error ? err.message : String(err);
+    revalidatePath("/connections");
+    redirect(`/connections?error=${encodeURIComponent(message)}`);
+  }
   revalidatePath("/connections");
 }
 

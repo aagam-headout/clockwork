@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { initiateConnection, toolkitExists } from "@/lib/composio";
+import {
+  composioErrorMessage,
+  initiateConnection,
+  toolkitExists,
+  toolkitIsNoAuth,
+} from "@/lib/composio";
 import { isOwner } from "@/lib/auth/require-owner";
 
 // GET so a plain <a href> / form-less button click can hit it directly and
@@ -20,16 +25,24 @@ export async function GET(
   // Any Composio toolkit is connectable, not just a curated few — so the slug
   // is only shape-checked here and then verified against the live catalog.
   if (!/^[a-z0-9_]{2,64}$/.test(toolkit)) {
-    return NextResponse.json(
-      { error: `Malformed toolkit slug: ${toolkit}` },
-      { status: 400 },
-    );
+    return backWithError(req, `Malformed toolkit slug: ${toolkit}`);
   }
 
   if (!(await toolkitExists(toolkit))) {
-    return NextResponse.json(
-      { error: `Unknown toolkit: ${toolkit}` },
-      { status: 400 },
+    return backWithError(req, `Unknown toolkit: ${toolkit}`);
+  }
+
+  // Nothing to connect: Composio answers these tools without a connected
+  // account, and asking it for an auth config is a 400. Say so on the page
+  // instead of dead-ending on a JSON error.
+  if (await toolkitIsNoAuth(toolkit)) {
+    return NextResponse.redirect(
+      new URL(
+        `/connections?notice=${encodeURIComponent(
+          `${toolkit} needs no authentication — its tools are already available to every workflow.`,
+        )}`,
+        req.url,
+      ),
     );
   }
 
@@ -38,16 +51,24 @@ export async function GET(
   try {
     const { redirectUrl } = await initiateConnection(toolkit, callbackUrl);
     if (!redirectUrl) {
-      return NextResponse.json(
-        { error: `Composio did not return a redirect URL for ${toolkit}` },
-        { status: 502 },
+      return backWithError(
+        req,
+        `Composio did not return a redirect URL for ${toolkit}.`,
       );
     }
     return NextResponse.redirect(redirectUrl);
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
-    );
+    return backWithError(req, composioErrorMessage(err));
   }
+}
+
+/*
+ * This route is reached by a plain link click, so a JSON body would leave the
+ * user staring at raw error text with no way back. Every failure lands on
+ * /connections with the message rendered as an alert instead.
+ */
+function backWithError(req: NextRequest, message: string) {
+  return NextResponse.redirect(
+    new URL(`/connections?error=${encodeURIComponent(message)}`, req.url),
+  );
 }

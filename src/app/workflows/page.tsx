@@ -8,6 +8,7 @@ import { requireOwner } from "@/lib/auth/require-owner";
 import { SubmitButton } from "@/components/submit-button";
 import { Plus, Play, Pause, Trash2, Workflow, Clock } from "lucide-react";
 import {
+  Alert,
   Badge,
   ButtonLink,
   Card,
@@ -38,8 +39,16 @@ function nextRunAt(cron: string, timezone: string): string | null {
   }
 }
 
-export default async function WorkflowsPage() {
+export default async function WorkflowsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ triggerError?: string }>;
+}) {
   await requireOwner();
+
+  // Set when a save succeeded but Composio wouldn't register its event
+  // triggers — the workflow exists and just never fires until that's fixed.
+  const { triggerError } = await searchParams;
 
   const rows = await db
     .select()
@@ -75,6 +84,14 @@ export default async function WorkflowsPage() {
           )
         }
       />
+
+      {triggerError && (
+        <div className="mt-6">
+          <Alert tone="warn" title="Saved, but event triggers didn't register">
+            {triggerError}
+          </Alert>
+        </div>
+      )}
 
       {rows.length === 0 ? (
         <div className="mt-6">

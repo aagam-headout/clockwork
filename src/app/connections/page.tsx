@@ -46,8 +46,16 @@ function since(iso?: string) {
   return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-export default async function ConnectionsPage() {
+export default async function ConnectionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string; notice?: string }>;
+}) {
   await requireOwner();
+
+  // `error` is set by `disconnectToolkit` when Composio refuses the delete;
+  // `notice` by the connect route when a toolkit needs no auth at all.
+  const { error: actionError, notice } = await searchParams;
 
   let accounts: Awaited<ReturnType<typeof listConnectedAccounts>> = [];
   let catalog: ToolkitSummary[] = [];
@@ -113,6 +121,22 @@ export default async function ConnectionsPage() {
           </>
         }
       />
+
+      {notice && (
+        <div className="rise mt-6">
+          <Alert tone="accent" title="No connection needed">
+            {notice}
+          </Alert>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="rise mt-6">
+          <Alert tone="danger" title="Composio rejected that">
+            {actionError}
+          </Alert>
+        </div>
+      )}
 
       {loadError && (
         <div className="rise mt-6">
