@@ -34,7 +34,11 @@ export function NewWorkflowClient({
     // natural width, and the chat should absorb everything else.
     <div className="grid h-full min-h-0 gap-5 max-lg:items-start lg:grid-cols-[minmax(0,1fr)_400px] xl:grid-cols-[minmax(0,1fr)_448px] xl:gap-6">
       <div className="h-[min(62vh,520px)] min-h-0 lg:h-full">
-        <WorkflowAgentChat onPropose={setProposal} />
+        <WorkflowAgentChat
+          onPropose={setProposal}
+          models={models}
+          availableToolkits={availableToolkits}
+        />
       </div>
 
       {/* The card frame is fixed here; the scroll lives inside it (fillHeight),

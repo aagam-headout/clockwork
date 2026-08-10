@@ -1,14 +1,72 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateObject } from "ai";
+import { generateObject, generateText, stepCountIs, type ToolSet } from "ai";
 import { gateway } from "@ai-sdk/gateway";
 import { z } from "zod";
 import { isOwner } from "@/lib/auth/require-owner";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
 import { getModelCatalog } from "@/lib/models";
 import { formatUsd, type ModelInfo } from "@/lib/model-tiers";
-import { DEFAULT_BUILDER_MODEL, isBuilderModel } from "@/lib/builder-models";
+import {
+  BUILDER_RESEARCH_STEPS,
+  DEFAULT_BUILDER_MODEL,
+} from "@/lib/builder-models";
+import { composio, COMPOSIO_USER_ID } from "@/lib/composio";
+import { buildToolFilter } from "@/lib/read-only";
 
-export const maxDuration = 60;
+// Two model calls now (research, then the spec), and the research one waits on
+// real app APIs.
+export const maxDuration = 120;
+
+/** Research is capped hard: it exists to check facts, not to run the workflow. */
+const RESEARCH_TIMEOUT_MS = 45_000;
+
+/*
+ * Optional first pass: let the assistant actually look inside the apps the user
+ * pointed it at — read which Slack channels exist, what a calendar looks like,
+ * how repos are named — so the goal it writes references real things instead of
+ * plausible-sounding placeholders. Read-only, always: this is a form-filling
+ * conversation, and nothing typed here should change state in a connected app.
+ */
+async function research(
+  modelId: string,
+  toolkits: string[],
+  history: Array<{ role: "user" | "assistant"; content: string }>,
+): Promise<{ notes: string; usedTools: string[] }> {
+  const allTools = (await composio.tools.get(COMPOSIO_USER_ID, {
+    toolkits,
+  })) as ToolSet;
+
+  const isAllowed = buildToolFilter([], [], [], true);
+  const tools: ToolSet = Object.fromEntries(
+    Object.entries(allTools).filter(([slug]) => isAllowed(slug)),
+  );
+  if (Object.keys(tools).length === 0) return { notes: "", usedTools: [] };
+
+  const usedTools: string[] = [];
+  const result = await generateText({
+    model: gateway(modelId),
+    tools,
+    stopWhen: stepCountIs(BUILDER_RESEARCH_STEPS),
+    abortSignal: AbortSignal.timeout(RESEARCH_TIMEOUT_MS),
+    onStepFinish: (step) => {
+      for (const call of step.toolCalls ?? []) usedTools.push(call.toolName);
+    },
+    system: `You are about to design a recurring automation for this user. First, look up
+whatever would make that spec concrete — channel names, calendar layout, repo or
+label names, what their inbox actually looks like.
+
+Make at most a few calls, and only where a real value beats a guess. Then reply
+with terse notes: the specific names and ids you found, nothing else. If the
+request needs no lookup, reply with "none".`,
+    messages: history,
+  });
+
+  const notes = result.text.trim();
+  return {
+    notes: notes.toLowerCase() === "none" ? "" : notes,
+    usedTools: [...new Set(usedTools)],
+  };
+}
 
 const DEFAULT_MODEL = "anthropic/claude-sonnet-5";
 
@@ -61,6 +119,7 @@ function systemPrompt(
   toolkitSlugs: string[],
   models: ModelInfo[],
   current: unknown,
+  notes: string,
 ) {
   return `You turn a rough, plain-English description of a recurring personal task into
 a structured workflow spec for a read-only automation agent.
@@ -75,7 +134,15 @@ ${JSON.stringify(current, null, 2)}
     : ""
 }
 
-Available toolkits — these are the apps the user has actually connected, pick only
+${
+  notes
+    ? `You just looked inside the user's connected apps. These are real values —
+prefer them over anything generic, and name them in the goal:
+${notes}
+
+`
+    : ""
+}Available toolkits — these are the apps the user has actually connected, pick only
 what the goal needs and never invent a slug that isn't listed:
 ${toolkitSlugs.join(", ")}.
 "composio_search" needs no auth and covers news/web search — use it for anything about
@@ -144,16 +211,44 @@ export async function POST(req: NextRequest) {
     const modelIds = offered.map((m) => m.id);
 
     // The model the *builder itself* thinks with — separate from the model it
-    // picks for the workflow. Validated against the shortlist rather than
-    // trusted, so the body can't point the call at an arbitrary model.
-    const builderModel = isBuilderModel(body.builderModel)
-      ? body.builderModel
-      : DEFAULT_BUILDER_MODEL;
+    // picks for the workflow. Any model the gateway routes to is fair game, but
+    // it's checked against that live catalog so the body can't name an
+    // arbitrary string and have it forwarded to the provider.
+    const builderModel =
+      typeof body.builderModel === "string" &&
+      catalog.some((m) => m.id === body.builderModel)
+        ? body.builderModel
+        : DEFAULT_BUILDER_MODEL;
+
+    // Only toolkits the user ticked in the chat, intersected with what's
+    // actually connected. `composio_search` is a toolkit like any other here.
+    const readToolkits: string[] = Array.isArray(body.readToolkits)
+      ? body.readToolkits.filter(
+          (slug: unknown) =>
+            typeof slug === "string" && toolkitSlugs.includes(slug),
+        )
+      : [];
+
+    // Research is best-effort: a flaky app API should downgrade the proposal to
+    // a guess, not fail the whole request.
+    let notes = "";
+    let usedTools: string[] = [];
+    if (readToolkits.length > 0) {
+      try {
+        ({ notes, usedTools } = await research(
+          builderModel,
+          readToolkits,
+          history,
+        ));
+      } catch {
+        // Fall through with no notes.
+      }
+    }
 
     const { object } = await generateObject({
       model: gateway(builderModel),
       schema: buildProposalSchema(toolkitSlugs, modelIds),
-      system: systemPrompt(toolkitSlugs, offered, body.current),
+      system: systemPrompt(toolkitSlugs, offered, body.current, notes),
       messages: history,
     });
 
@@ -170,6 +265,9 @@ export async function POST(req: NextRequest) {
       ...object,
       model,
       toolkits: toolkits.length > 0 ? toolkits : ["composio_search"],
+      // Shown in the chat so the user can see the proposal was grounded in a
+      // real lookup rather than invented.
+      usedTools,
     });
   } catch (err) {
     return NextResponse.json(

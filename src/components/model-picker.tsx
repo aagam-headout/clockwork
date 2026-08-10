@@ -91,19 +91,35 @@ function matchesQuery(model: ModelInfo, q: string): boolean {
 export function ModelPicker({
   name = "model",
   defaultValue,
+  value,
+  onChange,
+  variant = "field",
   initialModels,
 }: {
-  name?: string;
+  /** Hidden input name for <form action> use. Pass null outside a form. */
+  name?: string | null;
   defaultValue?: string;
+  /** Pass with `onChange` to drive the pick from parent state instead. */
+  value?: string;
+  onChange?: (id: string) => void;
+  /** `compact` is the header pill: one line, no cost sub-label. */
+  variant?: "field" | "compact";
   initialModels: ModelInfo[];
 }) {
   const [models, setModels] = useState<ModelInfo[]>(initialModels);
-  const [selectedId, setSelectedId] = useState(
-    defaultValue ??
+  const [internalId, setInternalId] = useState(
+    value ??
+      defaultValue ??
       initialModels.find((m) => m.tier === "mid")?.id ??
       initialModels[0]?.id ??
       "",
   );
+  const selectedId = value ?? internalId;
+
+  function select(id: string) {
+    setInternalId(id);
+    onChange?.(id);
+  }
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("recommended");
@@ -194,26 +210,38 @@ export function ModelPicker({
 
   return (
     <>
-      <input type="hidden" name={name} value={selectedId} />
+      {name != null && <input type="hidden" name={name} value={selectedId} />}
 
-      <button
-        type="button"
-        onClick={openPicker}
-        className="rounded-control border-border bg-bg hover:border-border-strong flex w-full cursor-pointer items-center gap-2 border px-2.5 py-2 text-left transition-colors"
-      >
-        <TierGlyph tier={selected.tier} />
-        <span className="min-w-0 flex-1">
-          <span className="text-foreground block truncate text-[13px] font-medium">
-            {selected.name}
+      {variant === "compact" ? (
+        <button
+          type="button"
+          onClick={openPicker}
+          title={`${selected.id} — click to change`}
+          className="border-border bg-surface text-muted hover:border-border-strong hover:text-foreground flex h-8 max-w-[200px] cursor-pointer items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors"
+        >
+          <span className="truncate">{selected.name}</span>
+          <ChevronsUpDown className="text-subtle h-3.5 w-3.5 shrink-0" />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={openPicker}
+          className="rounded-control border-border bg-bg hover:border-border-strong flex w-full cursor-pointer items-center gap-2 border px-2.5 py-2 text-left transition-colors"
+        >
+          <TierGlyph tier={selected.tier} />
+          <span className="min-w-0 flex-1">
+            <span className="text-foreground block truncate text-[13px] font-medium">
+              {selected.name}
+            </span>
+            <span className="text-subtle block truncate font-mono text-[10.5px]">
+              {selected.blendedPerM != null
+                ? `${formatUsd(selected.blendedPerM)}/1M · ≈${formatUsd(costPerRun(selected))} per run`
+                : selected.id}
+            </span>
           </span>
-          <span className="text-subtle block truncate font-mono text-[10.5px]">
-            {selected.blendedPerM != null
-              ? `${formatUsd(selected.blendedPerM)}/1M · ≈${formatUsd(costPerRun(selected))} per run`
-              : selected.id}
-          </span>
-        </span>
-        <ChevronsUpDown className="text-subtle h-3.5 w-3.5 shrink-0" />
-      </button>
+          <ChevronsUpDown className="text-subtle h-3.5 w-3.5 shrink-0" />
+        </button>
+      )}
 
       {/*
        * Portalled to <body>: the form wrapper is a `@container`, and
@@ -355,7 +383,7 @@ export function ModelPicker({
                             <button
                               type="button"
                               onClick={() => {
-                                setSelectedId(model.id);
+                                select(model.id);
                                 setOpen(false);
                               }}
                               className={`border-border flex w-full cursor-pointer items-start gap-3 border-b px-4 py-3 text-left transition-colors last:border-b-0 ${

@@ -10,20 +10,33 @@ import {
   Clock,
   Cpu,
   Wrench,
+  Globe,
+  Puzzle,
+  Search,
 } from "lucide-react";
 import { buttonClass, iconButtonClass } from "@/components/ui";
+import { ModelPicker } from "@/components/model-picker";
+import type { ToolkitOption } from "@/components/workflow-form";
 import type { ModelInfo } from "@/lib/model-tiers";
-import { BUILDER_MODEL_IDS, DEFAULT_BUILDER_MODEL } from "@/lib/builder-models";
+import { DEFAULT_BUILDER_MODEL } from "@/lib/builder-models";
 
 // The agent proposes the basics; everything it doesn't decide (delivery
 // destinations, tool filters, event triggers) keeps the form's own defaults.
-type Proposal = Partial<WorkflowFormValues> & { rationale: string };
+type Proposal = Partial<WorkflowFormValues> & {
+  rationale: string;
+  /** Tools the assistant actually called while researching this proposal. */
+  usedTools?: string[];
+};
 
 type Message =
   | { role: "user"; content: string }
   | { role: "assistant"; content: string; spec?: Proposal };
 
-type BuilderOption = { id: string; name: string };
+/** Always offered: web search needs no connected account. */
+const WEB_SEARCH: ToolkitOption = {
+  slug: "composio_search",
+  name: "Web search",
+};
 
 const EXAMPLES = [
   "Every weekday 8am, check my calendar and DM me a heads up on Slack",
@@ -39,8 +52,14 @@ const EXAMPLES = [
  */
 export function WorkflowAgentChat({
   onPropose,
+  models = [],
+  availableToolkits = [],
 }: {
   onPropose: (values: Proposal) => void;
+  /** Gateway catalog for the header picker — the same list the form uses. */
+  models?: ModelInfo[];
+  /** Connected apps the assistant may be allowed to read from. */
+  availableToolkits?: ToolkitOption[];
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
@@ -48,33 +67,20 @@ export function WorkflowAgentChat({
   const [error, setError] = useState<string | null>(null);
   const [current, setCurrent] = useState<Proposal | null>(null);
   const [builderModel, setBuilderModel] = useState(DEFAULT_BUILDER_MODEL);
-  const [builderOptions, setBuilderOptions] = useState<BuilderOption[]>(() =>
-    BUILDER_MODEL_IDS.map((id) => ({ id, name: id.split("/")[1] })),
-  );
+  // Apps the assistant may read from while it drafts. Empty by default: a
+  // lookup costs a round trip to someone's real inbox, so it's opted into.
+  const [readToolkits, setReadToolkits] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // The shortlist is a preference order, not a catalog — intersect it with what
-  // the gateway actually routes to so we never offer a model that 404s, and
-  // borrow the gateway's display names while we're there.
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/models")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { items?: ModelInfo[] } | null) => {
-        if (cancelled || !data?.items) return;
-        const byId = new Map(data.items.map((m) => [m.id, m]));
-        const live = BUILDER_MODEL_IDS.filter((id) => byId.has(id)).map(
-          (id) => ({ id, name: byId.get(id)!.name }),
-        );
-        if (live.length > 0) setBuilderOptions(live);
-      })
-      .catch(() => {
-        // A stale label is not worth an error banner — the shortlist still works.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const connectors = [WEB_SEARCH, ...availableToolkits];
+
+  function toggleToolkit(slug: string) {
+    setReadToolkits((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(slug)) next.add(slug);
+      return next;
+    });
+  }
 
   // Pin to the newest turn — including the pending bubble, so the user sees
   // that their message landed.
@@ -103,6 +109,7 @@ export function WorkflowAgentChat({
           messages: history.map((m) => ({ role: m.role, content: m.content })),
           current,
           builderModel,
+          readToolkits: [...readToolkits],
         }),
       });
       const data = await res.json();
@@ -143,20 +150,15 @@ export function WorkflowAgentChat({
         </div>
         <div className="flex min-w-0 items-center gap-1">
           {/* Which model does the *building* — not the model it picks for the
-              workflow, which the form on the right owns. */}
-          <select
-            aria-label="Assistant model"
-            title="Model the assistant builds with"
+              workflow, which the form on the right owns. Same catalog, same
+              dialog: one place to learn how models are chosen here. */}
+          <ModelPicker
+            name={null}
+            variant="compact"
             value={builderModel}
-            onChange={(e) => setBuilderModel(e.target.value)}
-            className="border-border bg-surface text-muted hover:border-border-strong hover:text-foreground h-8 max-w-[180px] cursor-pointer truncate rounded-full border px-3 text-xs font-medium transition-colors"
-          >
-            {builderOptions.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
+            onChange={setBuilderModel}
+            initialModels={models}
+          />
           {!empty && (
             <button
               type="button"
@@ -213,6 +215,14 @@ export function WorkflowAgentChat({
                     <p className="rounded-container border-border bg-bg-subtle text-foreground max-w-[92%] border px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap">
                       {message.content}
                     </p>
+                    {(message.spec?.usedTools?.length ?? 0) > 0 && (
+                      <p className="text-subtle flex items-start gap-1.5 text-[11px]">
+                        <Search className="mt-px h-3.5 w-3.5 shrink-0" />
+                        <span className="font-mono break-all">
+                          {message.spec!.usedTools!.join(", ")}
+                        </span>
+                      </p>
+                    )}
                     {message.spec && <SpecSummary spec={message.spec} />}
                   </div>
                 ),
@@ -221,7 +231,9 @@ export function WorkflowAgentChat({
               {loading && (
                 <div className="text-muted flex items-center gap-2 text-[13px]">
                   <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />
-                  Working on it…
+                  {readToolkits.size > 0
+                    ? "Looking through your apps…"
+                    : "Working on it…"}
                 </div>
               )}
             </div>
@@ -243,6 +255,51 @@ export function WorkflowAgentChat({
         }}
         className="border-border shrink-0 border-t px-4 py-3"
       >
+        {/* Reading is opt-in per app and always read-only — the assistant can
+            look, never write, whatever is ticked here. */}
+        <div className="mx-auto mb-2 flex w-full max-w-[680px] flex-wrap items-center gap-1.5">
+          <span className="text-subtle text-[11px]">Let it read:</span>
+          {connectors.length === 0 ? (
+            <span className="text-subtle text-[11px]">
+              nothing connected yet
+            </span>
+          ) : (
+            connectors.map((toolkit) => {
+              const on = readToolkits.has(toolkit.slug);
+              return (
+                <button
+                  key={toolkit.slug}
+                  type="button"
+                  onClick={() => toggleToolkit(toolkit.slug)}
+                  aria-pressed={on}
+                  title={`${toolkit.name} — read-only`}
+                  className={`flex h-7 max-w-[150px] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium transition-colors ${
+                    on
+                      ? "border-foreground bg-surface-2 text-foreground"
+                      : "border-border text-muted hover:border-border-strong hover:text-foreground"
+                  }`}
+                >
+                  {/* The shared ToolkitLogo is a 32px avatar — too big for a
+                      28px chip, so the mark is drawn bare here. */}
+                  {toolkit.slug === WEB_SEARCH.slug ? (
+                    <Globe className="h-3.5 w-3.5 shrink-0" />
+                  ) : toolkit.logo ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={toolkit.logo}
+                      alt=""
+                      className="h-3.5 w-3.5 shrink-0 rounded-[3px] object-contain"
+                    />
+                  ) : (
+                    <Puzzle className="h-3.5 w-3.5 shrink-0" />
+                  )}
+                  <span className="truncate">{toolkit.name}</span>
+                </button>
+              );
+            })
+          )}
+        </div>
+
         <div className="rounded-container border-border bg-bg focus-within:border-border-strong mx-auto flex w-full max-w-[680px] items-end gap-2 border p-1.5 transition-colors">
           <textarea
             value={draft}
