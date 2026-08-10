@@ -95,6 +95,7 @@ export function ModelPicker({
   onChange,
   variant = "field",
   initialModels,
+  include,
 }: {
   /** Hidden input name for <form action> use. Pass null outside a form. */
   name?: string | null;
@@ -105,8 +106,20 @@ export function ModelPicker({
   /** `compact` is the header pill: one line, no cost sub-label. */
   variant?: "field" | "compact";
   initialModels: ModelInfo[];
+  /**
+   * Restricts the offered catalog — used by the builder's picker, where only
+   * frontier models can do the job. Must be a stable reference.
+   */
+  include?: (model: ModelInfo) => boolean;
 }) {
-  const [models, setModels] = useState<ModelInfo[]>(initialModels);
+  const [fetched, setFetched] = useState<ModelInfo[]>(initialModels);
+  // One gate for the whole component: every facet, count and row below reads
+  // the narrowed list, so a restricted picker can never surface an id the
+  // caller would reject.
+  const models = useMemo(
+    () => (include ? fetched.filter(include) : fetched),
+    [fetched, include],
+  );
   const [internalId, setInternalId] = useState(
     value ??
       defaultValue ??
@@ -122,7 +135,9 @@ export function ModelPicker({
   }
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<Filter>("recommended");
+  // A restricted pool is already short and skews expensive; hiding its heavy
+  // models behind "Light + Mid" would open the dialog on a near-empty list.
+  const [filter, setFilter] = useState<Filter>(include ? "all" : "recommended");
   const [provider, setProvider] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -145,7 +160,7 @@ export function ModelPicker({
       const res = await fetch("/api/models");
       const data = await res.json();
       if (Array.isArray(data.items) && data.items.length > 0)
-        setModels(data.items);
+        setFetched(data.items);
     } catch {
       // Keep the server-rendered list.
     } finally {

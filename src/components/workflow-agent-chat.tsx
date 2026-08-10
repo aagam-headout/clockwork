@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { WorkflowFormValues } from "@/components/workflow-form";
 import {
   ArrowUp,
@@ -13,24 +14,45 @@ import {
   Globe,
   Puzzle,
   Search,
+  Plug,
+  Check,
+  ChevronsUpDown,
 } from "lucide-react";
 import { buttonClass, iconButtonClass } from "@/components/ui";
 import { ModelPicker } from "@/components/model-picker";
 import type { ToolkitOption } from "@/components/workflow-form";
 import type { ModelInfo } from "@/lib/model-tiers";
-import { DEFAULT_BUILDER_MODEL } from "@/lib/builder-models";
+import { DEFAULT_BUILDER_MODEL, isBuilderModel } from "@/lib/builder-models";
+
+/** Module-level so the picker's `include` prop keeps a stable identity. */
+const isBuilderModelInfo = (model: ModelInfo) => isBuilderModel(model.id);
 
 // The agent proposes the basics; everything it doesn't decide (delivery
 // destinations, tool filters, event triggers) keeps the form's own defaults.
 type Proposal = Partial<WorkflowFormValues> & {
-  rationale: string;
   /** Tools the assistant actually called while researching this proposal. */
+  usedTools?: string[];
+};
+
+/**
+ * The assistant clarifies before it commits, so a turn is a chat reply that may
+ * or may not carry a spec — `spec: null` means it asked a question instead.
+ */
+type ProposeResponse = {
+  reply: string;
+  spec: Partial<WorkflowFormValues> | null;
   usedTools?: string[];
 };
 
 type Message =
   | { role: "user"; content: string }
-  | { role: "assistant"; content: string; spec?: Proposal };
+  | {
+      role: "assistant";
+      content: string;
+      spec?: Proposal;
+      /** Shown on question turns too, where there is no spec to hang it off. */
+      usedTools?: string[];
+    };
 
 /** Always offered: web search needs no connected account. */
 const WEB_SEARCH: ToolkitOption = {
@@ -112,14 +134,28 @@ export function WorkflowAgentChat({
           readToolkits: [...readToolkits],
         }),
       });
-      const data = await res.json();
+      const data: ProposeResponse & { error?: string } = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to generate workflow");
 
-      onPropose(data);
-      setCurrent(data);
+      // A clarifying turn leaves the form alone — only a committed spec writes
+      // into it, so half-answered questions can't half-fill the workflow.
+      const spec: Proposal | undefined = data.spec
+        ? { ...data.spec, usedTools: data.usedTools }
+        : undefined;
+      if (spec) {
+        onPropose(spec);
+        // Without usedTools: `current` is echoed back to the model as the spec
+        // it's refining, and research trivia isn't part of the spec.
+        setCurrent(data.spec);
+      }
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: data.rationale, spec: data },
+        {
+          role: "assistant",
+          content: data.reply,
+          spec,
+          usedTools: data.usedTools,
+        },
       ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -142,22 +178,42 @@ export function WorkflowAgentChat({
       {/* px-4 matches the message column and the composer below it, so the
           card has one left edge from top to bottom. */}
       <div className="border-border flex h-12 shrink-0 items-center justify-between gap-2 border-b px-4">
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <span className="rounded-control border-border bg-bg-subtle text-foreground flex h-7 w-7 items-center justify-center border">
             <Sparkles className="h-4 w-4" />
           </span>
-          <span className="heading-14 text-foreground">Assistant</span>
+          {/* The controls to the right need the room on a narrow pane. */}
+          <span className="heading-14 text-foreground max-sm:sr-only">
+            Assistant
+          </span>
         </div>
-        <div className="flex min-w-0 items-center gap-1">
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+          {/* Which apps it may read, sitting right next to what it thinks with
+              — the two things that decide what a proposal can be. Reading is
+              opt-in per app and always read-only. */}
+          {connectors.length > 0 && (
+            <>
+              <ConnectorPicker
+                connectors={connectors}
+                selected={readToolkits}
+                onToggle={toggleToolkit}
+                onClear={() => setReadToolkits(new Set())}
+              />
+              <span className="bg-border h-5 w-px shrink-0" />
+            </>
+          )}
+
           {/* Which model does the *building* — not the model it picks for the
-              workflow, which the form on the right owns. Same catalog, same
-              dialog: one place to learn how models are chosen here. */}
+              workflow, which the form on the right owns. Same dialog, but a
+              narrowed catalog: only models that can hold the conversation and
+              still emit a valid spec. */}
           <ModelPicker
             name={null}
             variant="compact"
             value={builderModel}
             onChange={setBuilderModel}
             initialModels={models}
+            include={isBuilderModelInfo}
           />
           {!empty && (
             <button
@@ -215,11 +271,11 @@ export function WorkflowAgentChat({
                     <p className="rounded-container border-border bg-bg-subtle text-foreground max-w-[92%] border px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap">
                       {message.content}
                     </p>
-                    {(message.spec?.usedTools?.length ?? 0) > 0 && (
+                    {(message.usedTools?.length ?? 0) > 0 && (
                       <p className="text-subtle flex items-start gap-1.5 text-[11px]">
                         <Search className="mt-px h-3.5 w-3.5 shrink-0" />
                         <span className="font-mono break-all">
-                          {message.spec!.usedTools!.join(", ")}
+                          {message.usedTools!.join(", ")}
                         </span>
                       </p>
                     )}
@@ -255,51 +311,6 @@ export function WorkflowAgentChat({
         }}
         className="border-border shrink-0 border-t px-4 py-3"
       >
-        {/* Reading is opt-in per app and always read-only — the assistant can
-            look, never write, whatever is ticked here. */}
-        <div className="mx-auto mb-2 flex w-full max-w-[680px] flex-wrap items-center gap-1.5">
-          <span className="text-subtle text-[11px]">Let it read:</span>
-          {connectors.length === 0 ? (
-            <span className="text-subtle text-[11px]">
-              nothing connected yet
-            </span>
-          ) : (
-            connectors.map((toolkit) => {
-              const on = readToolkits.has(toolkit.slug);
-              return (
-                <button
-                  key={toolkit.slug}
-                  type="button"
-                  onClick={() => toggleToolkit(toolkit.slug)}
-                  aria-pressed={on}
-                  title={`${toolkit.name} — read-only`}
-                  className={`flex h-7 max-w-[150px] cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium transition-colors ${
-                    on
-                      ? "border-foreground bg-surface-2 text-foreground"
-                      : "border-border text-muted hover:border-border-strong hover:text-foreground"
-                  }`}
-                >
-                  {/* The shared ToolkitLogo is a 32px avatar — too big for a
-                      28px chip, so the mark is drawn bare here. */}
-                  {toolkit.slug === WEB_SEARCH.slug ? (
-                    <Globe className="h-3.5 w-3.5 shrink-0" />
-                  ) : toolkit.logo ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={toolkit.logo}
-                      alt=""
-                      className="h-3.5 w-3.5 shrink-0 rounded-[3px] object-contain"
-                    />
-                  ) : (
-                    <Puzzle className="h-3.5 w-3.5 shrink-0" />
-                  )}
-                  <span className="truncate">{toolkit.name}</span>
-                </button>
-              );
-            })
-          )}
-        </div>
-
         <div className="rounded-container border-border bg-bg focus-within:border-border-strong mx-auto flex w-full max-w-[680px] items-end gap-2 border p-1.5 transition-colors">
           <textarea
             value={draft}
@@ -316,7 +327,9 @@ export function WorkflowAgentChat({
             placeholder={
               empty
                 ? "Every weekday morning, check my calendar…"
-                : "Refine it — “make it hourly”"
+                : current
+                  ? "Refine it — “make it hourly”"
+                  : "Answer, or say “you decide”"
             }
             disabled={loading}
             aria-label="Describe the workflow"
@@ -333,6 +346,180 @@ export function WorkflowAgentChat({
         </div>
       </form>
     </div>
+  );
+}
+
+/**
+ * The apps the assistant may read from while drafting. A dropdown rather than a
+ * row of chips: the connector catalog is open-ended — every Composio app the
+ * user ever links shows up here — so this has to stay one control wide no
+ * matter how long the list gets, and be searchable once it's past a handful.
+ */
+function ConnectorPicker({
+  connectors,
+  selected,
+  onToggle,
+  onClear,
+}: {
+  connectors: ToolkitOption[];
+  selected: Set<string>;
+  onToggle: (slug: string) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    // The panel is anchored to the trigger's viewport box, so it has to follow
+    // it — the chat pane and the page both scroll under it.
+    const reposition = () =>
+      setRect(triggerRef.current?.getBoundingClientRect() ?? null);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+    };
+  }, [open]);
+
+  const q = query.trim().toLowerCase();
+  const visible = connectors.filter(
+    (t) =>
+      !q ||
+      t.name.toLowerCase().includes(q) ||
+      t.slug.toLowerCase().includes(q),
+  );
+
+  const count = selected.size;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => {
+          setRect(triggerRef.current?.getBoundingClientRect() ?? null);
+          setQuery("");
+          setOpen((v) => !v);
+        }}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="Apps the assistant may read while drafting — read-only"
+        className={`flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors ${
+          count > 0
+            ? "border-foreground bg-surface-2 text-foreground"
+            : "border-border text-muted hover:border-border-strong hover:text-foreground"
+        }`}
+      >
+        <Plug className="h-3.5 w-3.5 shrink-0" />
+        <span>{count > 0 ? `Reads ${count}` : "Reads nothing"}</span>
+        <ChevronsUpDown className="text-subtle h-3.5 w-3.5 shrink-0" />
+      </button>
+
+      {/* Portalled for the same reason the model picker is: the chat card
+          clips its overflow, and the form column is a `@container`. */}
+      {open &&
+        rect &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <>
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={() => setOpen(false)}
+              className="fixed inset-0 z-40 cursor-default"
+            />
+            <div
+              role="dialog"
+              aria-label="Apps the assistant may read"
+              className="rounded-container border-border bg-surface shadow-pop fixed z-50 flex max-h-[min(60vh,380px)] w-[260px] flex-col overflow-hidden border"
+              style={{
+                top: Math.round(rect.bottom + 6),
+                // Right-aligned to the trigger, clamped so a narrow viewport
+                // can't push the panel off-screen.
+                left: Math.round(
+                  Math.max(
+                    8,
+                    Math.min(rect.right - 260, window.innerWidth - 268),
+                  ),
+                ),
+              }}
+            >
+              <div className="border-border flex items-center gap-2 border-b px-3 py-2">
+                <Search className="text-subtle h-3.5 w-3.5 shrink-0" />
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search apps…"
+                  className="text-foreground placeholder:text-subtle min-w-0 flex-1 border-0 bg-transparent text-[13px] outline-none"
+                />
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {visible.length === 0 ? (
+                  <p className="text-subtle px-3 py-3 text-xs">
+                    No app matches that.
+                  </p>
+                ) : (
+                  visible.map((toolkit) => {
+                    const on = selected.has(toolkit.slug);
+                    return (
+                      <button
+                        key={toolkit.slug}
+                        type="button"
+                        onClick={() => onToggle(toolkit.slug)}
+                        aria-pressed={on}
+                        className={`border-border flex w-full cursor-pointer items-center gap-2 border-b px-3 py-2 text-left transition-colors last:border-b-0 ${
+                          on ? "bg-surface-2" : "hover:bg-surface-hover"
+                        }`}
+                      >
+                        {toolkit.slug === WEB_SEARCH.slug ? (
+                          <Globe className="text-subtle h-4 w-4 shrink-0" />
+                        ) : toolkit.logo ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={toolkit.logo}
+                            alt=""
+                            className="h-4 w-4 shrink-0 rounded-[3px] object-contain"
+                          />
+                        ) : (
+                          <Puzzle className="text-subtle h-4 w-4 shrink-0" />
+                        )}
+                        <span className="text-foreground min-w-0 flex-1 truncate text-[13px]">
+                          {toolkit.name}
+                        </span>
+                        {on && (
+                          <Check className="text-foreground h-4 w-4 shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="border-border bg-bg-subtle flex items-center justify-between gap-2 border-t px-3 py-2">
+                <span className="text-subtle text-[11px]">Read-only</span>
+                <button
+                  type="button"
+                  onClick={onClear}
+                  disabled={count === 0}
+                  className="text-muted hover:text-foreground cursor-pointer text-[11px] font-medium disabled:cursor-default disabled:opacity-50"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          </>,
+          document.body,
+        )}
+    </>
   );
 }
 

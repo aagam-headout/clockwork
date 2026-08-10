@@ -9,6 +9,7 @@ import { formatUsd, type ModelInfo } from "@/lib/model-tiers";
 import {
   BUILDER_RESEARCH_STEPS,
   DEFAULT_BUILDER_MODEL,
+  isBuilderModel,
 } from "@/lib/builder-models";
 import { composio, COMPOSIO_USER_ID } from "@/lib/composio";
 import { buildToolFilter } from "@/lib/read-only";
@@ -51,9 +52,10 @@ async function research(
     onStepFinish: (step) => {
       for (const call of step.toolCalls ?? []) usedTools.push(call.toolName);
     },
-    system: `You are about to design a recurring automation for this user. First, look up
-whatever would make that spec concrete — channel names, calendar layout, repo or
-label names, what their inbox actually looks like.
+    system: `You are helping design a recurring automation for this user. Look up whatever
+would make the conversation concrete — channel names, calendar layout, repo or
+label names, what their inbox actually looks like — so the next turn can name
+real things, whether it asks a sharper question or writes the spec.
 
 Make at most a few calls, and only where a real value beats a guess. Then reply
 with terse notes: the specific names and ids you found, nothing else. If the
@@ -88,6 +90,21 @@ function modelChoices(catalog: ModelInfo[]) {
  */
 function buildProposalSchema(toolkitSlugs: string[], modelIds: string[]) {
   return z.object({
+    reply: z
+      .string()
+      .describe(
+        "what to say to the user in the chat: either the questions you need answered, or a one-or-two-sentence plain-English readback of the spec you just wrote",
+      ),
+    spec: buildSpecSchema(toolkitSlugs, modelIds)
+      .nullable()
+      .describe(
+        "the workflow spec — null while you are still clarifying, filled in once you have enough to commit",
+      ),
+  });
+}
+
+function buildSpecSchema(toolkitSlugs: string[], modelIds: string[]) {
+  return z.object({
     name: z
       .string()
       .describe("short kebab-or-plain name, e.g. 'morning-brief'"),
@@ -107,11 +124,6 @@ function buildProposalSchema(toolkitSlugs: string[], modelIds: string[]) {
     deliverSlack: z
       .boolean()
       .describe("whether to also DM the digest on Slack"),
-    rationale: z
-      .string()
-      .describe(
-        "one or two sentences explaining the choices, shown to the user",
-      ),
   });
 }
 
@@ -121,13 +133,48 @@ function systemPrompt(
   current: unknown,
   notes: string,
 ) {
-  return `You turn a rough, plain-English description of a recurring personal task into
-a structured workflow spec for a read-only automation agent.
+  return `You are a colleague helping someone set up a recurring personal automation. You
+talk it through first, and only write the spec once you both know what it should
+do. The spec drives a read-only agent that will run unattended, so a wrong
+assumption here quietly produces a useless digest every morning.
+
+Every turn you return two things: "reply" — what you say in the chat — and
+"spec" — the structured workflow, or null.
+
+## Talk first (spec: null)
+
+On a vague or underspecified request, leave spec null and ask. Rules for asking:
+- Ask only what changes what the workflow DOES: which sources (which channel,
+  calendar, repo, label, inbox), what counts as worth reporting, roughly when
+  it should run, what a good digest looks like to them.
+- Never ask about anything you can reasonably decide yourself: model, maxSteps,
+  cron syntax, timezone. Decide those silently.
+- At most 3 questions, in one message, as short bullets. Offer a concrete
+  default for each ("I'd default to weekdays 8am — fine?") so they can answer
+  with one word.
+- Ask about real things you found in their apps, by name, when you know them.
+- At most two rounds of questions. After that, commit to a spec with your best
+  reading and say what you assumed.
+
+## Commit (spec: filled in)
+
+Write the spec as soon as any of these is true:
+- They answered enough that the remaining choices are yours to make.
+- Their first message was already specific (source + rough schedule + what they
+  want out of it).
+- They defer or approve: "you decide", "whatever's sensible", "go", "looks
+  good", "yes", "do it".
+- You have already asked twice.
+
+When you commit, "reply" is a short plain-English readback: what it will do,
+when, and any assumption you made — no field dump, the form beside the chat
+already shows the values. End by inviting a tweak in a few words.
 
 ${
   current
-    ? `The user is REFINING a spec you already proposed. Return the complete spec every
-time, carrying over everything they didn't ask you to change:
+    ? `The user is REFINING a spec you already proposed. Keep spec filled in from here
+on — do not go back to asking — and return the COMPLETE spec every time,
+carrying over everything they didn't ask you to change:
 ${JSON.stringify(current, null, 2)}
 
 `
@@ -142,7 +189,14 @@ ${notes}
 
 `
     : ""
-}Available toolkits — these are the apps the user has actually connected, pick only
+}## Filling the spec
+
+The "goal" field is the prompt the runtime agent gets on every trigger, and it
+sees nothing else — no chat history. Write it self-contained: which tools to
+check, the named channels/repos/labels, what to include and what to skip, and
+how to summarize. Fold in every decision you and the user reached.
+
+Available toolkits — these are the apps the user has actually connected, pick only
 what the goal needs and never invent a slug that isn't listed:
 ${toolkitSlugs.join(", ")}.
 "composio_search" needs no auth and covers news/web search — use it for anything about
@@ -211,12 +265,13 @@ export async function POST(req: NextRequest) {
     const modelIds = offered.map((m) => m.id);
 
     // The model the *builder itself* thinks with — separate from the model it
-    // picks for the workflow. Any model the gateway routes to is fair game, but
-    // it's checked against that live catalog so the body can't name an
-    // arbitrary string and have it forwarded to the provider.
+    // picks for the workflow. Two gates: it must be live in the gateway catalog
+    // (so the body can't forward an arbitrary string to a provider) and
+    // builder-capable (so a cheap model can't be forced in past the picker).
     const builderModel =
       typeof body.builderModel === "string" &&
-      catalog.some((m) => m.id === body.builderModel)
+      catalog.some((m) => m.id === body.builderModel) &&
+      isBuilderModel(body.builderModel)
         ? body.builderModel
         : DEFAULT_BUILDER_MODEL;
 
@@ -252,19 +307,27 @@ export async function POST(req: NextRequest) {
       messages: history,
     });
 
+    // Still clarifying: a chat turn with nothing to write into the form.
+    if (!object.spec) {
+      return NextResponse.json({ reply: object.reply, spec: null, usedTools });
+    }
+
     // The model can still hallucinate a slug despite the prompt; drop anything
     // that isn't connected rather than proposing a workflow that can't run.
-    const toolkits = object.toolkits.filter((slug) =>
+    const toolkits = object.spec.toolkits.filter((slug) =>
       toolkitSlugs.includes(slug),
     );
-    const model = catalog.some((m) => m.id === object.model)
-      ? object.model
+    const model = catalog.some((m) => m.id === object.spec!.model)
+      ? object.spec.model
       : DEFAULT_MODEL;
 
     return NextResponse.json({
-      ...object,
-      model,
-      toolkits: toolkits.length > 0 ? toolkits : ["composio_search"],
+      reply: object.reply,
+      spec: {
+        ...object.spec,
+        model,
+        toolkits: toolkits.length > 0 ? toolkits : ["composio_search"],
+      },
       // Shown in the chat so the user can see the proposal was grounded in a
       // real lookup rather than invented.
       usedTools,
