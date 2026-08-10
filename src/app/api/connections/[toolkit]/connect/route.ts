@@ -6,7 +6,7 @@ import { auth } from "@/lib/auth/server";
 // follow the redirect — no client JS needed for the core flow.
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ toolkit: string }> }
+  { params }: { params: Promise<{ toolkit: string }> },
 ) {
   // Belt-and-suspenders: middleware already blocks unauthenticated
   // requests, but this only exists to be linked from the (already
@@ -21,11 +21,17 @@ export async function GET(
   // Any Composio toolkit is connectable, not just a curated few — so the slug
   // is only shape-checked here and then verified against the live catalog.
   if (!/^[a-z0-9_]{2,64}$/.test(toolkit)) {
-    return NextResponse.json({ error: `Malformed toolkit slug: ${toolkit}` }, { status: 400 });
+    return NextResponse.json(
+      { error: `Malformed toolkit slug: ${toolkit}` },
+      { status: 400 },
+    );
   }
 
   if (!(await toolkitExists(toolkit))) {
-    return NextResponse.json({ error: `Unknown toolkit: ${toolkit}` }, { status: 400 });
+    return NextResponse.json(
+      { error: `Unknown toolkit: ${toolkit}` },
+      { status: 400 },
+    );
   }
 
   const callbackUrl = new URL("/connections", req.url).toString();
@@ -35,14 +41,14 @@ export async function GET(
     if (!redirectUrl) {
       return NextResponse.json(
         { error: `Composio did not return a redirect URL for ${toolkit}` },
-        { status: 502 }
+        { status: 502 },
       );
     }
     return NextResponse.redirect(redirectUrl);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -24,7 +24,7 @@ async function getOrCreateAuthConfigId(toolkit: string): Promise<string> {
 
   const created = await composio.authConfigs.create(toolkit, {
     type: "use_composio_managed_auth",
-    name: `${toolkit} (my-workflows)`,
+    name: `${toolkit} (Clockwork)`,
   });
   return created.id;
 }
@@ -39,7 +39,7 @@ export async function initiateConnection(toolkit: string, callbackUrl: string) {
   const connectionRequest = await composio.connectedAccounts.link(
     COMPOSIO_USER_ID,
     authConfigId,
-    { callbackUrl, allowMultiple: true }
+    { callbackUrl, allowMultiple: true },
   );
   return {
     connectedAccountId: connectionRequest.id,
@@ -48,7 +48,9 @@ export async function initiateConnection(toolkit: string, callbackUrl: string) {
 }
 
 export async function listConnectedAccounts() {
-  const res = await composio.connectedAccounts.list({ userIds: [COMPOSIO_USER_ID] });
+  const res = await composio.connectedAccounts.list({
+    userIds: [COMPOSIO_USER_ID],
+  });
   return res.items;
 }
 
@@ -130,7 +132,10 @@ export async function getToolkitCatalog(): Promise<ToolkitSummary[]> {
 }
 
 /** Case-insensitive match on slug, name, and description. */
-export async function searchToolkits(query: string, limit = 24): Promise<ToolkitSummary[]> {
+export async function searchToolkits(
+  query: string,
+  limit = 24,
+): Promise<ToolkitSummary[]> {
   const catalog = await getToolkitCatalog();
   const q = query.trim().toLowerCase();
   if (!q) return catalog.slice(0, limit);

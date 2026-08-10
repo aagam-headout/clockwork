@@ -34,13 +34,17 @@ export function SubmitButton({
       type="submit"
       disabled={pending}
       title={title ?? (typeof children === "string" ? children : undefined)}
-      aria-label={iconOnly && typeof children === "string" ? children : undefined}
+      aria-label={
+        iconOnly && typeof children === "string" ? children : undefined
+      }
       className={buttonClass(
         variant,
         size,
         `disabled:cursor-wait ${iconOnly ? "w-8 px-0" : ""} ${
-          danger ? "text-danger-text hover:bg-danger-soft hover:text-danger-text" : ""
-        }`
+          danger
+            ? "text-danger-text hover:bg-danger-soft hover:text-danger-text"
+            : ""
+        }`,
       )}
     >
       {pending ? (

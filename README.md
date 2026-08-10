@@ -1,4 +1,8 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Clockwork
+
+Scheduled agents that read your apps and report back.
+
+Built with [Next.js](https://nextjs.org), the AI SDK, Composio, and Neon.
 
 ## Getting Started
 

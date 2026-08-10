@@ -9,6 +9,7 @@ import {
   ButtonLink,
   Card,
   PageHeader,
+  PageShell,
   SectionLabel,
   Stat,
   statusTone,
@@ -58,14 +59,17 @@ export default async function RunDetailPage({
   const toolCalls = steps.filter((s) => s.type === "tool").length;
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-8 md:px-6 md:py-10">
+    <PageShell>
       <PageHeader
         backHref="/runs"
         backLabel="Runs"
         title={run.workflowName ?? "(deleted workflow)"}
         subtitle={
           run.startedAt
-            ? run.startedAt.toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" })
+            ? run.startedAt.toLocaleString("en-US", {
+                dateStyle: "full",
+                timeStyle: "short",
+              })
             : "Not started"
         }
         actions={
@@ -75,7 +79,11 @@ export default async function RunDetailPage({
             </Badge>
             <Badge tone="neutral">{run.trigger}</Badge>
             {run.workflowId && (
-              <ButtonLink href={`/workflows/${run.workflowId}`} variant="outline" size="sm">
+              <ButtonLink
+                href={`/workflows/${run.workflowId}`}
+                variant="outline"
+                size="sm"
+              >
                 Edit workflow
               </ButtonLink>
             )}
@@ -86,24 +94,36 @@ export default async function RunDetailPage({
       <div className="rise mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Stat
           label="Duration"
-          value={run.durationMs != null ? `${(run.durationMs / 1000).toFixed(1)}s` : "—"}
+          value={
+            run.durationMs != null
+              ? `${(run.durationMs / 1000).toFixed(1)}s`
+              : "—"
+          }
           tone={tone}
         />
-        <Stat label="Tool calls" value={toolCalls} hint={`${steps.length} steps total`} />
+        <Stat
+          label="Tool calls"
+          value={toolCalls}
+          hint={`${steps.length} steps total`}
+        />
         <Stat
           label="Tokens in"
-          value={run.inputTokens != null ? run.inputTokens.toLocaleString() : "—"}
+          value={
+            run.inputTokens != null ? run.inputTokens.toLocaleString() : "—"
+          }
         />
         <Stat
           label="Tokens out"
-          value={run.outputTokens != null ? run.outputTokens.toLocaleString() : "—"}
+          value={
+            run.outputTokens != null ? run.outputTokens.toLocaleString() : "—"
+          }
         />
       </div>
 
       {run.error && (
         <div className="mt-6">
           <Alert tone="danger" title="Run failed">
-            <pre className="mt-1 overflow-x-auto whitespace-pre-wrap font-mono text-xs leading-relaxed">
+            <pre className="mt-1 overflow-x-auto font-mono text-xs leading-relaxed whitespace-pre-wrap">
               {run.error}
             </pre>
           </Alert>
@@ -114,10 +134,10 @@ export default async function RunDetailPage({
         <section className="mt-10">
           <SectionLabel>Output</SectionLabel>
           <Card className="overflow-hidden">
-            <div className="whitespace-pre-wrap px-4 py-4 text-sm leading-relaxed text-foreground">
+            <div className="text-foreground px-4 py-4 text-sm leading-relaxed whitespace-pre-wrap">
               {output.body}
             </div>
-            <div className="flex items-center gap-2 border-t border-border bg-bg-subtle px-4 py-2.5 text-xs text-subtle">
+            <div className="border-border bg-bg-subtle text-subtle flex items-center gap-2 border-t px-4 py-2.5 text-xs">
               Delivered to
               {output.deliveredTo.map((target) => (
                 <Badge key={target} tone="success">
@@ -133,13 +153,16 @@ export default async function RunDetailPage({
         <SectionLabel count={steps.length}>Trace</SectionLabel>
 
         {steps.length === 0 ? (
-          <p className="rounded-container border border-border bg-bg-subtle px-4 py-8 text-center text-sm text-muted">
+          <p className="rounded-container border-border bg-bg-subtle text-muted border px-4 py-8 text-center text-sm">
             No steps recorded for this run.
           </p>
         ) : (
           <ol className="relative flex flex-col gap-2.5 pl-7">
             {/* Rail behind the step markers. */}
-            <span className="absolute bottom-3 left-[11px] top-3 w-px bg-border" aria-hidden />
+            <span
+              className="bg-border absolute top-3 bottom-3 left-[11px] w-px"
+              aria-hidden
+            />
 
             {steps.map((step) => {
               const isTool = step.type === "tool";
@@ -147,7 +170,7 @@ export default async function RunDetailPage({
               return (
                 <li key={step.id} className="relative">
                   <span
-                    className={`absolute -left-7 top-3 flex h-[22px] w-[22px] items-center justify-center rounded-full border bg-surface ${
+                    className={`bg-surface absolute top-3 -left-7 flex h-[22px] w-[22px] items-center justify-center rounded-full border ${
                       failed
                         ? "border-danger/40 text-danger"
                         : isTool
@@ -168,36 +191,38 @@ export default async function RunDetailPage({
                     {isTool ? (
                       <>
                         <div className="flex items-center justify-between gap-3">
-                          <span className="truncate font-mono text-xs font-medium text-accent-text">
+                          <span className="text-accent-text truncate font-mono text-xs font-medium">
                             {step.toolSlug}
                           </span>
                           {step.durationMs != null && (
-                            <span className="shrink-0 font-mono text-[11px] tabular-nums text-subtle">
+                            <span className="text-subtle shrink-0 font-mono text-[11px] tabular-nums">
                               {step.durationMs}ms
                             </span>
                           )}
                         </div>
                         <details className="group mt-2">
-                          <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-xs text-muted transition-colors hover:text-foreground">
-                            <span className="transition-transform group-open:rotate-90">›</span>
+                          <summary className="text-muted hover:text-foreground inline-flex cursor-pointer list-none items-center gap-1 text-xs transition-colors">
+                            <span className="transition-transform group-open:rotate-90">
+                              ›
+                            </span>
                             args / result
                           </summary>
-                          <pre className="mt-2 max-h-72 overflow-auto rounded-control border border-border bg-bg-subtle p-3 font-mono text-[11px] leading-relaxed text-muted">
+                          <pre className="rounded-control border-border bg-bg-subtle text-muted mt-2 max-h-72 overflow-auto border p-3 font-mono text-[11px] leading-relaxed">
                             {JSON.stringify(
                               { args: step.argsJson, result: step.resultJson },
                               null,
-                              2
+                              2,
                             )}
                           </pre>
                         </details>
                         {step.error && (
-                          <p className="mt-2 rounded-control border border-danger-line bg-danger-soft px-2.5 py-1.5 font-mono text-[11px] text-danger-text">
+                          <p className="rounded-control border-danger-line bg-danger-soft text-danger-text mt-2 border px-2.5 py-1.5 font-mono text-[11px]">
                             {step.error}
                           </p>
                         )}
                       </>
                     ) : (
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                      <p className="text-foreground text-sm leading-relaxed whitespace-pre-wrap">
                         {(step.resultJson as { text?: string } | null)?.text}
                       </p>
                     )}
@@ -208,6 +233,6 @@ export default async function RunDetailPage({
           </ol>
         )}
       </section>
-    </main>
+    </PageShell>
   );
 }

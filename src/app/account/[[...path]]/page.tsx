@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { AccountView } from "@neondatabase/auth-ui";
 import { requireOwner } from "@/lib/auth/require-owner";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, PageShell } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -20,16 +20,18 @@ export default async function AccountPage({
   if (!path?.length) redirect("/account/settings");
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-8 md:px-6 md:py-10">
+    <PageShell>
       <PageHeader
         title="Account"
         subtitle="Your profile, email, and sign-in security."
         backHref="/"
         backLabel="Overview"
       />
-      <div className="rise mt-6">
+      {/* `auth-surface` re-points the two shadcn token names that mean something
+          else in our scale — see the Neon Auth bridge in globals.css. */}
+      <div className="auth-surface rise mt-6">
         <AccountView path={path[path.length - 1]} />
       </div>
-    </main>
+    </PageShell>
   );
 }

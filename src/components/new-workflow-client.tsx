@@ -9,6 +9,13 @@ import {
 import { WorkflowAgentChat } from "@/components/workflow-agent-chat";
 import type { ModelInfo } from "@/lib/model-tiers";
 
+/*
+ * Two panes: the conversation on the left writes the form on the right. The
+ * chat is the primary surface here — describing the job is the fast path, and
+ * the form is the place you correct it — so it takes the flexible column and
+ * the settings sit in a fixed 420px rail. Each pane scrolls on its own; below
+ * `lg` they stack, chat first.
+ */
 export function NewWorkflowClient({
   action,
   availableToolkits,
@@ -21,19 +28,26 @@ export function NewWorkflowClient({
   const [proposal, setProposal] = useState<WorkflowFormValues | null>(null);
 
   return (
-    <div className="flex flex-col gap-6">
-      <WorkflowAgentChat onPropose={setProposal} />
+    <div className="grid h-full min-h-0 gap-6 max-lg:items-start lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
+      <div className="h-[440px] min-h-0 lg:h-full">
+        <WorkflowAgentChat onPropose={setProposal} />
+      </div>
 
-      {/* Remounting on a new proposal is simpler and more robust than lifting
-          every field into controlled state just for this one prefill path. */}
-      <WorkflowForm
-        key={proposal ? JSON.stringify(proposal) : "blank"}
-        action={action}
-        submitLabel="Create workflow"
-        defaultValues={proposal ?? undefined}
-        availableToolkits={availableToolkits}
-        models={models}
-      />
+      {/* The card frame is fixed here; the scroll lives inside it (fillHeight),
+          so its header edges and save bar never move. Remounting on a new
+          proposal is simpler and more robust than lifting every field into
+          controlled state just for this one prefill path. */}
+      <div className="min-h-0 lg:h-full">
+        <WorkflowForm
+          key={proposal ? JSON.stringify(proposal) : "blank"}
+          action={action}
+          submitLabel="Create workflow"
+          defaultValues={proposal ?? undefined}
+          availableToolkits={availableToolkits}
+          models={models}
+          fillHeight
+        />
+      </div>
     </div>
   );
 }

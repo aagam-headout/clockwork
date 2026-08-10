@@ -17,7 +17,7 @@ export async function getConnectedToolkitOptions(): Promise<ToolkitOption[]> {
   if (accounts.status !== "fulfilled") return [];
 
   const meta = new Map(
-    catalog.status === "fulfilled" ? catalog.value.map((t) => [t.slug, t]) : []
+    catalog.status === "fulfilled" ? catalog.value.map((t) => [t.slug, t]) : [],
   );
 
   const bySlug = new Map<string, ToolkitOption>();

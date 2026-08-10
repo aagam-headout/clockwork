@@ -40,7 +40,9 @@ export function ConnectorBrowser({
         setLoading(true);
         setError(null);
         try {
-          const res = await fetch(`/api/toolkits?q=${encodeURIComponent(query)}`);
+          const res = await fetch(
+            `/api/toolkits?q=${encodeURIComponent(query)}`,
+          );
           const data = await res.json();
           if (!res.ok) throw new Error(data.error ?? "Search failed");
           // Ignore responses that a newer keystroke has already superseded.
@@ -53,7 +55,7 @@ export function ConnectorBrowser({
           if (id === requestId.current) setLoading(false);
         }
       },
-      query ? 220 : 0
+      query ? 220 : 0,
     );
 
     return () => clearTimeout(timer);
@@ -64,28 +66,28 @@ export function ConnectorBrowser({
   return (
     <div>
       <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
+        <Search className="text-subtle pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search connectors…"
-          className="input h-10 pl-9 pr-9"
+          className="input h-10 pr-9 pl-9"
           aria-label="Search connectors"
         />
         {loading && (
-          <LoaderCircle className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-subtle" />
+          <LoaderCircle className="text-subtle absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 animate-spin" />
         )}
       </div>
 
       {error && (
-        <p className="mt-3 flex items-center gap-1.5 rounded-control border border-danger-line bg-danger-soft px-3 py-2 text-[13px] text-danger-text">
+        <p className="rounded-control border-danger-line bg-danger-soft text-danger-text mt-3 flex items-center gap-1.5 border px-3 py-2 text-[13px]">
           <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
           {error}
         </p>
       )}
 
       {!error && items.length === 0 && !loading && (
-        <p className="mt-4 rounded-container border border-border bg-bg-subtle px-4 py-10 text-center text-sm text-muted">
+        <p className="rounded-container border-border bg-bg-subtle text-muted mt-4 border px-4 py-10 text-center text-sm">
           No connector matches “{query}”.
         </p>
       )}
@@ -96,24 +98,28 @@ export function ConnectorBrowser({
           return (
             <div
               key={toolkit.slug}
-              className="flex items-center gap-3 rounded-container border border-border bg-surface p-3 transition-colors hover:border-border-strong"
+              className="rounded-container border-border bg-surface hover:border-border-strong flex items-center gap-3 border p-3 transition-colors"
             >
-              <ToolkitLogo slug={toolkit.slug} name={toolkit.name} logo={toolkit.logo} />
+              <ToolkitLogo
+                slug={toolkit.slug}
+                name={toolkit.name}
+                logo={toolkit.logo}
+              />
 
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <span className="truncate text-sm font-medium text-foreground">
+                  <span className="text-foreground truncate text-sm font-medium">
                     {toolkit.name}
                   </span>
                   {toolkit.noAuth && <Badge tone="neutral">no auth</Badge>}
                 </div>
-                <p className="truncate text-[11px] text-subtle">
+                <p className="text-subtle truncate text-[11px]">
                   {toolkit.description ?? toolkit.slug}
                 </p>
               </div>
 
               {isConnected ? (
-                <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-success-text">
+                <span className="text-success-text flex shrink-0 items-center gap-1 text-xs font-medium">
                   <Check className="h-3.5 w-3.5" />
                   Linked
                 </span>

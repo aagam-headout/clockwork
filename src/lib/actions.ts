@@ -23,7 +23,9 @@ function parseWorkflowForm(formData: FormData) {
   const goal = String(formData.get("goal") ?? "").trim();
   const cron = String(formData.get("cron") ?? "").trim();
   const timezone = String(formData.get("timezone") ?? "Asia/Kolkata").trim();
-  const model = String(formData.get("model") ?? "anthropic/claude-sonnet-5").trim();
+  const model = String(
+    formData.get("model") ?? "anthropic/claude-sonnet-5",
+  ).trim();
   const maxSteps = Number(formData.get("maxSteps") ?? 15);
   const toolkits = formData.getAll("toolkits").map(String);
 
@@ -64,7 +66,10 @@ export async function updateWorkflow(id: string, formData: FormData) {
 
 export async function toggleWorkflow(id: string, enabled: boolean) {
   await requireOwner();
-  await db.update(workflows).set({ enabled, updatedAt: new Date() }).where(eq(workflows.id, id));
+  await db
+    .update(workflows)
+    .set({ enabled, updatedAt: new Date() })
+    .where(eq(workflows.id, id));
   revalidatePath("/workflows");
 }
 
@@ -83,7 +88,10 @@ export async function disconnectToolkit(connectedAccountId: string) {
 
 export async function runWorkflowNow(id: string) {
   await requireOwner();
-  const [workflow] = await db.select().from(workflows).where(eq(workflows.id, id));
+  const [workflow] = await db
+    .select()
+    .from(workflows)
+    .where(eq(workflows.id, id));
   if (!workflow) throw new Error("workflow not found");
 
   await runWorkflow(workflow, "manual");

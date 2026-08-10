@@ -25,8 +25,12 @@ export const workflows = pgTable("workflows", {
   readOnly: boolean("read_only").notNull().default(true),
   enabled: boolean("enabled").notNull().default(true),
   lastRunAt: timestamp("last_run_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 export const runs = pgTable("runs", {
@@ -43,7 +47,9 @@ export const runs = pgTable("runs", {
   outputTokens: integer("output_tokens"),
   costUsd: numeric("cost_usd", { precision: 10, scale: 6 }),
   error: text("error"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 export const runSteps = pgTable("run_steps", {
@@ -58,7 +64,9 @@ export const runSteps = pgTable("run_steps", {
   resultJson: jsonb("result_json"),
   durationMs: integer("duration_ms"),
   error: text("error"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 export const outputs = pgTable("outputs", {
@@ -69,7 +77,9 @@ export const outputs = pgTable("outputs", {
   format: text("format").notNull().default("markdown"),
   body: text("body").notNull(),
   deliveredTo: text("delivered_to").array().notNull().default([]),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 // v2 — table created now, unused until write-mode ships
@@ -82,7 +92,9 @@ export const pendingActions = pgTable("pending_actions", {
   argsJson: jsonb("args_json").notNull(),
   status: text("status").notNull().default("pending"), // pending | approved | rejected
   decidedAt: timestamp("decided_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
 
 // v1 — Composio connected accounts cache (source of truth is Composio; this
@@ -92,5 +104,7 @@ export const connections = pgTable("connections", {
   toolkit: text("toolkit").notNull().unique(),
   composioConnectedAccountId: text("composio_connected_account_id"),
   status: text("status").notNull().default("not_connected"), // not_connected | pending | active | error
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });

@@ -40,8 +40,9 @@ export function buildToolFilter(deliver: DeliverTarget[]) {
   const allowedWriteSlugs = new Set(
     deliver
       .map((d) => DELIVER_TOOL_SLUGS[d.type])
-      .filter((slug): slug is string => Boolean(slug))
+      .filter((slug): slug is string => Boolean(slug)),
   );
 
-  return (slug: string) => isReadOnlyToolSlug(slug) || allowedWriteSlugs.has(slug);
+  return (slug: string) =>
+    isReadOnlyToolSlug(slug) || allowedWriteSlugs.has(slug);
 }

@@ -16,6 +16,7 @@ import {
   ListBox,
   Mono,
   PageHeader,
+  PageShell,
   SectionLabel,
   StatusDot,
   statusTone,
@@ -32,7 +33,10 @@ export default async function EditWorkflowPage({
   await requireOwner();
 
   const { id } = await params;
-  const [workflow] = await db.select().from(workflows).where(eq(workflows.id, id));
+  const [workflow] = await db
+    .select()
+    .from(workflows)
+    .where(eq(workflows.id, id));
   if (!workflow) notFound();
 
   const recentRuns = await db
@@ -61,7 +65,7 @@ export default async function EditWorkflowPage({
   const boundDelete = deleteWorkflow.bind(null, id);
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-8 md:px-6 md:py-10">
+    <PageShell>
       <PageHeader
         backHref="/workflows"
         backLabel="Workflows"
@@ -85,7 +89,12 @@ export default async function EditWorkflowPage({
                 await runWorkflowNow(id);
               }}
             >
-              <SubmitButton pendingLabel="Running…" icon={Play} variant="outline" size="sm">
+              <SubmitButton
+                pendingLabel="Running…"
+                icon={Play}
+                variant="outline"
+                size="sm"
+              >
                 Run now
               </SubmitButton>
             </form>
@@ -140,23 +149,27 @@ export default async function EditWorkflowPage({
               <Link
                 key={run.id}
                 href={`/runs/${run.id}`}
-                className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover"
+                className="group hover:bg-surface-hover flex items-center gap-3 px-4 py-3 transition-colors"
               >
-                <StatusDot tone={statusTone(run.status)} live={run.status === "running"} />
-                <span className="flex-1 truncate font-mono text-xs text-muted">
+                <StatusDot
+                  tone={statusTone(run.status)}
+                  live={run.status === "running"}
+                />
+                <span className="text-muted flex-1 truncate font-mono text-xs">
                   {(run.startedAt ?? run.createdAt).toLocaleString("en-US", {
                     dateStyle: "medium",
                     timeStyle: "short",
                   })}
-                  {run.durationMs != null && ` · ${(run.durationMs / 1000).toFixed(1)}s`}
+                  {run.durationMs != null &&
+                    ` · ${(run.durationMs / 1000).toFixed(1)}s`}
                 </span>
                 <Badge tone="neutral">{run.trigger}</Badge>
-                <ChevronRight className="h-4 w-4 text-subtle transition-transform group-hover:translate-x-0.5" />
+                <ChevronRight className="text-subtle h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </Link>
             ))}
           </ListBox>
         </section>
       )}
-    </main>
+    </PageShell>
   );
 }

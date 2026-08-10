@@ -44,7 +44,7 @@ export function Badge({
 }) {
   return (
     <span
-      className={`inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full border px-2 text-[11px] font-medium leading-none ${
+      className={`inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full border px-2 text-[11px] leading-none font-medium ${
         TONE_SOFT[tone]
       } ${mono ? "font-mono tracking-tight" : ""} ${className}`}
     >
@@ -54,7 +54,13 @@ export function Badge({
   );
 }
 
-export function StatusDot({ tone, live = false }: { tone: Tone; live?: boolean }) {
+export function StatusDot({
+  tone,
+  live = false,
+}: {
+  tone: Tone;
+  live?: boolean;
+}) {
   return (
     <span
       className={`h-2 w-2 shrink-0 rounded-full ${TONE_DOT[tone]} ${live ? "live-dot" : ""}`}
@@ -83,9 +89,9 @@ export function Card({
 }) {
   return (
     <As
-      className={`rounded-container border border-border bg-surface ${
+      className={`rounded-container border-border bg-surface border ${
         interactive
-          ? "transition-[border-color,background] duration-150 hover:border-border-strong"
+          ? "hover:border-border-strong transition-[border-color,background] duration-150"
           : ""
       } ${className}`}
     >
@@ -118,7 +124,7 @@ export const BUTTON_VARIANTS = {
 export function buttonClass(
   variant: keyof typeof BUTTON_VARIANTS = "outline",
   size: keyof typeof BUTTON_SIZES = "md",
-  className = ""
+  className = "",
 ) {
   return `${BUTTON_BASE} ${BUTTON_VARIANTS[variant]} ${BUTTON_SIZES[size]} ${className}`;
 }
@@ -146,6 +152,38 @@ export function ButtonLink({
   );
 }
 
+/**
+ * The one content shell every page uses — same max width, same gutters, same
+ * top offset, so switching tabs doesn't shift the header or the left edge.
+ * `fill` is for screens that own the viewport instead of scrolling as a
+ * document (the workflow builder): the shell becomes a full-height flex column
+ * whose children manage their own scrolling.
+ */
+export function PageShell({
+  children,
+  fill = false,
+}: {
+  children: React.ReactNode;
+  fill?: boolean;
+}) {
+  return (
+    // Gutters step up with the viewport (20 → 32 → 48 → 64px). The rail already
+    // eats the left edge, so content needs real air on both sides of it rather
+    // than the flat 16px it had.
+    <main
+      className={`mx-auto flex w-full max-w-7xl flex-col px-5 py-6 md:px-8 lg:px-12 xl:px-16 ${
+        // The fill variant keeps the same top offset so page titles line up
+        // across tabs, but a tighter bottom so the panes get the height.
+        fill
+          ? "lg:h-screen lg:overflow-hidden lg:pt-10 lg:pb-6"
+          : "md:py-8 lg:py-10"
+      }`}
+    >
+      {children}
+    </main>
+  );
+}
+
 export function PageHeader({
   title,
   subtitle,
@@ -166,7 +204,7 @@ export function PageHeader({
       {backHref && (
         <Link
           href={backHref}
-          className="mb-3 inline-flex items-center gap-1 text-[13px] text-muted transition-colors hover:text-foreground"
+          className="text-muted hover:text-foreground mb-3 inline-flex items-center gap-1 text-[13px] transition-colors"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           {backLabel ?? "Back"}
@@ -174,10 +212,14 @@ export function PageHeader({
       )}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="heading-24 truncate text-foreground">{title}</h1>
-          {subtitle && <div className="mt-1 text-sm text-muted">{subtitle}</div>}
+          <h1 className="heading-24 text-foreground truncate">{title}</h1>
+          {subtitle && (
+            <div className="text-muted mt-1 text-sm">{subtitle}</div>
+          )}
         </div>
-        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+        {actions && (
+          <div className="flex shrink-0 items-center gap-2">{actions}</div>
+        )}
       </div>
       {children}
     </header>
@@ -196,12 +238,14 @@ export function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="rise flex flex-col items-center rounded-container border border-border bg-bg-subtle px-6 py-16 text-center">
-      <div className="flex h-10 w-10 items-center justify-center rounded-control border border-border bg-surface">
-        <Icon className="h-4.5 w-4.5 text-subtle" />
+    <div className="rise rounded-container border-border bg-bg-subtle flex flex-col items-center border px-6 py-16 text-center">
+      <div className="rounded-control border-border bg-surface flex h-10 w-10 items-center justify-center border">
+        <Icon className="text-subtle h-4.5 w-4.5" />
       </div>
-      <p className="heading-16 mt-4 text-foreground">{title}</p>
-      {description && <p className="mt-1.5 max-w-sm text-sm text-muted">{description}</p>}
+      <p className="heading-16 text-foreground mt-4">{title}</p>
+      {description && (
+        <p className="text-muted mt-1.5 max-w-sm text-sm">{description}</p>
+      )}
       {action && <div className="mt-6">{action}</div>}
     </div>
   );
@@ -219,15 +263,15 @@ export function Stat({
   tone?: Tone;
 }) {
   return (
-    <div className="rounded-container border border-border bg-surface px-4 py-3.5">
+    <div className="rounded-container border-border bg-surface border px-4 py-3.5">
       <div className="flex items-center gap-1.5">
         <span className={`h-1.5 w-1.5 rounded-full ${TONE_DOT[tone]}`} />
-        <span className="text-xs font-medium text-muted">{label}</span>
+        <span className="text-muted text-xs font-medium">{label}</span>
       </div>
-      <div className="mt-2 text-[28px] font-semibold leading-none tracking-[-1.12px] tabular-nums text-foreground">
+      <div className="text-foreground mt-2 text-[28px] leading-none font-semibold tracking-[-1.12px] tabular-nums">
         {value}
       </div>
-      {hint && <div className="mt-2 truncate text-xs text-subtle">{hint}</div>}
+      {hint && <div className="text-subtle mt-2 truncate text-xs">{hint}</div>}
     </div>
   );
 }
@@ -245,7 +289,7 @@ export function SectionLabel({
     <div className="mb-3 flex items-center gap-2">
       <h2 className="heading-14 text-foreground">{children}</h2>
       {count != null && (
-        <span className="rounded-full border border-border bg-surface-2 px-1.5 text-[11px] font-medium leading-5 tabular-nums text-muted">
+        <span className="border-border bg-surface-2 text-muted rounded-full border px-1.5 text-[11px] leading-5 font-medium tabular-nums">
           {count}
         </span>
       )}
@@ -255,10 +299,16 @@ export function SectionLabel({
   );
 }
 
-export function Mono({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+export function Mono({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <code
-      className={`rounded-control border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] tracking-tight text-muted ${className}`}
+      className={`rounded-control border-border bg-surface-2 text-muted border px-1.5 py-0.5 font-mono text-[11px] tracking-tight ${className}`}
     >
       {children}
     </code>
@@ -275,7 +325,9 @@ export function Alert({
   children: React.ReactNode;
 }) {
   return (
-    <div className={`rounded-container border px-4 py-3 text-sm ${TONE_SOFT[tone]}`}>
+    <div
+      className={`rounded-container border px-4 py-3 text-sm ${TONE_SOFT[tone]}`}
+    >
       {title && <p className="font-medium">{title}</p>}
       <div className={title ? "mt-1 opacity-90" : ""}>{children}</div>
     </div>
@@ -300,7 +352,7 @@ export function ListBox({
 }) {
   return (
     <div
-      className={`divide-y divide-border overflow-hidden rounded-container border border-border bg-surface ${className}`}
+      className={`divide-border rounded-container border-border bg-surface divide-y overflow-hidden border ${className}`}
     >
       {children}
     </div>

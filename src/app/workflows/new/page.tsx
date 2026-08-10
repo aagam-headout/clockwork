@@ -1,7 +1,7 @@
 import { createWorkflow } from "@/lib/actions";
 import { NewWorkflowClient } from "@/components/new-workflow-client";
 import { requireOwner } from "@/lib/auth/require-owner";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, PageShell } from "@/components/ui";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
 import { getModelCatalog } from "@/lib/models";
 
@@ -16,7 +16,10 @@ export default async function NewWorkflowPage() {
   ]);
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-8 md:px-6 md:py-10">
+    // The builder is an app screen, not a document: on large viewports the page
+    // itself doesn't scroll — the chat and the form each scroll in their own
+    // pane, so the composer and the save bar are always reachable.
+    <PageShell fill>
       <PageHeader
         backHref="/workflows"
         backLabel="Workflows"
@@ -24,13 +27,13 @@ export default async function NewWorkflowPage() {
         subtitle="Describe the job in plain English, or fill the form yourself."
       />
 
-      <div className="rise mt-6">
+      <div className="rise mt-6 min-h-0 lg:flex-1">
         <NewWorkflowClient
           action={createWorkflow}
           availableToolkits={availableToolkits}
           models={models}
         />
       </div>
-    </main>
+    </PageShell>
   );
 }

@@ -49,9 +49,7 @@
         "connections_toolkit_unique": {
           "name": "connections_toolkit_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "toolkit"
-          ]
+          "columns": ["toolkit"]
         }
       },
       "policies": {},
@@ -109,12 +107,8 @@
           "name": "outputs_run_id_runs_id_fk",
           "tableFrom": "outputs",
           "tableTo": "runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -181,12 +175,8 @@
           "name": "pending_actions_run_id_runs_id_fk",
           "tableFrom": "pending_actions",
           "tableTo": "runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -270,12 +260,8 @@
           "name": "run_steps_run_id_runs_id_fk",
           "tableFrom": "run_steps",
           "tableTo": "runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -372,12 +358,8 @@
           "name": "runs_workflow_id_workflows_id_fk",
           "tableFrom": "runs",
           "tableTo": "workflows",
-          "columnsFrom": [
-            "workflow_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workflow_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -514,9 +496,7 @@
         "workflows_slug_unique": {
           "name": "workflows_slug_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "slug"
-          ]
+          "columns": ["slug"]
         }
       },
       "policies": {},

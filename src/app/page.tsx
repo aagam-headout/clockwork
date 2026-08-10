@@ -9,6 +9,7 @@ import {
   Card,
   EmptyState,
   PageHeader,
+  PageShell,
   SectionLabel,
   Stat,
 } from "@/components/ui";
@@ -42,7 +43,10 @@ export default async function TodayPage() {
     db
       .select({
         total: count(),
-        failed: sql<number>`count(*) filter (where ${runs.status} = 'error')`.mapWith(Number),
+        failed:
+          sql<number>`count(*) filter (where ${runs.status} = 'error')`.mapWith(
+            Number,
+          ),
       })
       .from(runs)
       .where(gte(runs.createdAt, startOfToday)),
@@ -50,7 +54,10 @@ export default async function TodayPage() {
     db
       .select({
         total: count(),
-        enabled: sql<number>`count(*) filter (where ${workflows.enabled})`.mapWith(Number),
+        enabled:
+          sql<number>`count(*) filter (where ${workflows.enabled})`.mapWith(
+            Number,
+          ),
       })
       .from(workflows),
   ]);
@@ -68,7 +75,7 @@ export default async function TodayPage() {
   })();
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-10">
+    <PageShell>
       <PageHeader
         title="Overview"
         subtitle={`${greeting} — ${new Date().toLocaleDateString("en-US", {
@@ -94,7 +101,9 @@ export default async function TodayPage() {
           label="Runs"
           value={runsToday}
           hint={failedToday > 0 ? `${failedToday} failed` : "no failures"}
-          tone={failedToday > 0 ? "danger" : runsToday > 0 ? "success" : "neutral"}
+          tone={
+            failedToday > 0 ? "danger" : runsToday > 0 ? "success" : "neutral"
+          }
         />
         <Stat
           label="Active"
@@ -104,8 +113,10 @@ export default async function TodayPage() {
         />
       </div>
 
-      <div className="mt-8">
-        <SectionLabel count={feed.length || undefined}>Today&apos;s digests</SectionLabel>
+      <div className="mt-10">
+        <SectionLabel count={feed.length || undefined}>
+          Today&apos;s digests
+        </SectionLabel>
         {feed.length === 0 ? (
           <EmptyState
             icon={Sparkles}
@@ -125,28 +136,39 @@ export default async function TodayPage() {
         ) : (
           <div className="flex flex-col gap-4">
             {feed.map((item) => (
-              <Card key={item.outputId} as="article" interactive className="rise overflow-hidden">
-                <div className="flex items-center justify-between gap-3 border-b border-border bg-bg-subtle px-4 py-2.5">
+              <Card
+                key={item.outputId}
+                as="article"
+                interactive
+                className="rise overflow-hidden"
+              >
+                <div className="border-border bg-bg-subtle flex items-center justify-between gap-3 border-b px-4 py-2.5">
                   <div className="flex min-w-0 items-center gap-2">
                     <Link
                       href={`/runs/${item.runId}`}
-                      className="group flex min-w-0 items-center gap-1 text-[13px] font-medium text-foreground"
+                      className="group text-foreground flex min-w-0 items-center gap-1 text-[13px] font-medium"
                     >
-                      <span className="truncate group-hover:underline">{item.workflowName}</span>
-                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-subtle transition-transform group-hover:translate-x-0.5" />
+                      <span className="truncate group-hover:underline">
+                        {item.workflowName}
+                      </span>
+                      <ChevronRight className="text-subtle h-3.5 w-3.5 shrink-0 transition-transform group-hover:translate-x-0.5" />
                     </Link>
                     {item.deliveredTo.length > 1 && (
-                      <Badge tone="neutral">{item.deliveredTo.join(" · ")}</Badge>
+                      <Badge tone="neutral">
+                        {item.deliveredTo.join(" · ")}
+                      </Badge>
                     )}
                   </div>
                   <time
                     dateTime={item.createdAt.toISOString()}
-                    className="shrink-0 font-mono text-[11px] text-subtle"
+                    className="text-subtle shrink-0 font-mono text-[11px]"
                   >
-                    {item.createdAt.toLocaleTimeString("en-US", { timeStyle: "short" })}
+                    {item.createdAt.toLocaleTimeString("en-US", {
+                      timeStyle: "short",
+                    })}
                   </time>
                 </div>
-                <div className="whitespace-pre-wrap px-4 py-4 text-sm leading-relaxed text-foreground">
+                <div className="text-foreground px-4 py-4 text-sm leading-relaxed whitespace-pre-wrap">
                   {item.body}
                 </div>
               </Card>
@@ -154,6 +176,6 @@ export default async function TodayPage() {
           </div>
         )}
       </div>
-    </main>
+    </PageShell>
   );
 }

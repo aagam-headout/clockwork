@@ -2,21 +2,21 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
-import { AppNav } from "@/components/app-nav";
+import { AppSidebar } from "@/components/app-sidebar";
 import { AuthProvider } from "@/components/auth-provider";
 import { auth } from "@/lib/auth/server";
-import { THEME_SCRIPT } from "@/components/theme-toggle";
+import { SIDEBAR_SCRIPT, THEME_SCRIPT } from "@/lib/pre-paint";
 import "./globals.css";
 
 // The favicon comes from app/icon.svg (file convention) — no static favicon.ico.
 export const metadata: Metadata = {
-  title: { default: "my-workflows", template: "%s · my-workflows" },
+  title: { default: "Clockwork", template: "%s · Clockwork" },
   description: "Scheduled agents that read your apps and report back.",
-  applicationName: "my-workflows",
+  applicationName: "Clockwork",
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  // The sidebar's account card needs a name/email; it's a client component, so
+  // The sidebar's account block needs a name/email; it's a client component, so
   // the session is read here (deduped per request by the auth client) instead of
   // re-fetching it in the browser. connection() opts every route out of
   // prerendering first — otherwise the cookie read below throws mid-build for
@@ -37,13 +37,17 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
       className={`${GeistSans.variable} ${GeistMono.variable} h-full antialiased`}
     >
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
-      </head>
-      <body className="min-h-full bg-bg">
+      <body className="bg-bg min-h-full">
+        {/* First thing in <body>, not in <head>: this Next version drops a raw
+            <script> placed inside a layout's <head>, which silently killed both
+            pre-paint scripts (the theme flashed, the rail snapped). Running here
+            still beats first paint. */}
+        <script
+          dangerouslySetInnerHTML={{ __html: THEME_SCRIPT + SIDEBAR_SCRIPT }}
+        />
         <AuthProvider>
-          <div className="flex min-h-screen flex-col">
-            <AppNav user={user} />
+          <div className="flex min-h-screen flex-col md:flex-row">
+            <AppSidebar user={user} />
             <div className="min-w-0 flex-1">{children}</div>
           </div>
         </AuthProvider>

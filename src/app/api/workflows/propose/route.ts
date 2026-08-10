@@ -29,27 +29,50 @@ function modelChoices(catalog: ModelInfo[]) {
  */
 function buildProposalSchema(toolkitSlugs: string[], modelIds: string[]) {
   return z.object({
-    name: z.string().describe("short kebab-or-plain name, e.g. 'morning-brief'"),
+    name: z
+      .string()
+      .describe("short kebab-or-plain name, e.g. 'morning-brief'"),
     goal: z
       .string()
       .describe(
-        "the full natural-language prompt the workflow's agent will run on every trigger — specific about what to check and how to summarize it"
+        "the full natural-language prompt the workflow's agent will run on every trigger — specific about what to check and how to summarize it",
       ),
     cron: z.string().describe("standard 5-field cron expression"),
     timezone: z.string().describe("IANA timezone, e.g. Asia/Kolkata"),
-    toolkits: z.array(z.string()).min(1).describe(`subset of: ${toolkitSlugs.join(", ")}`),
+    toolkits: z
+      .array(z.string())
+      .min(1)
+      .describe(`subset of: ${toolkitSlugs.join(", ")}`),
     model: z.string().describe(`one of: ${modelIds.join(", ")}`),
     maxSteps: z.number().int().min(1).max(30),
-    deliverSlack: z.boolean().describe("whether to also DM the digest on Slack"),
+    deliverSlack: z
+      .boolean()
+      .describe("whether to also DM the digest on Slack"),
     rationale: z
       .string()
-      .describe("one or two sentences explaining the choices, shown to the user"),
+      .describe(
+        "one or two sentences explaining the choices, shown to the user",
+      ),
   });
 }
 
-function systemPrompt(toolkitSlugs: string[], models: ModelInfo[]) {
+function systemPrompt(
+  toolkitSlugs: string[],
+  models: ModelInfo[],
+  current: unknown,
+) {
   return `You turn a rough, plain-English description of a recurring personal task into
 a structured workflow spec for a read-only automation agent.
+
+${
+  current
+    ? `The user is REFINING a spec you already proposed. Return the complete spec every
+time, carrying over everything they didn't ask you to change:
+${JSON.stringify(current, null, 2)}
+
+`
+    : ""
+}
 
 Available toolkits — these are the apps the user has actually connected, pick only
 what the goal needs and never invent a slug that isn't listed:
@@ -80,9 +103,35 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const { description } = await req.json();
-  if (!description || typeof description !== "string") {
-    return NextResponse.json({ error: "description is required" }, { status: 400 });
+  // The builder is a conversation: the client sends the whole turn history plus
+  // the spec currently in the form, so "make it hourly" refines instead of
+  // starting over. `description` stays accepted for a single-shot request.
+  const body = await req.json();
+  const history: Array<{ role: "user" | "assistant"; content: string }> =
+    Array.isArray(body.messages)
+      ? body.messages
+          .filter(
+            (m: unknown): m is { role: string; content: string } =>
+              typeof m === "object" &&
+              m !== null &&
+              typeof (m as { content?: unknown }).content === "string",
+          )
+          .map((m: { role: string; content: string }) => ({
+            role:
+              m.role === "assistant"
+                ? ("assistant" as const)
+                : ("user" as const),
+            content: m.content,
+          }))
+      : typeof body.description === "string"
+        ? [{ role: "user" as const, content: body.description }]
+        : [];
+
+  if (history.length === 0 || history.at(-1)?.role !== "user") {
+    return NextResponse.json(
+      { error: "a user message is required" },
+      { status: 400 },
+    );
   }
 
   try {
@@ -97,14 +146,18 @@ export async function POST(req: NextRequest) {
     const { object } = await generateObject({
       model: gateway(DEFAULT_MODEL),
       schema: buildProposalSchema(toolkitSlugs, modelIds),
-      system: systemPrompt(toolkitSlugs, offered),
-      prompt: description,
+      system: systemPrompt(toolkitSlugs, offered, body.current),
+      messages: history,
     });
 
     // The model can still hallucinate a slug despite the prompt; drop anything
     // that isn't connected rather than proposing a workflow that can't run.
-    const toolkits = object.toolkits.filter((slug) => toolkitSlugs.includes(slug));
-    const model = catalog.some((m) => m.id === object.model) ? object.model : DEFAULT_MODEL;
+    const toolkits = object.toolkits.filter((slug) =>
+      toolkitSlugs.includes(slug),
+    );
+    const model = catalog.some((m) => m.id === object.model)
+      ? object.model
+      : DEFAULT_MODEL;
 
     return NextResponse.json({
       ...object,
@@ -114,7 +167,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

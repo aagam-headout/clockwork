@@ -1,11 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { WorkflowFormValues } from "@/components/workflow-form";
-import { Send, Sparkles, Check } from "lucide-react";
+import {
+  ArrowUp,
+  Sparkles,
+  RotateCcw,
+  TriangleAlert,
+  Clock,
+  Cpu,
+  Wrench,
+} from "lucide-react";
 import { buttonClass } from "@/components/ui";
 
 type Proposal = WorkflowFormValues & { rationale: string };
+
+type Message =
+  | { role: "user"; content: string }
+  | { role: "assistant"; content: string; spec?: Proposal };
 
 const EXAMPLES = [
   "Every weekday 8am, check my calendar and DM me a heads up on Slack",
@@ -13,28 +25,61 @@ const EXAMPLES = [
   "Every morning, flag unread Gmail threads that look urgent",
 ];
 
-export function WorkflowAgentChat({ onPropose }: { onPropose: (values: Proposal) => void }) {
-  const [description, setDescription] = useState("");
+/**
+ * The left pane of the new-workflow screen: a conversation that writes the form
+ * on the right. It keeps the whole turn history plus the spec it last proposed
+ * and sends both to /api/workflows/propose, so a follow-up like "make it
+ * hourly" edits that spec instead of starting from nothing.
+ */
+export function WorkflowAgentChat({
+  onPropose,
+}: {
+  onPropose: (values: Proposal) => void;
+}) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [rationale, setRationale] = useState<string | null>(null);
+  const [current, setCurrent] = useState<Proposal | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  async function submit(text: string) {
-    if (!text.trim() || loading) return;
+  // Pin to the newest turn — including the pending bubble, so the user sees
+  // that their message landed.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages, loading]);
 
+  async function send(text: string) {
+    const content = text.trim();
+    if (!content || loading) return;
+
+    const history: Message[] = [...messages, { role: "user", content }];
+    setMessages(history);
+    setDraft("");
     setLoading(true);
     setError(null);
+
     try {
       const res = await fetch("/api/workflows/propose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: text }),
+        body: JSON.stringify({
+          messages: history.map((m) => ({ role: m.role, content: m.content })),
+          current,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to generate workflow");
 
       onPropose(data);
-      setRationale(data.rationale);
+      setCurrent(data);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: data.rationale, spec: data },
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -42,79 +87,170 @@ export function WorkflowAgentChat({ onPropose }: { onPropose: (values: Proposal)
     }
   }
 
+  function reset() {
+    setMessages([]);
+    setCurrent(null);
+    setError(null);
+    setDraft("");
+  }
+
+  const empty = messages.length === 0;
+
   return (
-    <div className="relative overflow-hidden rounded-container border border-border bg-bg-subtle p-4">
-      <div className="flex items-center gap-2">
-        <span className="flex h-6 w-6 items-center justify-center rounded-control border border-border bg-surface text-foreground">
-          <Sparkles className="h-3.5 w-3.5" />
-        </span>
-        <p className="heading-14 text-foreground">Describe it, I&apos;ll fill the form</p>
+    <div className="rounded-container border-border bg-surface flex h-full min-h-0 flex-col overflow-hidden border">
+      <div className="border-border flex h-12 shrink-0 items-center justify-between gap-2 border-b px-3">
+        <div className="flex items-center gap-2">
+          <span className="rounded-control border-border bg-bg-subtle text-foreground flex h-6 w-6 items-center justify-center border">
+            <Sparkles className="h-3.5 w-3.5" />
+          </span>
+          <span className="heading-14 text-foreground">Assistant</span>
+        </div>
+        {!empty && (
+          <button
+            type="button"
+            onClick={reset}
+            className={buttonClass("ghost", "sm", "gap-1 px-2")}
+            title="Start over"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Reset
+          </button>
+        )}
+      </div>
+
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+        {/* The pane is wide; the column inside it stays a readable width. Turns
+            hug the composer the way every chat does — the empty pitch centers. */}
+        <div
+          className={`mx-auto flex min-h-full w-full max-w-[680px] flex-col ${
+            empty ? "justify-center" : "justify-end"
+          }`}
+        >
+          {empty ? (
+            <div className="flex flex-col">
+              <p className="text-muted text-sm leading-relaxed">
+                Describe the job in plain English. I&apos;ll fill in the
+                schedule, tools, model and prompt on the right — then you can
+                edit anything before saving.
+              </p>
+              <div className="mt-4 flex flex-col gap-1.5">
+                {EXAMPLES.map((example) => (
+                  <button
+                    key={example}
+                    type="button"
+                    onClick={() => void send(example)}
+                    className="rounded-control border-border bg-bg-subtle text-muted hover:border-border-strong hover:text-foreground cursor-pointer border px-3 py-2 text-left text-[13px] leading-snug transition-colors"
+                  >
+                    {example}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {messages.map((message, i) =>
+                message.role === "user" ? (
+                  <div key={i} className="flex justify-end">
+                    <p className="rounded-container bg-solid text-solid-fg max-w-[85%] px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap">
+                      {message.content}
+                    </p>
+                  </div>
+                ) : (
+                  <div key={i} className="flex flex-col gap-2">
+                    <p className="rounded-container border-border bg-bg-subtle text-foreground max-w-[92%] border px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap">
+                      {message.content}
+                    </p>
+                    {message.spec && <SpecSummary spec={message.spec} />}
+                  </div>
+                ),
+              )}
+
+              {loading && (
+                <div className="text-muted flex items-center gap-2 text-[13px]">
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />
+                  Working on it…
+                </div>
+              )}
+            </div>
+          )}
+
+          {error && (
+            <p className="rounded-control border-danger-line bg-danger-soft text-danger-text mt-3 flex items-start gap-1.5 border px-2.5 py-2 text-[13px]">
+              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {error}
+            </p>
+          )}
+        </div>
       </div>
 
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          void submit(description);
+          void send(draft);
         }}
-        className="mt-3 flex gap-2"
+        className="border-border shrink-0 border-t px-4 py-3"
       >
-        <input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Every weekday morning, check my calendar and DM me a heads up on Slack"
-          className="input h-10"
-          disabled={loading}
-        />
-        <button
-          type="submit"
-          disabled={loading || !description.trim()}
-          className={buttonClass("primary", "md")}
-        >
-          {loading ? (
-            <>
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />
-              Thinking…
-            </>
-          ) : (
-            <>
-              <Send className="h-3.5 w-3.5" />
-              Generate
-            </>
-          )}
-        </button>
-      </form>
-
-      {!rationale && !error && (
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
-          {EXAMPLES.map((example) => (
-            <button
-              key={example}
-              type="button"
-              disabled={loading}
-              onClick={() => {
-                setDescription(example);
-                void submit(example);
-              }}
-              className="h-7 max-w-full cursor-pointer truncate rounded-full border border-border bg-surface px-3 text-xs text-muted transition-colors hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {example}
-            </button>
-          ))}
+        <div className="rounded-container border-border bg-bg focus-within:border-border-strong mx-auto flex w-full max-w-[680px] items-end gap-2 border p-1.5 transition-colors">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter sends, Shift+Enter breaks the line — the convention every
+              // chat composer uses.
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send(draft);
+              }
+            }}
+            rows={3}
+            placeholder={
+              empty
+                ? "Every weekday morning, check my calendar…"
+                : "Refine it — “make it hourly”"
+            }
+            disabled={loading}
+            aria-label="Describe the workflow"
+            className="text-foreground placeholder:text-subtle max-h-40 min-h-0 w-full resize-none bg-transparent px-1.5 py-1 text-[13px] leading-relaxed outline-none disabled:opacity-60"
+          />
+          <button
+            type="submit"
+            disabled={loading || !draft.trim()}
+            aria-label="Send"
+            className={buttonClass("primary", "sm", "w-8 shrink-0 px-0")}
+          >
+            <ArrowUp className="h-4 w-4" />
+          </button>
         </div>
-      )}
+      </form>
+    </div>
+  );
+}
 
-      {error && (
-        <p className="mt-2.5 rounded-control border border-danger-line bg-danger-soft px-2.5 py-1.5 text-[13px] text-danger-text">
-          {error}
-        </p>
-      )}
+/** What the assistant just wrote into the form, at a glance. */
+function SpecSummary({ spec }: { spec: Proposal }) {
+  const items: Array<{
+    icon: React.ComponentType<{ className?: string }>;
+    text: string;
+  }> = [
+    { icon: Clock, text: `${spec.cron} · ${spec.timezone}` },
+    { icon: Wrench, text: spec.toolkits.join(", ") },
+    { icon: Cpu, text: spec.model },
+  ];
 
-      {rationale && !error && (
-        <p className="mt-2.5 flex items-start gap-1.5 text-[13px] leading-relaxed text-muted">
-          <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
-          <span>{rationale}</span>
-        </p>
-      )}
+  return (
+    <div className="rounded-container border-border flex flex-col gap-1 border px-3 py-2">
+      <span className="text-foreground text-[13px] font-medium">
+        {spec.name}
+      </span>
+      {items.map(({ icon: Icon, text }) => (
+        <span
+          key={text}
+          className="text-muted flex items-center gap-1.5 text-xs"
+        >
+          <Icon className="text-subtle h-3.5 w-3.5 shrink-0" />
+          <span className="truncate font-mono">{text}</span>
+        </span>
+      ))}
     </div>
   );
 }

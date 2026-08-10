@@ -60,7 +60,9 @@ export async function getModelCatalog(): Promise<ModelInfo[]> {
           tier: tierFor(blended),
         };
       })
-      .sort((a, b) => (a.blendedPerM ?? Infinity) - (b.blendedPerM ?? Infinity));
+      .sort(
+        (a, b) => (a.blendedPerM ?? Infinity) - (b.blendedPerM ?? Infinity),
+      );
 
     if (items.length === 0) return FALLBACK_MODELS;
 

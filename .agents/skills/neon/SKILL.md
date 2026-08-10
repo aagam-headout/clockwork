@@ -75,15 +75,15 @@ Neon provides a set of agent skills in addition to the official documentation. W
 
 The skills below live in the [`neondatabase/agent-skills`](https://github.com/neondatabase/agent-skills) repo:
 
-| Skill | Use it for |
-| --- | --- |
-| `neon-postgres` | Working with databases, including connections, schemas, queries, and autoscaling: SQL development, schema design, performance optimization, and scaling decisions. |
-| `neon-postgres-branches` | Choosing or creating the right branch type for dev, preview, test, or CI workflows. Use this skill as a slash command. |
-| `neon-object-storage` | Storing and serving files (uploads, images, blobs), including branching them with the database. |
-| `neon-functions` | Deploying long-running or streaming serverless functions — APIs, agents, SSE/WebSocket servers. |
-| `neon-ai-gateway` | Calling an LLM or routing across model providers with one credential, including discovering the branch's servable models at runtime via the OpenAI-compatible `/v1/models` endpoint. |
-| `claimable-postgres` | Provisioning instant, claimable temporary Postgres databases (for example, one per end user or demo). |
-| `neon-postgres-egress-optimizer` | Diagnosing or fixing excessive Postgres egress (network data-transfer) costs in a codebase. |
+| Skill                            | Use it for                                                                                                                                                                           |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `neon-postgres`                  | Working with databases, including connections, schemas, queries, and autoscaling: SQL development, schema design, performance optimization, and scaling decisions.                   |
+| `neon-postgres-branches`         | Choosing or creating the right branch type for dev, preview, test, or CI workflows. Use this skill as a slash command.                                                               |
+| `neon-object-storage`            | Storing and serving files (uploads, images, blobs), including branching them with the database.                                                                                      |
+| `neon-functions`                 | Deploying long-running or streaming serverless functions — APIs, agents, SSE/WebSocket servers.                                                                                      |
+| `neon-ai-gateway`                | Calling an LLM or routing across model providers with one credential, including discovering the branch's servable models at runtime via the OpenAI-compatible `/v1/models` endpoint. |
+| `claimable-postgres`             | Provisioning instant, claimable temporary Postgres databases (for example, one per end user or demo).                                                                                |
+| `neon-postgres-egress-optimizer` | Diagnosing or fixing excessive Postgres egress (network data-transfer) costs in a codebase.                                                                                          |
 
 For guidance on agent platforms that provision and operate Lakebase Postgres on Neon at scale, use `neon-postgres-agent-platforms`, which lives in a separate repo: [`neondatabase/neon-for-agent-platforms`](https://github.com/neondatabase/neon-for-agent-platforms).
 
@@ -204,12 +204,8 @@ export default defineConfig({
   auth: true,
   dataApi: true,
   preview: {
-    functions: {
-      /* ... */
-    }, // see the neon-functions skill
-    buckets: {
-      /* ... */
-    }, // see the neon-object-storage skill
+    functions: {/* ... */}, // see the neon-functions skill
+    buckets: {/* ... */}, // see the neon-object-storage skill
     aiGateway: true, // see the neon-ai-gateway skill
   },
 });

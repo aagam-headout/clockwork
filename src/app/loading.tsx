@@ -1,4 +1,4 @@
-import { Skeleton } from "@/components/ui";
+import { PageShell, Skeleton } from "@/components/ui";
 
 /*
  * Every page in this app is force-dynamic and talks to Postgres (and often
@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui";
  */
 export default function Loading() {
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-10" aria-busy>
+    <PageShell>
       <span className="sr-only">Loading…</span>
 
       <Skeleton className="h-8 w-48" />
@@ -17,15 +17,15 @@ export default function Loading() {
 
       <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
         {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-[86px] rounded-container" />
+          <Skeleton key={i} className="rounded-container h-[86px]" />
         ))}
       </div>
 
       <div className="mt-8 flex flex-col gap-4">
         {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-24 rounded-container" />
+          <Skeleton key={i} className="rounded-container h-24" />
         ))}
       </div>
-    </main>
+    </PageShell>
   );
 }

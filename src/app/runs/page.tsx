@@ -8,6 +8,7 @@ import {
   EmptyState,
   ListBox,
   PageHeader,
+  PageShell,
   SectionLabel,
   StatusDot,
   statusTone,
@@ -36,7 +37,11 @@ function dayLabel(date: Date): string {
   const diffDays = Math.round((today.getTime() - d.getTime()) / 86_400_000);
   if (diffDays === 0) return "Today";
   if (diffDays === 1) return "Yesterday";
-  return date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+  return date.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 export default async function RunsPage() {
@@ -71,16 +76,21 @@ export default async function RunsPage() {
   const failed = rows.filter((r) => r.status === "error").length;
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-10">
+    <PageShell>
       <PageHeader
         title="Runs"
-        subtitle={
-          rows.length === 0 ? undefined : `${rows.length} runs${failed > 0 ? ` · ${failed} failed` : ""}`
+        subtitle="Every execution of your workflows, newest first."
+        actions={
+          rows.length === 0 ? undefined : (
+            <Badge tone={failed > 0 ? "danger" : "success"} dot>
+              {rows.length} runs{failed > 0 ? ` · ${failed} failed` : ""}
+            </Badge>
+          )
         }
       />
 
       {rows.length === 0 ? (
-        <div className="mt-10">
+        <div className="mt-6">
           <EmptyState
             icon={History}
             title="No runs recorded"
@@ -91,7 +101,9 @@ export default async function RunsPage() {
         <div className="mt-6 flex flex-col gap-8">
           {groups.map((group) => (
             <section key={group.label} className="rise">
-              <SectionLabel count={group.items.length}>{group.label}</SectionLabel>
+              <SectionLabel count={group.items.length}>
+                {group.label}
+              </SectionLabel>
 
               <ListBox>
                 {group.items.map((run) => {
@@ -101,33 +113,36 @@ export default async function RunsPage() {
                     <Link
                       key={run.id}
                       href={`/runs/${run.id}`}
-                      className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover"
+                      className="group hover:bg-surface-hover flex items-center gap-3 px-4 py-3 transition-colors"
                     >
                       <StatusDot tone={tone} live={run.status === "running"} />
 
                       <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-2">
-                          <span className="truncate text-sm font-medium text-foreground">
+                          <span className="text-foreground truncate text-sm font-medium">
                             {run.workflowName ?? "(deleted workflow)"}
                           </span>
                           <Badge tone="neutral">{run.trigger}</Badge>
                         </div>
-                        <p className="mt-0.5 truncate font-mono text-[11px] text-subtle">
-                          {at.toLocaleTimeString("en-US", { timeStyle: "short" })}
-                          {run.durationMs != null && ` · ${(run.durationMs / 1000).toFixed(1)}s`}
+                        <p className="text-subtle mt-0.5 truncate font-mono text-[11px]">
+                          {at.toLocaleTimeString("en-US", {
+                            timeStyle: "short",
+                          })}
+                          {run.durationMs != null &&
+                            ` · ${(run.durationMs / 1000).toFixed(1)}s`}
                           {run.inputTokens != null &&
                             run.outputTokens != null &&
                             ` · ${(run.inputTokens + run.outputTokens).toLocaleString()} tok`}
                         </p>
                       </div>
 
-                      <span className="hidden shrink-0 text-[11px] text-subtle sm:block">
+                      <span className="text-subtle hidden shrink-0 text-[11px] sm:block">
                         {relative(at)}
                       </span>
                       <Badge tone={tone} dot={run.status === "running"}>
                         {run.status}
                       </Badge>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-subtle transition-transform group-hover:translate-x-0.5" />
+                      <ChevronRight className="text-subtle h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
                     </Link>
                   );
                 })}
@@ -136,6 +151,6 @@ export default async function RunsPage() {
           ))}
         </div>
       )}
-    </main>
+    </PageShell>
   );
 }

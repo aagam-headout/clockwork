@@ -1,11 +1,10 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { Sun, Moon } from "lucide-react";
+import { NEXT_THEMES_KEY, THEME_KEY } from "@/lib/pre-paint";
 
 type Theme = "light" | "dark";
 
-const STORAGE_KEY = "mw-theme";
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
 /*
@@ -34,7 +33,7 @@ function subscribe(onChange: () => void) {
 
 function getSnapshot(): Theme {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(THEME_KEY);
     if (stored === "light" || stored === "dark") return stored;
   } catch {
     // Private-mode / disabled storage — fall through to the OS preference.
@@ -44,32 +43,33 @@ function getSnapshot(): Theme {
 
 function setTheme(theme: Theme) {
   try {
-    localStorage.setItem(STORAGE_KEY, theme);
+    localStorage.setItem(THEME_KEY, theme);
+    // auth-ui's next-themes provider reads this on mount; without it the auth
+    // and account screens follow the OS while the rest of the app is pinned.
+    localStorage.setItem(NEXT_THEMES_KEY, theme);
   } catch {
     // Non-persistent is still better than not switching at all.
   }
-  document.documentElement.setAttribute("data-theme", theme);
+  const root = document.documentElement;
+  root.setAttribute("data-theme", theme);
+  // next-themes only re-reads storage on mount and on cross-tab events, so its
+  // two markers are flipped here directly.
+  root.classList.toggle("dark", theme === "dark");
+  root.style.colorScheme = theme;
   for (const listener of listeners) listener();
 }
 
-export function ThemeToggle() {
-  // Server snapshot is "light"; the pre-paint script has already applied the
-  // pinned palette, and suppressHydrationWarning on <html> covers the mismatch.
-  const theme = useSyncExternalStore(subscribe, getSnapshot, () => "light" as Theme);
-  const next: Theme = theme === "dark" ? "light" : "dark";
-
-  return (
-    <button
-      type="button"
-      onClick={() => setTheme(next)}
-      title={`Switch to ${next} theme`}
-      aria-label={`Switch to ${next} theme`}
-      className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
-    >
-      {theme === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-    </button>
-  );
+/**
+ * Current palette, for the chrome that renders the control — the sidebar's
+ * Appearance row is the only one. Server snapshot
+ * is "light"; the pre-paint script has already applied the pinned palette, and
+ * suppressHydrationWarning on <html> covers the mismatch.
+ */
+export function useTheme(): Theme {
+  return useSyncExternalStore(subscribe, getSnapshot, () => "light" as Theme);
 }
 
-/** Inlined before paint so a pinned theme never flashes the wrong palette. */
-export const THEME_SCRIPT = `try{var t=localStorage.getItem("${STORAGE_KEY}");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}`;
+/** Flip light ⇄ dark. */
+export function toggleTheme() {
+  setTheme(getSnapshot() === "dark" ? "light" : "dark");
+}

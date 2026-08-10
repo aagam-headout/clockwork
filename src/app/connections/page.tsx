@@ -1,7 +1,20 @@
-import { listConnectedAccounts, searchToolkits, type ToolkitSummary } from "@/lib/composio";
+import {
+  listConnectedAccounts,
+  searchToolkits,
+  type ToolkitSummary,
+} from "@/lib/composio";
 import { requireOwner } from "@/lib/auth/require-owner";
 import { disconnectToolkit } from "@/lib/actions";
-import { Alert, Badge, Card, EmptyState, PageHeader, SectionLabel, buttonClass } from "@/components/ui";
+import {
+  Alert,
+  Badge,
+  Card,
+  EmptyState,
+  PageHeader,
+  PageShell,
+  SectionLabel,
+  buttonClass,
+} from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { ConnectorBrowser } from "@/components/connector-browser";
 import { ToolkitLogo } from "@/components/toolkit-logo";
@@ -34,10 +47,12 @@ export default async function ConnectionsPage() {
   ]);
 
   if (accountsResult.status === "fulfilled") accounts = accountsResult.value;
-  else loadError = accountsResult.reason?.message ?? String(accountsResult.reason);
+  else
+    loadError = accountsResult.reason?.message ?? String(accountsResult.reason);
 
   if (catalogResult.status === "fulfilled") catalog = catalogResult.value;
-  else loadError ??= catalogResult.reason?.message ?? String(catalogResult.reason);
+  else
+    loadError ??= catalogResult.reason?.message ?? String(catalogResult.reason);
 
   // Composio metadata is the source of truth for names/logos; fall back to the
   // slug so an unknown connector still renders sensibly.
@@ -61,7 +76,7 @@ export default async function ConnectionsPage() {
   const activeCount = connected.filter((c) => c.status === "ACTIVE").length;
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-10">
+    <PageShell>
       <PageHeader
         title="Connections"
         subtitle="Any app in the Composio catalog."
@@ -80,8 +95,10 @@ export default async function ConnectionsPage() {
         </div>
       )}
 
-      <section className="rise mt-8">
-        <SectionLabel count={connected.length || undefined}>Connected</SectionLabel>
+      <section className="rise mt-6">
+        <SectionLabel count={connected.length || undefined}>
+          Connected
+        </SectionLabel>
 
         {connected.length === 0 ? (
           <EmptyState
@@ -94,7 +111,11 @@ export default async function ConnectionsPage() {
             {connected.map((row) => {
               const active = row.status === "ACTIVE";
               return (
-                <Card key={row.id} interactive className="flex items-center gap-3 p-3">
+                <Card
+                  key={row.id}
+                  interactive
+                  className="flex items-center gap-3 p-3"
+                >
                   <ToolkitLogo
                     slug={row.slug}
                     name={row.name}
@@ -103,14 +124,18 @@ export default async function ConnectionsPage() {
                     connected={active}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="heading-14 truncate text-foreground">{row.name}</div>
+                    <div className="heading-14 text-foreground truncate">
+                      {row.name}
+                    </div>
                     <div className="flex items-center gap-1.5">
                       <span
                         className={`font-mono text-[11px] ${active ? "text-success-text" : "text-warn-text"}`}
                       >
                         {row.status.toLowerCase()}
                       </span>
-                      <span className="truncate font-mono text-[11px] text-subtle">{row.slug}</span>
+                      <span className="text-subtle truncate font-mono text-[11px]">
+                        {row.slug}
+                      </span>
                     </div>
                   </div>
 
@@ -151,11 +176,12 @@ export default async function ConnectionsPage() {
       <section className="rise mt-10">
         <SectionLabel>Add a connector</SectionLabel>
         <ConnectorBrowser
-          connectedSlugs={connected.filter((c) => c.status === "ACTIVE").map((c) => c.slug)}
+          connectedSlugs={connected
+            .filter((c) => c.status === "ACTIVE")
+            .map((c) => c.slug)}
           initialItems={catalog}
         />
       </section>
-
-    </main>
+    </PageShell>
   );
 }

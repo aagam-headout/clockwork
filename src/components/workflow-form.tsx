@@ -39,6 +39,7 @@ export function WorkflowForm({
   submitLabel,
   availableToolkits = [],
   models = [],
+  fillHeight = false,
 }: {
   action: (formData: FormData) => void;
   defaultValues?: Partial<WorkflowFormValues>;
@@ -47,9 +48,15 @@ export function WorkflowForm({
   availableToolkits?: ToolkitOption[];
   /** Model catalog from AI Gateway; the picker refreshes it on open. */
   models?: ModelInfo[];
+  /**
+   * Pin the card to its container's height (lg+) and scroll the sections
+   * inside it, so the card frame and its footer stay put. Off by default:
+   * standalone pages let the whole page scroll instead.
+   */
+  fillHeight?: boolean;
 }) {
   const [selectedToolkits, setSelectedToolkits] = useState<Set<string>>(
-    new Set(defaultValues?.toolkits ?? ["composio_search"])
+    new Set(defaultValues?.toolkits ?? ["composio_search"]),
   );
   const [cron, setCron] = useState(defaultValues?.cron ?? "0 8 * * 1-5");
   const [extraSlug, setExtraSlug] = useState("");
@@ -57,13 +64,20 @@ export function WorkflowForm({
   // workflow already had but that isn't currently connected — never drop those
   // silently on save.
   const [extraToolkits, setExtraToolkits] = useState<ToolkitOption[]>(() => {
-    const known = new Set([...availableToolkits.map((t) => t.slug), WEB_SEARCH.slug]);
+    const known = new Set([
+      ...availableToolkits.map((t) => t.slug),
+      WEB_SEARCH.slug,
+    ]);
     return (defaultValues?.toolkits ?? [])
       .filter((slug) => !known.has(slug))
       .map((slug) => ({ slug, name: TOOLKIT_LABELS[slug] ?? slug }));
   });
 
-  const options: ToolkitOption[] = [WEB_SEARCH, ...availableToolkits, ...extraToolkits];
+  const options: ToolkitOption[] = [
+    WEB_SEARCH,
+    ...availableToolkits,
+    ...extraToolkits,
+  ];
 
   function toggleToolkit(toolkit: string) {
     setSelectedToolkits((prev) => {
@@ -75,187 +89,224 @@ export function WorkflowForm({
   }
 
   function addExtraToolkit() {
-    const slug = extraSlug.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    const slug = extraSlug
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, "_");
     if (!slug) return;
     if (!options.some((o) => o.slug === slug)) {
-      setExtraToolkits((prev) => [...prev, { slug, name: TOOLKIT_LABELS[slug] ?? slug }]);
+      setExtraToolkits((prev) => [
+        ...prev,
+        { slug, name: TOOLKIT_LABELS[slug] ?? slug },
+      ]);
     }
     setSelectedToolkits((prev) => new Set(prev).add(slug));
     setExtraSlug("");
   }
 
   return (
+    // `overflow-clip` rather than `hidden` in the page-scroll case: it still clips
+    // the section corners but doesn't become a scroll container, which would kill
+    // the sticky footer. In `fillHeight` mode the card itself is the fixed frame
+    // and `sections` below is the scroll port.
     <form
       action={action}
-      className="flex flex-col gap-px overflow-hidden rounded-container border border-border bg-border"
+      className={`rounded-container border-border bg-surface @container flex flex-col overflow-clip border ${
+        fillHeight ? "lg:h-full lg:min-h-0" : ""
+      }`}
     >
-      <Section title="Basics">
-        <Field label="Name">
-          <input
-            name="name"
-            required
-            defaultValue={defaultValues?.name}
-            placeholder="morning-brief"
-            className="input"
-          />
-        </Field>
-
-        <Field label="Goal" hint="The entire prompt the agent runs on.">
-          <textarea
-            name="goal"
-            required
-            rows={5}
-            defaultValue={defaultValues?.goal}
-            placeholder="Check my calendar for today and my assigned GitHub issues. Summarize into a short digest. Flag any meeting conflicts."
-            className="input font-mono text-[13px]"
-          />
-        </Field>
-      </Section>
-
-      <Section title="Schedule">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Cron">
+      <div
+        className={`bg-border flex flex-col gap-px ${
+          fillHeight ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
+        }`}
+      >
+        <Section title="Basics">
+          <Field label="Name">
             <input
-              name="cron"
+              name="name"
               required
-              value={cron}
-              onChange={(e) => setCron(e.target.value)}
-              className="input font-mono"
+              defaultValue={defaultValues?.name}
+              placeholder="morning-brief"
+              className="input"
             />
           </Field>
 
-          <Field label="Timezone">
-            <input
-              name="timezone"
+          <Field label="Goal" hint="The entire prompt the agent runs on.">
+            <textarea
+              name="goal"
               required
-              defaultValue={defaultValues?.timezone ?? "Asia/Kolkata"}
-              className="input font-mono"
+              rows={5}
+              defaultValue={defaultValues?.goal}
+              placeholder="Check my calendar for today and my assigned GitHub issues. Summarize into a short digest. Flag any meeting conflicts."
+              className="input font-mono text-[13px]"
             />
           </Field>
-        </div>
+        </Section>
 
-        <div className="flex flex-wrap gap-1.5">
-          {CRON_PRESETS.map((preset) => (
-            <button
-              key={preset.value}
-              type="button"
-              onClick={() => setCron(preset.value)}
-              className={`h-7 cursor-pointer rounded-full border px-3 text-xs font-medium transition-colors ${
-                cron === preset.value
-                  ? "border-foreground bg-surface-2 text-foreground"
-                  : "border-border text-muted hover:border-border-strong hover:text-foreground"
-              }`}
-            >
-              {preset.label}
-            </button>
-          ))}
-        </div>
-      </Section>
+        <Section title="Schedule">
+          <div className="grid gap-4 @sm:grid-cols-2">
+            <Field label="Cron">
+              <input
+                name="cron"
+                required
+                value={cron}
+                onChange={(e) => setCron(e.target.value)}
+                className="input font-mono"
+              />
+            </Field>
 
-      <Section title="Tools">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {options.map((toolkit) => {
-            const on = selectedToolkits.has(toolkit.slug);
-            return (
-              <label
-                key={toolkit.slug}
-                className={`relative flex cursor-pointer items-center gap-2 rounded-control border px-2 py-1.5 text-[13px] font-medium transition-colors ${
-                  on
+            <Field label="Timezone">
+              <input
+                name="timezone"
+                required
+                defaultValue={defaultValues?.timezone ?? "Asia/Kolkata"}
+                className="input font-mono"
+              />
+            </Field>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {CRON_PRESETS.map((preset) => (
+              <button
+                key={preset.value}
+                type="button"
+                onClick={() => setCron(preset.value)}
+                className={`h-7 cursor-pointer rounded-full border px-3 text-xs font-medium transition-colors ${
+                  cron === preset.value
                     ? "border-foreground bg-surface-2 text-foreground"
                     : "border-border text-muted hover:border-border-strong hover:text-foreground"
                 }`}
               >
-                <input
-                  type="checkbox"
-                  name="toolkits"
-                  value={toolkit.slug}
-                  checked={on}
-                  onChange={() => toggleToolkit(toolkit.slug)}
-                  className="sr-only"
-                />
-                {toolkit.slug === WEB_SEARCH.slug ? (
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control border border-border bg-surface-2 text-subtle">
-                    <Globe className="h-3.5 w-3.5" />
-                  </span>
-                ) : (
-                  <ToolkitLogo slug={toolkit.slug} name={toolkit.name} logo={toolkit.logo} />
-                )}
-                <span className="truncate">{toolkit.name}</span>
-                {on && <Check className="ml-auto h-3.5 w-3.5 shrink-0" />}
-              </label>
-            );
-          })}
-        </div>
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </Section>
 
-        {availableToolkits.length === 0 && (
-          <p className="text-xs text-subtle">
-            Only web search available —{" "}
-            <Link href="/connections" className="text-accent-text underline underline-offset-2">
-              connect an app
-            </Link>
-            .
-          </p>
-        )}
+        <Section title="Tools">
+          <div className="grid grid-cols-1 gap-2 @md:grid-cols-2">
+            {options.map((toolkit) => {
+              const on = selectedToolkits.has(toolkit.slug);
+              return (
+                <label
+                  key={toolkit.slug}
+                  className={`rounded-control relative flex cursor-pointer items-center gap-2 border px-2 py-1.5 text-[13px] font-medium transition-colors ${
+                    on
+                      ? "border-foreground bg-surface-2 text-foreground"
+                      : "border-border text-muted hover:border-border-strong hover:text-foreground"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    name="toolkits"
+                    value={toolkit.slug}
+                    checked={on}
+                    onChange={() => toggleToolkit(toolkit.slug)}
+                    className="sr-only"
+                  />
+                  {toolkit.slug === WEB_SEARCH.slug ? (
+                    <span className="rounded-control border-border bg-surface-2 text-subtle flex h-7 w-7 shrink-0 items-center justify-center border">
+                      <Globe className="h-3.5 w-3.5" />
+                    </span>
+                  ) : (
+                    <ToolkitLogo
+                      slug={toolkit.slug}
+                      name={toolkit.name}
+                      logo={toolkit.logo}
+                    />
+                  )}
+                  <span className="truncate">{toolkit.name}</span>
+                  {on && <Check className="ml-auto h-3.5 w-3.5 shrink-0" />}
+                </label>
+              );
+            })}
+          </div>
 
-        <div className="flex items-center gap-2">
-          <input
-            value={extraSlug}
-            onChange={(e) => setExtraSlug(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addExtraToolkit();
-              }
-            }}
-            placeholder="Add by slug — linear, jira…"
-            className="input h-9"
-            aria-label="Add a toolkit by slug"
-          />
-          <button
-            type="button"
-            onClick={addExtraToolkit}
-            disabled={!extraSlug.trim()}
-            className={buttonClass("outline", "sm")}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add
-          </button>
-        </div>
-      </Section>
+          {availableToolkits.length === 0 && (
+            <p className="text-subtle text-xs">
+              Only web search available —{" "}
+              <Link
+                href="/connections"
+                className="text-accent-text underline underline-offset-2"
+              >
+                connect an app
+              </Link>
+              .
+            </p>
+          )}
 
-      <Section title="Model">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Model">
-            <ModelPicker defaultValue={defaultValues?.model} initialModels={models} />
-          </Field>
-
-          <Field label="Max steps">
+          <div className="flex items-center gap-2">
             <input
-              type="number"
-              name="maxSteps"
-              min={1}
-              max={30}
-              defaultValue={defaultValues?.maxSteps ?? 15}
-              className="input"
+              value={extraSlug}
+              onChange={(e) => setExtraSlug(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addExtraToolkit();
+                }
+              }}
+              placeholder="Add by slug — linear, jira…"
+              className="input h-9"
+              aria-label="Add a toolkit by slug"
             />
-          </Field>
-        </div>
-      </Section>
+            <button
+              type="button"
+              onClick={addExtraToolkit}
+              disabled={!extraSlug.trim()}
+              className={buttonClass("outline", "sm")}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add
+            </button>
+          </div>
+        </Section>
 
-      <Section title="Delivery">
-        <div className="flex flex-col gap-2">
-          <Checkbox checked disabled label="Dashboard" hint="Always on." />
-          <Checkbox
-            name="deliverSlack"
-            defaultChecked={defaultValues?.deliverSlack}
-            label="Slack DM"
-            hint="Needs Slack connected."
-          />
-        </div>
-      </Section>
+        <Section title="Model">
+          <div className="grid gap-4 @sm:grid-cols-2">
+            <Field label="Model">
+              <ModelPicker
+                defaultValue={defaultValues?.model}
+                initialModels={models}
+              />
+            </Field>
 
-      <div className="flex items-center justify-between gap-3 bg-bg-subtle px-5 py-4">
-        <p className="text-xs text-subtle">Read-only — the agent never writes.</p>
+            <Field label="Max steps">
+              <input
+                type="number"
+                name="maxSteps"
+                min={1}
+                max={30}
+                defaultValue={defaultValues?.maxSteps ?? 15}
+                className="input"
+              />
+            </Field>
+          </div>
+        </Section>
+
+        <Section title="Delivery">
+          <div className="flex flex-col gap-2">
+            <Checkbox checked disabled label="Dashboard" hint="Always on." />
+            <Checkbox
+              name="deliverSlack"
+              defaultChecked={defaultValues?.deliverSlack}
+              label="Slack DM"
+              hint="Needs Slack connected."
+            />
+          </div>
+        </Section>
+      </div>
+
+      {/* In fillHeight mode it sits outside the scroll port, so it's simply the
+          card's last row. Otherwise it sticks to the viewport bottom while the
+          form is taller than it, so the save action is never a scroll away. */}
+      <div
+        className={`border-border bg-bg-subtle/90 flex items-center justify-between gap-3 border-t px-5 py-3 backdrop-blur-md ${
+          fillHeight ? "lg:shrink-0" : "sticky bottom-0"
+        }`}
+      >
+        <p className="text-subtle text-xs">
+          Read-only — the agent never writes.
+        </p>
         <FormSubmitButton>{submitLabel}</FormSubmitButton>
       </div>
     </form>
@@ -272,11 +323,13 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="grid gap-x-8 gap-y-4 bg-surface px-5 py-6 sm:grid-cols-[200px_1fr]">
+    <section className="bg-surface grid gap-x-8 gap-y-4 px-5 py-5 @xl:grid-cols-[180px_1fr] @xl:py-6">
       <div>
         <h2 className="heading-14 text-foreground">{title}</h2>
         {description && (
-          <p className="mt-1 hidden text-xs leading-relaxed text-subtle sm:block">{description}</p>
+          <p className="text-subtle mt-1 hidden text-xs leading-relaxed @xl:block">
+            {description}
+          </p>
         )}
       </div>
       <div className="flex min-w-0 flex-col gap-4">{children}</div>
@@ -287,7 +340,11 @@ function Section({
 function FormSubmitButton({ children }: { children: React.ReactNode }) {
   const { pending } = useFormStatus();
   return (
-    <button type="submit" disabled={pending} className={buttonClass("primary", "md")}>
+    <button
+      type="submit"
+      disabled={pending}
+      className={buttonClass("primary", "md")}
+    >
       {pending ? "Saving…" : children}
     </button>
   );
@@ -304,9 +361,9 @@ function Field({
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <label className="text-[13px] font-medium text-foreground">{label}</label>
+      <label className="text-foreground text-[13px] font-medium">{label}</label>
       {children}
-      {hint && <p className="text-xs leading-relaxed text-subtle">{hint}</p>}
+      {hint && <p className="text-subtle text-xs leading-relaxed">{hint}</p>}
     </div>
   );
 }
@@ -328,8 +385,10 @@ function Checkbox({
 }) {
   return (
     <label
-      className={`flex items-start gap-2.5 rounded-control border border-border px-3 py-2.5 transition-colors ${
-        disabled ? "cursor-not-allowed opacity-70" : "cursor-pointer hover:border-border-strong"
+      className={`rounded-control border-border flex items-start gap-2.5 border px-3 py-2.5 transition-colors ${
+        disabled
+          ? "cursor-not-allowed opacity-70"
+          : "hover:border-border-strong cursor-pointer"
       }`}
     >
       <input
@@ -342,8 +401,10 @@ function Checkbox({
         className="mt-0.5 h-3.5 w-3.5 accent-[var(--solid)]"
       />
       <span className="min-w-0">
-        <span className="block text-[13px] font-medium text-foreground">{label}</span>
-        {hint && <span className="block text-xs text-subtle">{hint}</span>}
+        <span className="text-foreground block text-[13px] font-medium">
+          {label}
+        </span>
+        {hint && <span className="text-subtle block text-xs">{hint}</span>}
       </span>
     </label>
   );

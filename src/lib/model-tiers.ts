@@ -28,7 +28,10 @@ const BLEND = { input: 0.8, output: 0.2 };
 /** Tokens a typical digest run burns — used for the per-run cost estimate. */
 export const TYPICAL_RUN = { inputTokens: 20_000, outputTokens: 1_000 };
 
-export function blendedPerM(inputPerM?: number, outputPerM?: number): number | undefined {
+export function blendedPerM(
+  inputPerM?: number,
+  outputPerM?: number,
+): number | undefined {
   if (inputPerM == null || outputPerM == null) return undefined;
   return inputPerM * BLEND.input + outputPerM * BLEND.output;
 }
@@ -60,7 +63,8 @@ export const TIER_HINTS: Record<ModelTier, string> = {
 export function costPerRun(model: ModelInfo): number | undefined {
   if (model.inputPerM == null || model.outputPerM == null) return undefined;
   return (
-    (model.inputPerM * TYPICAL_RUN.inputTokens + model.outputPerM * TYPICAL_RUN.outputTokens) /
+    (model.inputPerM * TYPICAL_RUN.inputTokens +
+      model.outputPerM * TYPICAL_RUN.outputTokens) /
     1_000_000
   );
 }

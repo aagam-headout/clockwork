@@ -3,7 +3,15 @@
 // the same label and glyph for a given toolkit slug.
 // lucide dropped brand glyphs in v1, so Slack/GitHub fall back to the closest
 // generic marks (channel hash, git branch).
-import { Mail, Calendar, Hash, NotebookText, GitBranch, Globe, type LucideIcon } from "lucide-react";
+import {
+  Mail,
+  Calendar,
+  Hash,
+  NotebookText,
+  GitBranch,
+  Globe,
+  type LucideIcon,
+} from "lucide-react";
 
 export const TOOLKIT_LABELS: Record<string, string> = {
   googlecalendar: "Google Calendar",

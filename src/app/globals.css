@@ -2,6 +2,23 @@
 @import "@neondatabase/auth-ui/tailwind";
 
 /*
+ * better-auth-ui's markup carries `dark:` utilities, and Tailwind's stock dark
+ * variant is plain `prefers-color-scheme` — which ignores a pinned palette. This
+ * restates the variant as the same three-state resolution the tokens below use,
+ * so a pinned theme reaches those utilities too.
+ */
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+  &:where(:root[data-theme="dark"] *) {
+    @slot;
+  }
+}
+
+/*
  * Design tokens, tuned to Vercel's Geist system.
  *
  * The rules that keep it looking like Vercel and not a generic dashboard:
@@ -158,6 +175,82 @@
   --shadow-card: none;
   --shadow-raised: 0 2px 6px rgb(0 0 0 / 0.6);
   --shadow-pop: 0 12px 40px rgb(0 0 0 / 0.8);
+}
+
+/* ---------- Neon Auth UI bridge ---------- */
+
+/*
+ * @neondatabase/auth-ui renders better-auth-ui's shadcn markup, and every color
+ * it paints resolves through `var(--neon-x, var(--x, <zinc default>))` while its
+ * dark palette keys off `:root.dark`. This app defined none of those names, so
+ * AccountView and AuthView came out in stock shadcn zinc — light cards, 10px
+ * radii, blue-black buttons — regardless of the palette around them. Mapping the
+ * shadcn token names onto our scale is what makes them one UI.
+ *
+ * These live unlayered, so they beat the package's `@layer neon-auth` defaults,
+ * and each one is an alias rather than a literal, so they follow `data-theme`
+ * for free — the package's own dark palette keys off a `.dark` class we don't
+ * set, and would otherwise never fire.
+ */
+/* `--border` and `--ring` are deliberately absent: ours already carry exactly
+   the shadcn meaning, so the package picks them up as-is. */
+:root {
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--surface);
+  --card-foreground: var(--fg);
+  --popover: var(--surface);
+  --popover-foreground: var(--fg);
+  --primary: var(--solid);
+  --primary-foreground: var(--solid-fg);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--fg);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--fg-muted);
+  --accent-foreground: var(--fg);
+  --destructive: var(--danger);
+  --destructive-foreground: #ffffff;
+  --input: var(--border);
+  --sidebar: var(--bg-subtle);
+  --sidebar-foreground: var(--fg);
+  --sidebar-primary: var(--solid);
+  --sidebar-primary-foreground: var(--solid-fg);
+  --sidebar-accent: var(--surface-hover);
+  --sidebar-accent-foreground: var(--fg);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+}
+
+/*
+ * Two token names mean different things in the two systems: shadcn's `accent`
+ * is a hover *surface* (ours is the blue link color) and `muted` is a *surface*
+ * (ours is secondary text). Our `@theme` below is the last one imported, so it
+ * owns both names app-wide; this scope hands the auth subtree the shadcn
+ * reading back.
+ *
+ * It has to re-point `--accent` and not `--color-accent`: `@theme inline`
+ * compiles `bg-accent` down to `background-color: var(--accent)` with no
+ * `--color-accent` indirection left to override — which is why better-auth-ui's
+ * `bg-accent` skeletons kept coming out link-blue.
+ */
+.auth-surface,
+/* Its toasts and dialogs portal to <body>, outside the subtree above. */
+[data-sonner-toaster],
+[data-radix-popper-content-wrapper] {
+  --accent: var(--surface-hover);
+  /* Drives --radius-sm/md/lg/xl for everything better-auth-ui renders. */
+  --neon-radius: 8px;
+}
+
+/*
+ * `muted` can't be re-pointed the same way: `bg-muted` and `text-muted` both
+ * compile to `var(--fg-muted)`, so moving that variable would fix the surfaces
+ * and blank out the text with them. Only the surface reading is wrong here.
+ */
+.auth-surface :is(.bg-muted, .bg-muted\/50),
+[data-sonner-toaster] :is(.bg-muted, .bg-muted\/50),
+[data-radix-popper-content-wrapper] :is(.bg-muted, .bg-muted\/50) {
+  background-color: var(--surface-2);
 }
 
 @theme inline {
@@ -338,7 +431,8 @@ body {
 
 select.input {
   appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, var(--fg-subtle) 50%),
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--fg-subtle) 50%),
     linear-gradient(135deg, var(--fg-subtle) 50%, transparent 50%);
   background-position:
     calc(100% - 15px) calc(50% + 1px),
@@ -466,4 +560,66 @@ svg.lucide {
   box-shadow:
     inset 0 1px 0 color-mix(in oklab, #fff 22%, transparent),
     inset 0 0 0 1px color-mix(in oklab, var(--fg) 18%, transparent);
+}
+
+/* ---------- sidebar rail ---------- */
+
+/*
+ * The expanded/collapsed rail is driven by a `data-sidebar` attribute on <html>
+ * (set before paint by SIDEBAR_SCRIPT) rather than React state, so the rail
+ * never renders at the wrong width for a frame on load. Only the toggle button
+ * itself reads the value in JS.
+ *
+ * All of it is scoped to md+ — below that the rail is a drawer at full width —
+ * and between 768px and 1000px the collapsed shape is forced regardless of the
+ * stored preference, because a 240px rail plus content doesn't fit there.
+ */
+:root {
+  --sidebar-w: 240px;
+}
+
+@media (min-width: 768px) {
+  .sidebar {
+    width: var(--sidebar-w);
+    transition: width 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  :root[data-sidebar="collapsed"] {
+    --sidebar-w: 60px;
+  }
+
+  /* Text that has nowhere to go in a 60px rail. */
+  :root[data-sidebar="collapsed"] .sidebar-label {
+    display: none;
+  }
+
+  /* Rows go from "icon + label" to a centered icon. */
+  :root[data-sidebar="collapsed"] .sidebar-row {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
+
+/* Forced collapse: same three declarations, no attribute required. */
+@media (min-width: 768px) and (max-width: 999.98px) {
+  :root {
+    --sidebar-w: 60px;
+  }
+
+  .sidebar-label {
+    display: none;
+  }
+
+  .sidebar-row {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
 }

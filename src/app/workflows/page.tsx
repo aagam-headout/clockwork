@@ -14,6 +14,7 @@ import {
   EmptyState,
   Mono,
   PageHeader,
+  PageShell,
   StatusDot,
   statusTone,
 } from "@/components/ui";
@@ -37,11 +38,18 @@ function nextRunAt(cron: string, timezone: string): string | null {
 export default async function WorkflowsPage() {
   await requireOwner();
 
-  const rows = await db.select().from(workflows).orderBy(desc(workflows.createdAt));
+  const rows = await db
+    .select()
+    .from(workflows)
+    .orderBy(desc(workflows.createdAt));
 
   // One query, reduced in JS to "latest run per workflow" — simpler than a
   // window function and plenty fast at this scale (personal tool, low volume).
-  const recentRuns = await db.select().from(runs).orderBy(desc(runs.createdAt)).limit(300);
+  const recentRuns = await db
+    .select()
+    .from(runs)
+    .orderBy(desc(runs.createdAt))
+    .limit(300);
   const latestStatusByWorkflow = new Map<string, string>();
   for (const run of recentRuns) {
     if (!latestStatusByWorkflow.has(run.workflowId)) {
@@ -52,14 +60,21 @@ export default async function WorkflowsPage() {
   const enabledCount = rows.filter((w) => w.enabled).length;
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-10">
+    <PageShell>
       <PageHeader
         title="Workflows"
-        subtitle={rows.length === 0 ? undefined : `${rows.length} total · ${enabledCount} active`}
+        subtitle="Scheduled agents that read your apps and report back."
+        actions={
+          rows.length === 0 ? undefined : (
+            <Badge tone={enabledCount > 0 ? "success" : "warn"} dot>
+              {rows.length} total · {enabledCount} active
+            </Badge>
+          )
+        }
       />
 
       {rows.length === 0 ? (
-        <div className="mt-10">
+        <div className="mt-6">
           <EmptyState
             icon={Workflow}
             title="No workflows yet"
@@ -82,7 +97,10 @@ export default async function WorkflowsPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       {latestStatus && (
-                        <span title={`Last run: ${latestStatus}`} className="flex items-center">
+                        <span
+                          title={`Last run: ${latestStatus}`}
+                          className="flex items-center"
+                        >
                           <StatusDot
                             tone={statusTone(latestStatus)}
                             live={latestStatus === "running"}
@@ -91,7 +109,7 @@ export default async function WorkflowsPage() {
                       )}
                       <Link
                         href={`/workflows/${wf.id}`}
-                        className="heading-16 truncate text-foreground hover:underline"
+                        className="heading-16 text-foreground truncate hover:underline"
                       >
                         {wf.name}
                       </Link>
@@ -99,7 +117,7 @@ export default async function WorkflowsPage() {
                       {!wf.enabled && <Badge tone="warn">paused</Badge>}
                     </div>
 
-                    <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-muted">
+                    <p className="text-muted mt-2 line-clamp-2 text-sm leading-relaxed">
                       {wf.goal}
                     </p>
 
@@ -111,7 +129,7 @@ export default async function WorkflowsPage() {
                       ))}
                     </div>
 
-                    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-subtle">
+                    <div className="text-subtle mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                       <span className="inline-flex items-center gap-1">
                         <Clock className="h-3.5 w-3.5" />
                         {wf.enabled
@@ -140,7 +158,11 @@ export default async function WorkflowsPage() {
                         await runWorkflowNow(wf.id);
                       }}
                     >
-                      <SubmitButton pendingLabel="Running…" icon={Play} variant="outline">
+                      <SubmitButton
+                        pendingLabel="Running…"
+                        icon={Play}
+                        variant="outline"
+                      >
                         Run now
                       </SubmitButton>
                     </form>
@@ -156,7 +178,9 @@ export default async function WorkflowsPage() {
                         icon={wf.enabled ? Pause : Play}
                         variant="ghost"
                         iconOnly
-                        title={wf.enabled ? "Pause schedule" : "Enable schedule"}
+                        title={
+                          wf.enabled ? "Pause schedule" : "Enable schedule"
+                        }
                       >
                         {wf.enabled ? "Pause" : "Enable"}
                       </SubmitButton>
@@ -186,6 +210,6 @@ export default async function WorkflowsPage() {
           })}
         </div>
       )}
-    </main>
+    </PageShell>
   );
 }

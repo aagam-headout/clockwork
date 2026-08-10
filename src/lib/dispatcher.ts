@@ -10,17 +10,33 @@ import { runWorkflow } from "@/lib/executor";
  * since it last ran. Tick cadence (GH Actions, every 5 min) is the real
  * schedule resolution; the cron expression only has to be coarser than that.
  */
-function isDue(cron: string, timezone: string, lastRunAt: Date | null, now: Date): boolean {
-  const interval = CronExpressionParser.parse(cron, { currentDate: now, tz: timezone });
+function isDue(
+  cron: string,
+  timezone: string,
+  lastRunAt: Date | null,
+  now: Date,
+): boolean {
+  const interval = CronExpressionParser.parse(cron, {
+    currentDate: now,
+    tz: timezone,
+  });
   const mostRecentFire = interval.prev().toDate();
   if (!lastRunAt) return true;
   return mostRecentFire > lastRunAt;
 }
 
 export async function runDueWorkflows(now: Date = new Date()) {
-  const enabled = await db.select().from(workflows).where(eq(workflows.enabled, true));
+  const enabled = await db
+    .select()
+    .from(workflows)
+    .where(eq(workflows.enabled, true));
 
-  const results: Array<{ workflowId: string; slug: string; status: string; error?: string }> = [];
+  const results: Array<{
+    workflowId: string;
+    slug: string;
+    status: string;
+    error?: string;
+  }> = [];
 
   for (const workflow of enabled) {
     let due: boolean;
