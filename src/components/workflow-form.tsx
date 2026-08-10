@@ -191,6 +191,12 @@ export function WorkflowForm({
   const [selectedToolkits, setSelectedToolkits] = useState<Set<string>>(
     new Set(defaultValues?.toolkits ?? ["composio_search"]),
   );
+  // Controlled only so the header can show a live count — everything else
+  // about the field (validation, submission) works the same as uncontrolled.
+  const [goal, setGoal] = useState(initial.goal ?? "");
+  // No tokenizer on the client; ~4 chars/token is the standard rough estimate
+  // and is plenty for "am I anywhere near the limit" purposes.
+  const goalTokens = goal.trim() ? Math.ceil(goal.trim().length / 4) : 0;
   const [cron, setCron] = useState(defaultValues?.cron || "0 8 * * 1-5");
   const [triggerType, setTriggerType] = useState<"cron" | "event">(
     defaultValues?.triggerType ?? "cron",
@@ -341,16 +347,25 @@ export function WorkflowForm({
             />
           </Field>
 
-          <Field label="Goal">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <label className="text-foreground text-[13px] font-medium">
+                Goal
+              </label>
+              <span className="text-subtle text-xs tabular-nums">
+                ~{goalTokens.toLocaleString()} tokens
+              </span>
+            </div>
             <textarea
               name="goal"
               required
               rows={5}
-              defaultValue={initial.goal}
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
               placeholder="Check my calendar for today and my assigned GitHub issues. Summarize into a short digest. Flag any meeting conflicts."
               className="input font-mono text-[13px]"
             />
-          </Field>
+          </div>
         </Section>
 
         <Section title="Trigger" icon={CalendarClock}>
@@ -446,7 +461,7 @@ export function WorkflowForm({
         </Section>
 
         <Section title="Tools" icon={Wrench}>
-          <div className="grid grid-cols-1 gap-2 @md:grid-cols-2">
+          <div className="grid grid-cols-2 gap-2">
             {options.map((toolkit) => {
               const on = selectedToolkits.has(toolkit.slug);
               return (

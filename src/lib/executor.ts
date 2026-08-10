@@ -31,28 +31,61 @@ const MEMORY_CHARS = 4_000;
 /** The agent's exact reply when nothing happened since the last digest. */
 export const NO_UPDATES = "NO_UPDATES";
 
-const SYSTEM_PROMPT = `You are a personal automation agent running an unattended, scheduled workflow.
+/**
+ * Deliberately static per workflow — every per-run fact (current time,
+ * previous digest, event payload) lives in the user prompt instead. A stable
+ * system prompt + tool schema prefix is what lets the provider's prompt cache
+ * hit across the steps of a run and across closely-spaced runs.
+ */
+function systemPrompt(workflow: Workflow): string {
+  const cadence = workflow.cron
+    ? `It runs on the cron schedule "${workflow.cron}" (${workflow.timezone}), so "since the last run" means roughly one such interval.`
+    : `It runs whenever a matching event fires, so runs may be minutes or days apart — judge recency from the timestamps in the prompt, not from an assumed schedule.`;
+
+  return `You are a personal automation agent running "${workflow.name}", an unattended,
+scheduled workflow. ${cadence}
+
+The current date and time appears at the top of the user message. Treat it as
+ground truth for "today"/"latest"/"current" — never answer from your own training
+data for anything that changes over time (prices, scores, GMP, news, schedules,
+statuses). If a fact could plausibly be different today than when you were
+trained, you MUST fetch it fresh with a tool this run; do not state it from memory.
 
 Nobody is watching this run. There is no one to ask, so when the goal is
 ambiguous, take the narrowest reading that is still useful and note the
 assumption in one line at the end of the digest.
 
+You have a hard budget of ${workflow.maxSteps} steps for this run, and every
+tool call spends one. Budget them: fetch what the goal depends on first, and
+leave room for any delivery tool call you were asked to make — a run that hits
+the cap mid-task is recorded as truncated, which is worse than a digest built
+from one fetch fewer.
+
 Rules:
 - You are READ-ONLY. Only the tools you've been given exist for you — there is
   no other way to take action, so never claim to have sent, created, or
   changed anything unless you actually called a tool that did it.
-- Work in the fewest tool calls that answer the goal. Fetch, then stop — do not
-  keep browsing for completeness once you can write the digest.
+- If the goal or trigger payload contains a URL, you MUST call a fetch/search
+  tool against it this run to get its current content — never describe or
+  summarize a URL's contents from memory, and never reuse a stale value from
+  your previous digest when a live source is available to check it.
+- Work in the fewest tool calls that answer the goal, but "fewest" never means
+  skipping the fetch a time-sensitive claim needs. Fetch what the goal
+  actually depends on, then stop — do not keep browsing for completeness once
+  you can write the digest.
 - Be concise. Your final answer is a short markdown digest a human will
   skim on a phone: headline first, then a tight bulleted list. No preamble,
   no "here is a summary of...".
 - If a tool call fails or returns nothing, say so plainly in one line rather
   than guessing or inventing content.
-- If you are shown a previous digest, report only what changed since it.
-  Do not repeat items it already covered.
+- If you are shown a previous digest, treat its numbers/facts as stale by
+  default — re-check them against a live source rather than repeating them,
+  and report only what changed since it. Do not repeat items it already
+  covered.
 - If nothing has changed since the previous digest, reply with exactly
   ${NO_UPDATES} and nothing else, and do not call any delivery tool. Silence
   is better than a digest that says "no updates" in ten words.`;
+}
 
 type EnqueueResult =
   | { runId: string; skipped?: false }
@@ -207,14 +240,19 @@ export async function executeRun(runId: string): Promise<RunResult> {
       .filter(Boolean)
       .join("\n");
 
-    const previous = await previousDigest(workflow.id);
+    const [previous, failure] = await Promise.all([
+      previousDigest(workflow.id),
+      previousFailure(workflow.id),
+    ]);
+    const now = new Date();
+    const system = systemPrompt(workflow);
 
     const result = await generateText({
       model: await resolveModelFor(workflow.ownerEmail, workflow.model),
       system: deliverInstructions
-        ? `${SYSTEM_PROMPT}\n\n${deliverInstructions}`
-        : SYSTEM_PROMPT,
-      prompt: buildPrompt(workflow, previous, run.triggerPayload),
+        ? `${system}\n\n${deliverInstructions}`
+        : system,
+      prompt: buildPrompt(workflow, previous, failure, run.triggerPayload, now),
       tools,
       stopWhen: stepCountIs(workflow.maxSteps),
       abortSignal: AbortSignal.timeout(RUN_TIMEOUT_MS),
@@ -356,19 +394,98 @@ async function previousDigest(
   return row ?? null;
 }
 
+/**
+ * What went wrong last time, so this run can route around it instead of
+ * repeating it: a truncated run means the plan was too wide for the step
+ * budget, an errored one names the tool or timeout that sank it.
+ */
+async function previousFailure(
+  workflowId: string,
+): Promise<{ status: string; error: string; at: Date } | null> {
+  // Only the *immediately preceding* finished run matters: an error three
+  // runs back that later runs sailed past is noise, not guidance. (The run
+  // currently executing is still "running", so it can't match here.)
+  const [row] = await db
+    .select({ status: runs.status, error: runs.error, at: runs.finishedAt })
+    .from(runs)
+    .where(
+      and(
+        eq(runs.workflowId, workflowId),
+        inArray(runs.status, ["error", "truncated", "ok"]),
+      ),
+    )
+    .orderBy(desc(runs.finishedAt))
+    .limit(1);
+
+  if (!row || row.status === "ok" || !row.error || !row.at) return null;
+  return { status: row.status, error: row.error, at: row.at };
+}
+
+/** URLs in the goal/payload are what the agent must actually fetch, not recall. */
+const URL_PATTERN = /https?:\/\/\S+/gi;
+
+/** "42 minutes" / "3 hours" / "2 days" — a daily digest is not "0 days old". */
+function humanizeAge(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"}`;
+}
+
 function buildPrompt(
   workflow: Workflow,
   previous: { body: string; at: Date } | null,
+  failure: { status: string; error: string; at: Date } | null,
   triggerPayload: unknown,
+  now: Date,
 ): string {
-  const parts = [workflow.goal];
+  const stamp = now.toLocaleString("en-US", {
+    timeZone: workflow.timezone,
+    dateStyle: "full",
+    timeStyle: "short",
+  });
+  const parts = [
+    `Right now it is ${stamp} (${workflow.timezone}), ${now.toISOString()} UTC.`,
+    workflow.goal,
+  ];
+
+  // Scan the payload too: an event workflow's URL usually arrives in the
+  // event, not in the goal written months earlier.
+  const payloadJson = triggerPayload ? JSON.stringify(triggerPayload) : "";
+  const urls = [
+    ...new Set([
+      ...(workflow.goal.match(URL_PATTERN) ?? []),
+      ...(payloadJson.match(URL_PATTERN) ?? []),
+    ]),
+  ].map((u) => u.replace(/[\\"',)\]}>.]+$/, ""));
+  if (urls.length) {
+    parts.push(
+      `---\nThe goal above references ${urls.length === 1 ? "this URL" : "these URLs"}:\n${urls
+        .map((u) => `- ${u}`)
+        .join(
+          "\n",
+        )}\nFetch ${urls.length === 1 ? "it" : "each of them"} with a tool this run and use only what comes back today — do not answer from what you already know about ${urls.length === 1 ? "that page" : "those pages"}.`,
+    );
+  }
 
   if (previous) {
+    const age = humanizeAge(now.getTime() - previous.at.getTime());
     parts.push(
-      `---\nYour previous digest for this workflow, from ${previous.at.toISOString()}:\n\n${previous.body.slice(
+      `---\nYour previous digest for this workflow, from ${previous.at.toISOString()} (${age} ago):\n\n${previous.body.slice(
         0,
         MEMORY_CHARS,
-      )}\n\nReport only what is new or changed since then.`,
+      )}\n\nThat digest is ${age} old — re-verify any time-sensitive figures in it against a live source before repeating them, and report only what is new or changed since then. Where a tool lets you filter by time, "new" means created or updated after ${previous.at.toISOString()} — use that cutoff explicitly rather than judging recency by eye.`,
+    );
+  }
+
+  if (failure) {
+    const age = humanizeAge(now.getTime() - failure.at.getTime());
+    parts.push(
+      failure.status === "truncated"
+        ? `---\nHeads-up: your previous attempt (${age} ago) ran out of steps before finishing — "${failure.error}". Plan tighter this time: fewer, more targeted tool calls, and write the digest before the budget runs out.`
+        : `---\nHeads-up: your previous attempt (${age} ago) failed with: "${failure.error}". If that error points at a specific tool or source, try a different tool or a narrower query for it this run rather than repeating the same call — and if it still fails, say so in the digest instead of erroring out.`,
     );
   }
 

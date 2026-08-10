@@ -1,7 +1,9 @@
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { createWorkflow } from "@/lib/actions";
 import { NewWorkflowClient } from "@/components/new-workflow-client";
 import { requireOwner } from "@/lib/auth/require-owner";
-import { PageHeader, PageShell } from "@/components/ui";
+import { PageShell } from "@/components/ui";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
 import { getModelCatalog } from "@/lib/models";
 
@@ -21,12 +23,15 @@ export default async function NewWorkflowPage() {
     // itself doesn't scroll — the chat and the form each scroll in their own
     // pane, so the composer and the save bar are always reachable.
     <PageShell fill>
-      <PageHeader
-        backHref="/workflows"
-        backLabel="Workflows"
-        title="New workflow"
-        subtitle="Describe the job in plain English, or fill the form yourself."
-      />
+      <Link
+        href="/workflows"
+        className="rise text-muted hover:text-foreground inline-flex items-center gap-1.5 text-[13px] transition-colors"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" />
+        Workflows
+        <span className="text-subtle">/</span>
+        <span className="text-foreground">New</span>
+      </Link>
 
       <div className="rise mt-6 min-h-0 lg:flex-1">
         <NewWorkflowClient

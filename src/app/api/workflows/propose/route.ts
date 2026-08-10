@@ -144,7 +144,16 @@ function systemPrompt(
   current: unknown,
   notes: string,
 ) {
-  return `You are a colleague helping someone set up a recurring personal automation. You
+  // The default audience is in Asia/Kolkata, where UTC's date is wrong for
+  // almost six hours a day.
+  const today = new Date().toLocaleDateString("en-CA", {
+    timeZone: "Asia/Kolkata",
+  });
+  return `Today's date is ${today}. Use it to resolve anything relative ("starting
+next Monday", "every day this week") the user says — never guess a date from
+your own training data.
+
+You are a colleague helping someone set up a recurring personal automation. You
 talk it through first, and only write the spec once you both know what it should
 do. The spec drives a read-only agent that will run unattended, so a wrong
 assumption here quietly produces a useless digest every morning.
@@ -207,11 +216,23 @@ sees nothing else — no chat history. Write it self-contained: which tools to
 check, the named channels/repos/labels, what to include and what to skip, and
 how to summarize. Fold in every decision you and the user reached.
 
+On every run after the first, the agent is also shown its previous digest and
+told to report only what changed. Write the goal so "new" is unambiguous —
+name the field that marks something as new (created date, unread state, a
+moving number) — otherwise every run re-reports the same items or, worse, goes
+silent on real changes.
+
 Available toolkits — these are the apps the user has actually connected, pick only
 what the goal needs and never invent a slug that isn't listed:
 ${toolkitSlugs.join(", ")}.
 "composio_search" needs no auth and covers news/web search — use it for anything about
 news, trends, or public information.
+
+If the user gave a specific URL (a page to track, an IPO/stock page, a status
+page, anything that changes over time), say so explicitly in the goal and
+state that the agent must fetch that URL fresh on every run rather than rely
+on what it already knows about it — stale numbers from memory are the #1 way
+these workflows go wrong.
 
 The agent that will run this workflow is READ-ONLY except that it may send itself a
 Slack DM if deliverSlack is true. It cannot send email, create issues, post to
@@ -226,8 +247,10 @@ one or two sources, a mid model when it must reason over several tools, a heavy
 model only for genuinely hard synthesis. A workflow that runs hourly should
 almost always be light.
 
-Default timezone to Asia/Kolkata unless the user implies otherwise. Keep maxSteps
-around 10-15 for a normal digest, higher only if the goal spans many toolkits.`;
+Default timezone to Asia/Kolkata unless the user implies otherwise. maxSteps is
+the run's hard tool-call budget: about 10-15 covers a normal digest, higher only
+if the goal spans many toolkits, and leave one extra step for the Slack DM when
+deliverSlack is true — a run that hits the cap is recorded as truncated.`;
 }
 
 export async function POST(req: NextRequest) {
