@@ -21,6 +21,9 @@ import {
 import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
 
 export const dynamic = "force-dynamic";
+// The "Run now" action finishes its work in `after()`; that work is bounded
+// by this segment's duration limit.
+export const maxDuration = 300;
 
 function nextRunAt(cron: string, timezone: string): string | null {
   try {
@@ -90,7 +93,10 @@ export default async function WorkflowsPage() {
         <div className="mt-6 flex flex-col gap-4">
           {rows.map((wf) => {
             const latestStatus = latestStatusByWorkflow.get(wf.id);
-            const next = wf.enabled ? nextRunAt(wf.cron, wf.timezone) : null;
+            const next =
+              wf.enabled && wf.triggerType !== "event"
+                ? nextRunAt(wf.cron, wf.timezone)
+                : null;
             return (
               <Card key={wf.id} interactive className="rise p-4 md:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-4">
@@ -113,7 +119,11 @@ export default async function WorkflowsPage() {
                       >
                         {wf.name}
                       </Link>
-                      <Mono>{wf.cron}</Mono>
+                      <Mono>
+                        {wf.triggerType === "event"
+                          ? `${wf.eventTriggers.length} event${wf.eventTriggers.length === 1 ? "" : "s"}`
+                          : wf.cron}
+                      </Mono>
                       {!wf.enabled && <Badge tone="warn">paused</Badge>}
                     </div>
 
@@ -132,11 +142,13 @@ export default async function WorkflowsPage() {
                     <div className="text-subtle mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                       <span className="inline-flex items-center gap-1">
                         <Clock className="h-3.5 w-3.5" />
-                        {wf.enabled
-                          ? next
-                            ? `Next ${next}`
-                            : "Invalid cron expression"
-                          : "Schedule paused"}
+                        {!wf.enabled
+                          ? "Paused"
+                          : wf.triggerType === "event"
+                            ? `Runs on ${wf.eventTriggers.join(", ") || "no events yet"}`
+                            : next
+                              ? `Next ${next}`
+                              : "Invalid cron expression"}
                       </span>
                       {wf.lastRunAt && (
                         <span>

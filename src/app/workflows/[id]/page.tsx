@@ -24,6 +24,9 @@ import {
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
+// "Run now" continues in `after()` after the action responds; the run itself
+// needs the full window, and `after` work is bounded by this segment's limit.
+export const maxDuration = 300;
 
 export default async function EditWorkflowPage({
   params,
@@ -59,7 +62,9 @@ export default async function EditWorkflowPage({
   ]);
 
   const deliver = (workflow.deliver as DeliverTarget[]) ?? [];
-  const deliverSlack = deliver.some((d) => d.type === "slack_dm");
+  const slackChannel = deliver.find((d) => d.type === "slack_channel");
+  const email = deliver.find((d) => d.type === "email");
+  const webhook = deliver.find((d) => d.type === "webhook");
 
   const boundUpdate = updateWorkflow.bind(null, id);
   const boundDelete = deleteWorkflow.bind(null, id);
@@ -122,12 +127,25 @@ export default async function EditWorkflowPage({
           defaultValues={{
             name: workflow.name,
             goal: workflow.goal,
+            triggerType: workflow.triggerType === "event" ? "event" : "cron",
             cron: workflow.cron,
             timezone: workflow.timezone,
+            eventTriggers: workflow.eventTriggers,
             model: workflow.model,
             maxSteps: workflow.maxSteps,
             toolkits: workflow.toolkits,
-            deliverSlack,
+            allowTools: workflow.allowTools,
+            denyTools: workflow.denyTools,
+            deliverSlack: deliver.some((d) => d.type === "slack_dm"),
+            deliverSlackChannel: Boolean(slackChannel),
+            slackChannel:
+              slackChannel?.type === "slack_channel"
+                ? slackChannel.channel
+                : "",
+            deliverEmail: Boolean(email),
+            emailTo: email?.type === "email" ? email.to : "",
+            deliverWebhook: Boolean(webhook),
+            webhookUrl: webhook?.type === "webhook" ? webhook.url : "",
           }}
         />
       </div>

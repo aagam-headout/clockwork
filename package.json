@@ -9,7 +9,16 @@
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
+    "docker:reset": "docker compose down -v",
+    "docker:psql": "docker compose exec db psql -U clockwork -d clockwork",
+    "docker:tick": "docker compose exec ticker sh -c 'curl -fsS -X POST -H \"Authorization: Bearer $CRON_SECRET\" http://app:3000/api/cron/tick'"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.46",
@@ -24,6 +33,7 @@
     "geist": "^1.7.2",
     "lucide-react": "^1.31.0",
     "next": "16.3.0",
+    "pg": "^8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "zod": "^4.4.3"
@@ -31,6 +41,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pg": "^8.21.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "drizzle-kit": "^0.31.10",
@@ -39,7 +50,16 @@
     "prettier": "^3.9.6",
     "prettier-plugin-tailwindcss": "^0.8.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   },
-  "packageManager": "pnpm@10.33.0"
+  "packageManager": "pnpm@10.33.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ],
+    "patchedDependencies": {
+      "@neondatabase/auth-ui@0.2.1-beta": "patches/@neondatabase__auth-ui@0.2.1-beta.patch"
+    }
+  }
 }

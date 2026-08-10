@@ -14,6 +14,8 @@ import {
   statusTone,
 } from "@/components/ui";
 import { History, ChevronRight } from "lucide-react";
+import { LiveRun } from "@/components/live-run";
+import { formatUsd } from "@/lib/model-tiers";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +59,7 @@ export default async function RunsPage() {
       durationMs: runs.durationMs,
       inputTokens: runs.inputTokens,
       outputTokens: runs.outputTokens,
+      costUsd: runs.costUsd,
       workflowName: workflows.name,
     })
     .from(runs)
@@ -74,6 +77,10 @@ export default async function RunsPage() {
   }
 
   const failed = rows.filter((r) => r.status === "error").length;
+  const inFlight = rows.some(
+    (r) => r.status === "running" || r.status === "queued",
+  );
+  const spend = rows.reduce((sum, r) => sum + Number(r.costUsd ?? 0), 0);
 
   return (
     <PageShell>
@@ -82,9 +89,13 @@ export default async function RunsPage() {
         subtitle="Every execution of your workflows, newest first."
         actions={
           rows.length === 0 ? undefined : (
-            <Badge tone={failed > 0 ? "danger" : "success"} dot>
-              {rows.length} runs{failed > 0 ? ` · ${failed} failed` : ""}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <LiveRun active={inFlight} />
+              <Badge tone={failed > 0 ? "danger" : "success"} dot>
+                {rows.length} runs{failed > 0 ? ` · ${failed} failed` : ""}
+              </Badge>
+              {spend > 0 && <Badge tone="neutral">{formatUsd(spend)}</Badge>}
+            </div>
           )
         }
       />
@@ -133,6 +144,8 @@ export default async function RunsPage() {
                           {run.inputTokens != null &&
                             run.outputTokens != null &&
                             ` · ${(run.inputTokens + run.outputTokens).toLocaleString()} tok`}
+                          {run.costUsd != null &&
+                            ` · ${formatUsd(Number(run.costUsd))}`}
                         </p>
                       </div>
 

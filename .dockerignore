@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.vercel
+.env*
+!.env.docker.example
+.playwright-mcp
+npm-debug.log*
+.pnpm-debug.log*
+.DS_Store

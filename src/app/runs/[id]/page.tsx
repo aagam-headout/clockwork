@@ -15,6 +15,8 @@ import {
   statusTone,
 } from "@/components/ui";
 import { Wrench, AlignLeft, TriangleAlert } from "lucide-react";
+import { LiveRun } from "@/components/live-run";
+import { formatUsd } from "@/lib/model-tiers";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +39,8 @@ export default async function RunDetailPage({
       durationMs: runs.durationMs,
       inputTokens: runs.inputTokens,
       outputTokens: runs.outputTokens,
+      costUsd: runs.costUsd,
+      finishReason: runs.finishReason,
       error: runs.error,
       workflowName: workflows.name,
       workflowId: workflows.id,
@@ -57,6 +61,12 @@ export default async function RunDetailPage({
 
   const tone = statusTone(run.status);
   const toolCalls = steps.filter((s) => s.type === "tool").length;
+  const inFlight = run.status === "running" || run.status === "queued";
+  const deliveryLog = (output?.deliveryLog ?? []) as Array<{
+    type: string;
+    ok: boolean;
+    error?: string;
+  }>;
 
   return (
     <PageShell>
@@ -74,7 +84,8 @@ export default async function RunDetailPage({
         }
         actions={
           <div className="flex items-center gap-2">
-            <Badge tone={tone} dot={run.status === "running"}>
+            <LiveRun active={inFlight} />
+            <Badge tone={tone} dot={inFlight}>
               {run.status}
             </Badge>
             <Badge tone="neutral">{run.trigger}</Badge>
@@ -91,7 +102,7 @@ export default async function RunDetailPage({
         }
       />
 
-      <div className="rise mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="rise mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         <Stat
           label="Duration"
           value={
@@ -117,12 +128,22 @@ export default async function RunDetailPage({
           value={
             run.outputTokens != null ? run.outputTokens.toLocaleString() : "—"
           }
+          hint={run.finishReason ? `finish: ${run.finishReason}` : undefined}
+        />
+        <Stat
+          label="Cost"
+          value={formatUsd(
+            run.costUsd != null ? Number(run.costUsd) : undefined,
+          )}
         />
       </div>
 
       {run.error && (
         <div className="mt-6">
-          <Alert tone="danger" title="Run failed">
+          <Alert
+            tone={run.status === "truncated" ? "warn" : "danger"}
+            title={run.status === "truncated" ? "Run cut short" : "Run failed"}
+          >
             <pre className="mt-1 overflow-x-auto font-mono text-xs leading-relaxed whitespace-pre-wrap">
               {run.error}
             </pre>
@@ -135,14 +156,28 @@ export default async function RunDetailPage({
           <SectionLabel>Output</SectionLabel>
           <Card className="overflow-hidden">
             <div className="text-foreground px-4 py-4 text-sm leading-relaxed whitespace-pre-wrap">
-              {output.body}
+              {output.unchanged ? (
+                <span className="text-muted italic">
+                  Nothing new since the previous digest — nothing was sent.
+                </span>
+              ) : (
+                output.body
+              )}
             </div>
-            <div className="border-border bg-bg-subtle text-subtle flex items-center gap-2 border-t px-4 py-2.5 text-xs">
-              Delivered to
-              {output.deliveredTo.map((target) => (
-                <Badge key={target} tone="success">
-                  {target}
-                </Badge>
+            <div className="border-border bg-bg-subtle text-subtle flex flex-wrap items-center gap-2 border-t px-4 py-2.5 text-xs">
+              Delivery
+              {deliveryLog.length === 0 && <span>—</span>}
+              {deliveryLog.map((entry) => (
+                <span
+                  key={entry.type}
+                  title={entry.error}
+                  className="inline-flex items-center"
+                >
+                  <Badge tone={entry.ok ? "success" : "warn"}>
+                    {entry.type}
+                    {entry.ok ? "" : " · failed"}
+                  </Badge>
+                </span>
               ))}
             </div>
           </Card>

@@ -1,0 +1,12 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index ef6aacd9dc6950eb4230ee72ee4e8f4768cd6075..00f8665f0b1c9ee491cf21fdeef054bf7d42d0ed 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -9512,6 +9512,7 @@ function SignInForm({ className, classNames, isSubmitting, localization, redirec
+ 							className: classNames == null ? void 0 : classNames.input,
+ 							placeholder: localization.PASSWORD_PLACEHOLDER,
+ 							disabled: isSubmitting,
++							enableToggle: true,
+ 							...field
+ 						}) }),
+ 						/* @__PURE__ */ jsx(FormMessage, { className: classNames == null ? void 0 : classNames.error })

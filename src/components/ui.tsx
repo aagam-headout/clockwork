@@ -72,7 +72,8 @@ export function StatusDot({
 export function statusTone(status: string): Tone {
   if (status === "ok") return "success";
   if (status === "error") return "danger";
-  if (status === "running") return "accent";
+  if (status === "truncated") return "warn";
+  if (status === "running" || status === "queued") return "accent";
   return "neutral";
 }
 

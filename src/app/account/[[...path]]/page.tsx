@@ -30,7 +30,15 @@ export default async function AccountPage({
       {/* `auth-surface` re-points the two shadcn token names that mean something
           else in our scale — see the Neon Auth bridge in globals.css. */}
       <div className="auth-surface rise mt-6">
-        <AccountView path={path[path.length - 1]} />
+        <AccountView
+          path={path[path.length - 1]}
+          classNames={{
+            sidebar: {
+              buttonActive:
+                "bg-surface text-foreground ring-1 ring-border font-medium",
+            },
+          }}
+        />
       </div>
     </PageShell>
   );

@@ -1,0 +1,77 @@
+# Local stack: Postgres, the app, and the scheduler — the three pieces that
+# are Neon, Vercel, and GitHub Actions in production. Composio and the AI
+# Gateway are remote APIs either way, so those still need real keys.
+#
+#   cp .env.docker.example .env.docker   # fill in COMPOSIO_API_KEY + AI_GATEWAY_API_KEY
+#   docker compose up
+#
+# App on http://localhost:3000, Postgres on localhost:5444.
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: clockwork
+      POSTGRES_PASSWORD: clockwork
+      POSTGRES_DB: clockwork
+    ports:
+      # 5444 on the host, so it never collides with a Postgres you already run.
+      - "5444:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clockwork -d clockwork"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: applies src/db/migrations, then exits. The app waits for it.
+  migrate:
+    build:
+      context: .
+      target: dev
+    env_file: .env.docker
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+    command: pnpm exec drizzle-kit migrate
+
+  app:
+    build:
+      context: .
+      target: dev
+    env_file: .env.docker
+    ports:
+      # APP_PORT lets the stack coexist with a `pnpm dev` already on 3000.
+      - "${APP_PORT:-3000}:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      # The repo is mounted for hot reload; node_modules stays the image's own
+      # (Linux) copy rather than the host's.
+      - .:/app
+      - node_modules:/app/node_modules
+      - next_cache:/app/.next
+
+  # Stands in for the GitHub Actions cron: pokes the same tick endpoint on the
+  # same 5-minute cadence, with the same bearer secret.
+  ticker:
+    image: alpine:3.21
+    env_file: .env.docker
+    depends_on:
+      - app
+    command: >
+      sh -c 'apk add --no-cache curl >/dev/null &&
+      while true; do
+        curl -fsS -m 300 -X POST -H "Authorization: Bearer $$CRON_SECRET" http://app:3000/api/cron/tick || echo "tick failed";
+        sleep "$${TICK_INTERVAL_SECONDS:-300}";
+      done'
+
+volumes:
+  pgdata:
+  node_modules:
+  next_cache:

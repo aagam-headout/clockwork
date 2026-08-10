@@ -25,7 +25,9 @@ export function NewWorkflowClient({
   availableToolkits: ToolkitOption[];
   models: ModelInfo[];
 }) {
-  const [proposal, setProposal] = useState<WorkflowFormValues | null>(null);
+  const [proposal, setProposal] = useState<Partial<WorkflowFormValues> | null>(
+    null,
+  );
 
   return (
     <div className="grid h-full min-h-0 gap-6 max-lg:items-start lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">

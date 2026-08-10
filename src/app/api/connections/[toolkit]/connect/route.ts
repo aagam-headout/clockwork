@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { initiateConnection, toolkitExists } from "@/lib/composio";
-import { auth } from "@/lib/auth/server";
+import { isOwner } from "@/lib/auth/require-owner";
 
 // GET so a plain <a href> / form-less button click can hit it directly and
 // follow the redirect — no client JS needed for the core flow.
@@ -11,8 +11,7 @@ export async function GET(
   // Belt-and-suspenders: middleware already blocks unauthenticated
   // requests, but this only exists to be linked from the (already
   // owner-gated) /connections page — reject anyone else outright.
-  const { data: session } = await auth.getSession();
-  if (session?.user?.email !== process.env.OWNER_EMAIL) {
+  if (!(await isOwner())) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

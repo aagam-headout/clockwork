@@ -1,35 +1,23 @@
-import { CronExpressionParser } from "cron-parser";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { workflows } from "@/db/schema";
 import { runWorkflow } from "@/lib/executor";
+import { isDue } from "@/lib/schedule";
 
 /**
- * A workflow is "due" if its most recent scheduled fire time (per its own
- * cron + timezone) is after `lastRunAt` — i.e. at least one tick has passed
- * since it last ran. Tick cadence (GH Actions, every 5 min) is the real
- * schedule resolution; the cron expression only has to be coarser than that.
+ * How long one tick may spend starting runs. The route's `maxDuration` is
+ * 300s and a single run may take up to 240s, so the dispatcher stops handing
+ * out work well before the function is killed — anything left over is still
+ * due on the next tick, because `lastAttemptAt` only moves for workflows that
+ * actually started.
  */
-function isDue(
-  cron: string,
-  timezone: string,
-  lastRunAt: Date | null,
-  now: Date,
-): boolean {
-  const interval = CronExpressionParser.parse(cron, {
-    currentDate: now,
-    tz: timezone,
-  });
-  const mostRecentFire = interval.prev().toDate();
-  if (!lastRunAt) return true;
-  return mostRecentFire > lastRunAt;
-}
+const TICK_BUDGET_MS = 240_000;
 
 export async function runDueWorkflows(now: Date = new Date()) {
   const enabled = await db
     .select()
     .from(workflows)
-    .where(eq(workflows.enabled, true));
+    .where(and(eq(workflows.enabled, true), eq(workflows.triggerType, "cron")));
 
   const results: Array<{
     workflowId: string;
@@ -38,10 +26,17 @@ export async function runDueWorkflows(now: Date = new Date()) {
     error?: string;
   }> = [];
 
+  const tickStartedAt = Date.now();
+
   for (const workflow of enabled) {
     let due: boolean;
     try {
-      due = isDue(workflow.cron, workflow.timezone, workflow.lastRunAt, now);
+      due = isDue(
+        workflow.cron,
+        workflow.timezone,
+        workflow.lastAttemptAt,
+        now,
+      );
     } catch (err) {
       results.push({
         workflowId: workflow.id,
@@ -52,6 +47,15 @@ export async function runDueWorkflows(now: Date = new Date()) {
       continue;
     }
     if (!due) continue;
+
+    if (Date.now() - tickStartedAt > TICK_BUDGET_MS) {
+      results.push({
+        workflowId: workflow.id,
+        slug: workflow.slug,
+        status: "deferred_to_next_tick",
+      });
+      continue;
+    }
 
     // Sequential on purpose: a shared Vercel function has one duration
     // budget (maxDuration) to split across every due workflow in this

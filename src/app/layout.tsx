@@ -5,6 +5,7 @@ import { GeistMono } from "geist/font/mono";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AuthProvider } from "@/components/auth-provider";
 import { auth } from "@/lib/auth/server";
+import { LOCAL_AUTH_BYPASS, LOCAL_OWNER_EMAIL } from "@/lib/auth/local";
 import { SIDEBAR_SCRIPT, THEME_SCRIPT } from "@/lib/pre-paint";
 import "./globals.css";
 
@@ -22,14 +23,18 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   // prerendering first — otherwise the cookie read below throws mid-build for
   // the two pages that would otherwise be static (/_not-found, /auth/forbidden).
   await connection();
-  const { data: session } = await auth.getSession();
-  const user = session?.user
-    ? {
-        name: session.user.name ?? null,
-        email: session.user.email ?? null,
-        image: session.user.image ?? null,
-      }
-    : null;
+  const user = LOCAL_AUTH_BYPASS
+    ? { name: null, email: LOCAL_OWNER_EMAIL, image: null }
+    : await (async () => {
+        const { data: session } = await auth.getSession();
+        return session?.user
+          ? {
+              name: session.user.name ?? null,
+              email: session.user.email ?? null,
+              image: session.user.image ?? null,
+            }
+          : null;
+      })();
 
   return (
     <html

@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/.vitest
 
 # next.js
 /.next/
@@ -30,11 +31,15 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — real secrets never, templates always
 .env*
+!.env*.example
 
 # vercel
 .vercel
+
+# local tooling output
+.playwright-mcp/
 
 # typescript
 *.tsbuildinfo

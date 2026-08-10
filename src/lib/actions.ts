@@ -3,10 +3,12 @@
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { db } from "@/db";
 import { workflows } from "@/db/schema";
-import { runWorkflow } from "@/lib/executor";
+import { enqueueRun, executeRun } from "@/lib/executor";
 import { disconnectAccount } from "@/lib/composio";
+import { syncEventTriggers } from "@/lib/triggers";
 import type { DeliverTarget } from "@/lib/read-only";
 import { requireOwner } from "@/lib/auth/require-owner";
 
@@ -18,25 +20,113 @@ function slugify(name: string) {
     .replace(/(^-|-$)/g, "");
 }
 
-function parseWorkflowForm(formData: FormData) {
-  const name = String(formData.get("name") ?? "").trim();
-  const goal = String(formData.get("goal") ?? "").trim();
-  const cron = String(formData.get("cron") ?? "").trim();
-  const timezone = String(formData.get("timezone") ?? "Asia/Kolkata").trim();
-  const model = String(
-    formData.get("model") ?? "anthropic/claude-sonnet-5",
-  ).trim();
-  const maxSteps = Number(formData.get("maxSteps") ?? 15);
-  const toolkits = formData.getAll("toolkits").map(String);
+function field(formData: FormData, key: string, fallback = "") {
+  return String(formData.get(key) ?? fallback).trim();
+}
 
+/**
+ * Delivery targets, each gated on its own checkbox. A checked target with an
+ * empty destination is a user error worth surfacing, not a silent drop.
+ */
+function parseDeliver(formData: FormData): DeliverTarget[] {
   const deliver: DeliverTarget[] = [{ type: "dashboard" }];
+
   if (formData.get("deliverSlack") === "on") deliver.push({ type: "slack_dm" });
 
-  if (!name || !goal || !cron || toolkits.length === 0) {
-    throw new Error("Name, goal, cron, and at least one toolkit are required.");
+  if (formData.get("deliverSlackChannel") === "on") {
+    const channel = field(formData, "slackChannel");
+    if (!channel) throw new Error("Slack channel delivery needs a channel.");
+    deliver.push({ type: "slack_channel", channel });
   }
 
-  return { name, goal, cron, timezone, model, maxSteps, toolkits, deliver };
+  if (formData.get("deliverEmail") === "on") {
+    const to = field(formData, "emailTo");
+    if (!to) throw new Error("Email delivery needs a recipient address.");
+    deliver.push({ type: "email", to });
+  }
+
+  if (formData.get("deliverWebhook") === "on") {
+    const url = field(formData, "webhookUrl");
+    if (!/^https?:\/\//i.test(url)) {
+      throw new Error("Webhook delivery needs an http(s) URL.");
+    }
+    deliver.push({ type: "webhook", url });
+  }
+
+  return deliver;
+}
+
+function parseWorkflowForm(formData: FormData) {
+  const name = field(formData, "name");
+  const goal = field(formData, "goal");
+  const triggerType =
+    field(formData, "triggerType", "cron") === "event" ? "event" : "cron";
+  const cron = field(formData, "cron");
+  const timezone = field(formData, "timezone", "Asia/Kolkata");
+  const model = field(formData, "model", "anthropic/claude-sonnet-5");
+  const maxSteps = Number(formData.get("maxSteps") ?? 15);
+  const toolkits = formData.getAll("toolkits").map(String);
+  const eventTriggers = formData
+    .getAll("eventTriggers")
+    .map(String)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const allowTools = splitList(field(formData, "allowTools"));
+  const denyTools = splitList(field(formData, "denyTools"));
+
+  const deliver = parseDeliver(formData);
+
+  if (!name || !goal || toolkits.length === 0) {
+    throw new Error("Name, goal, and at least one toolkit are required.");
+  }
+  if (triggerType === "cron" && !cron) {
+    throw new Error("A scheduled workflow needs a cron expression.");
+  }
+  if (triggerType === "event" && eventTriggers.length === 0) {
+    throw new Error("An event workflow needs at least one trigger.");
+  }
+
+  return {
+    name,
+    goal,
+    triggerType,
+    // An event workflow has no schedule; keep the column non-null and empty
+    // so the dispatcher never considers it due.
+    cron: triggerType === "event" ? "" : cron,
+    timezone,
+    model,
+    maxSteps,
+    toolkits,
+    eventTriggers,
+    allowTools,
+    denyTools,
+    deliver,
+  };
+}
+
+function splitList(value: string): string[] {
+  return value
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Registering the trigger with Composio is best-effort: the workflow is
+ * already saved and correct, and a Composio hiccup shouldn't lose the edit.
+ * A trigger that failed to register simply never fires — the failure is
+ * logged, and re-saving the workflow retries it.
+ */
+async function registerTriggers(eventTriggers: string[], triggerType: string) {
+  if (triggerType !== "event" || eventTriggers.length === 0) return;
+  try {
+    const results = await syncEventTriggers(eventTriggers);
+    for (const r of results.filter((r) => !r.ok)) {
+      console.error(`[triggers] failed to register ${r.slug}: ${r.error}`);
+    }
+  } catch (err) {
+    console.error("[triggers] registration failed", err);
+  }
 }
 
 export async function createWorkflow(formData: FormData) {
@@ -45,6 +135,7 @@ export async function createWorkflow(formData: FormData) {
   const slug = slugify(parsed.name);
 
   await db.insert(workflows).values({ ...parsed, slug });
+  await registerTriggers(parsed.eventTriggers, parsed.triggerType);
 
   revalidatePath("/workflows");
   redirect("/workflows");
@@ -58,6 +149,7 @@ export async function updateWorkflow(id: string, formData: FormData) {
     .update(workflows)
     .set({ ...parsed, updatedAt: new Date() })
     .where(eq(workflows.id, id));
+  await registerTriggers(parsed.eventTriggers, parsed.triggerType);
 
   revalidatePath("/workflows");
   revalidatePath(`/workflows/${id}`);
@@ -86,15 +178,32 @@ export async function disconnectToolkit(connectedAccountId: string) {
   revalidatePath("/connections");
 }
 
+/**
+ * Queues a manual run and hands the user straight to its live page. The run
+ * itself continues in `after()`, so the button doesn't stay pending for the
+ * minutes an agent run can take.
+ */
 export async function runWorkflowNow(id: string) {
   await requireOwner();
   const [workflow] = await db
-    .select()
+    .select({ id: workflows.id })
     .from(workflows)
     .where(eq(workflows.id, id));
   if (!workflow) throw new Error("workflow not found");
 
-  await runWorkflow(workflow, "manual");
+  const queued = await enqueueRun(id, "manual");
+
+  if (queued.skipped) {
+    // Already in flight — send the user to the run list rather than
+    // starting a second, concurrent run of the same workflow.
+    revalidatePath("/runs");
+    redirect("/runs");
+  }
+
+  const runId = queued.runId;
+  after(() => executeRun(runId));
+
   revalidatePath("/runs");
   revalidatePath("/");
+  redirect(`/runs/${runId}`);
 }

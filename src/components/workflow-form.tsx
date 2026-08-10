@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
@@ -22,15 +22,32 @@ const WEB_SEARCH = { slug: "composio_search", name: "Web search" };
 
 export type ToolkitOption = { slug: string; name: string; logo?: string };
 
+export type TriggerTypeOption = {
+  slug: string;
+  name: string;
+  description: string;
+  toolkit: string;
+};
+
 export type WorkflowFormValues = {
   name: string;
   goal: string;
+  triggerType: "cron" | "event";
   cron: string;
   timezone: string;
+  eventTriggers: string[];
   model: string;
   maxSteps: number;
   toolkits: string[];
+  allowTools: string[];
+  denyTools: string[];
   deliverSlack: boolean;
+  deliverSlackChannel: boolean;
+  slackChannel: string;
+  deliverEmail: boolean;
+  emailTo: string;
+  deliverWebhook: boolean;
+  webhookUrl: string;
 };
 
 export function WorkflowForm({
@@ -58,7 +75,14 @@ export function WorkflowForm({
   const [selectedToolkits, setSelectedToolkits] = useState<Set<string>>(
     new Set(defaultValues?.toolkits ?? ["composio_search"]),
   );
-  const [cron, setCron] = useState(defaultValues?.cron ?? "0 8 * * 1-5");
+  const [cron, setCron] = useState(defaultValues?.cron || "0 8 * * 1-5");
+  const [triggerType, setTriggerType] = useState<"cron" | "event">(
+    defaultValues?.triggerType ?? "cron",
+  );
+  const [eventTriggers, setEventTriggers] = useState<Set<string>>(
+    new Set(defaultValues?.eventTriggers ?? []),
+  );
+  const [triggerTypes, setTriggerTypes] = useState<TriggerTypeOption[]>([]);
   const [extraSlug, setExtraSlug] = useState("");
   // Slugs typed in by hand (e.g. an app connected in another tab) plus any the
   // workflow already had but that isn't currently connected — never drop those
@@ -78,6 +102,34 @@ export function WorkflowForm({
     ...availableToolkits,
     ...extraToolkits,
   ];
+
+  const toolkitKey = [...selectedToolkits].sort().join(",");
+
+  /*
+   * Which events you can listen to depends on which apps the workflow uses,
+   * so the catalog is fetched per toolkit selection — and only in event mode,
+   * since a scheduled workflow never needs it.
+   */
+  useEffect(() => {
+    if (triggerType !== "event") return;
+    const controller = new AbortController();
+    fetch(`/api/trigger-types?toolkits=${encodeURIComponent(toolkitKey)}`, {
+      signal: controller.signal,
+    })
+      .then((r) => (r.ok ? r.json() : { items: [] }))
+      .then((data) => setTriggerTypes(data.items ?? []))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [triggerType, toolkitKey]);
+
+  function toggleEventTrigger(slug: string) {
+    setEventTriggers((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+  }
 
   function toggleToolkit(toolkit: string) {
     setSelectedToolkits((prev) => {
@@ -143,44 +195,78 @@ export function WorkflowForm({
           </Field>
         </Section>
 
-        <Section title="Schedule">
-          <div className="grid gap-4 @sm:grid-cols-2">
-            <Field label="Cron">
-              <input
-                name="cron"
-                required
-                value={cron}
-                onChange={(e) => setCron(e.target.value)}
-                className="input font-mono"
-              />
-            </Field>
+        <Section title="Trigger">
+          <input type="hidden" name="triggerType" value={triggerType} />
 
-            <Field label="Timezone">
-              <input
-                name="timezone"
-                required
-                defaultValue={defaultValues?.timezone ?? "Asia/Kolkata"}
-                className="input font-mono"
-              />
-            </Field>
-          </div>
-
-          <div className="flex flex-wrap gap-1.5">
-            {CRON_PRESETS.map((preset) => (
+          <div className="flex gap-1.5">
+            {(
+              [
+                { value: "cron", label: "On a schedule" },
+                { value: "event", label: "On an event" },
+              ] as const
+            ).map((mode) => (
               <button
-                key={preset.value}
+                key={mode.value}
                 type="button"
-                onClick={() => setCron(preset.value)}
-                className={`h-7 cursor-pointer rounded-full border px-3 text-xs font-medium transition-colors ${
-                  cron === preset.value
+                onClick={() => setTriggerType(mode.value)}
+                className={`h-8 cursor-pointer rounded-full border px-3.5 text-xs font-medium transition-colors ${
+                  triggerType === mode.value
                     ? "border-foreground bg-surface-2 text-foreground"
                     : "border-border text-muted hover:border-border-strong hover:text-foreground"
                 }`}
               >
-                {preset.label}
+                {mode.label}
               </button>
             ))}
           </div>
+
+          {triggerType === "cron" ? (
+            <>
+              <div className="grid gap-4 @sm:grid-cols-2">
+                <Field label="Cron">
+                  <input
+                    name="cron"
+                    required
+                    value={cron}
+                    onChange={(e) => setCron(e.target.value)}
+                    className="input font-mono"
+                  />
+                </Field>
+
+                <Field label="Timezone">
+                  <input
+                    name="timezone"
+                    required
+                    defaultValue={defaultValues?.timezone ?? "Asia/Kolkata"}
+                    className="input font-mono"
+                  />
+                </Field>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {CRON_PRESETS.map((preset) => (
+                  <button
+                    key={preset.value}
+                    type="button"
+                    onClick={() => setCron(preset.value)}
+                    className={`h-7 cursor-pointer rounded-full border px-3 text-xs font-medium transition-colors ${
+                      cron === preset.value
+                        ? "border-foreground bg-surface-2 text-foreground"
+                        : "border-border text-muted hover:border-border-strong hover:text-foreground"
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <EventTriggerPicker
+              options={triggerTypes}
+              selected={eventTriggers}
+              onToggle={toggleEventTrigger}
+            />
+          )}
         </Section>
 
         <Section title="Tools">
@@ -292,7 +378,69 @@ export function WorkflowForm({
               label="Slack DM"
               hint="Needs Slack connected."
             />
+            <TargetWithInput
+              name="deliverSlackChannel"
+              label="Slack channel"
+              hint="Needs Slack connected."
+              inputName="slackChannel"
+              placeholder="#general or C0123456789"
+              defaultChecked={defaultValues?.deliverSlackChannel}
+              defaultValue={defaultValues?.slackChannel}
+            />
+            <TargetWithInput
+              name="deliverEmail"
+              label="Email"
+              hint="Sent through your connected Gmail."
+              inputName="emailTo"
+              type="email"
+              placeholder="you@example.com"
+              defaultChecked={defaultValues?.deliverEmail}
+              defaultValue={defaultValues?.emailTo}
+            />
+            <TargetWithInput
+              name="deliverWebhook"
+              label="Webhook"
+              hint="POSTed as JSON by the runner itself — no tool involved."
+              inputName="webhookUrl"
+              type="url"
+              placeholder="https://example.com/hook"
+              defaultChecked={defaultValues?.deliverWebhook}
+              defaultValue={defaultValues?.webhookUrl}
+            />
           </div>
+          <p className="text-subtle text-xs leading-relaxed">
+            Nothing is sent on a run where the agent finds no updates — only the
+            dashboard records it.
+          </p>
+        </Section>
+
+        <Section title="Tool filters">
+          <div className="grid gap-4 @sm:grid-cols-2">
+            <Field
+              label="Allow only"
+              hint="Optional whitelist. Trailing * works: GITHUB_LIST_*"
+            >
+              <input
+                name="allowTools"
+                defaultValue={defaultValues?.allowTools?.join(", ")}
+                placeholder="GITHUB_LIST_*, GMAIL_FETCH_EMAILS"
+                className="input font-mono text-[12px]"
+              />
+            </Field>
+            <Field label="Never use" hint="Wins over the allow list.">
+              <input
+                name="denyTools"
+                defaultValue={defaultValues?.denyTools?.join(", ")}
+                placeholder="SLACK_SEARCH_MESSAGES"
+                className="input font-mono text-[12px]"
+              />
+            </Field>
+          </div>
+          <p className="text-subtle text-xs leading-relaxed">
+            A toolkit can expose hundreds of tools, and every schema loaded is
+            prompt tokens spent on every step. Narrow it when a workflow only
+            ever needs two or three.
+          </p>
         </Section>
       </div>
 
@@ -310,6 +458,136 @@ export function WorkflowForm({
         <FormSubmitButton>{submitLabel}</FormSubmitButton>
       </div>
     </form>
+  );
+}
+
+/**
+ * Event triggers for the toolkits this workflow uses. Anything already saved
+ * stays listed even when the catalog can't be reached, so an unreachable
+ * Composio never silently drops a workflow's trigger on save.
+ */
+function EventTriggerPicker({
+  options,
+  selected,
+  onToggle,
+}: {
+  options: TriggerTypeOption[];
+  selected: Set<string>;
+  onToggle: (slug: string) => void;
+}) {
+  const known = new Set(options.map((o) => o.slug));
+  const rows = [
+    ...options,
+    ...[...selected]
+      .filter((slug) => !known.has(slug))
+      .map((slug) => ({
+        slug,
+        name: slug,
+        description: "Saved earlier — not in the current catalog.",
+        toolkit: "",
+      })),
+  ];
+
+  return (
+    <div className="flex flex-col gap-2">
+      {rows.length === 0 ? (
+        <p className="text-subtle text-xs leading-relaxed">
+          No events available for the selected tools. Pick a connected app above
+          — web search has no events.
+        </p>
+      ) : (
+        <div className="border-border rounded-control max-h-64 overflow-y-auto border">
+          {rows.map((option) => {
+            const on = selected.has(option.slug);
+            return (
+              <label
+                key={option.slug}
+                className={`border-border flex cursor-pointer items-start gap-2.5 border-b px-3 py-2.5 transition-colors last:border-b-0 ${
+                  on ? "bg-surface-2" : "hover:bg-surface-hover"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  name="eventTriggers"
+                  value={option.slug}
+                  checked={on}
+                  onChange={() => onToggle(option.slug)}
+                  className="mt-0.5 h-3.5 w-3.5 accent-[var(--solid)]"
+                />
+                <span className="min-w-0">
+                  <span className="text-foreground block font-mono text-[12px] font-medium">
+                    {option.slug}
+                  </span>
+                  <span className="text-subtle line-clamp-2 block text-xs">
+                    {option.description}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+      <p className="text-subtle text-xs leading-relaxed">
+        The workflow runs each time one of these fires, with the event payload
+        handed to the agent.
+      </p>
+    </div>
+  );
+}
+
+/** A delivery target whose destination field only appears once it's on. */
+function TargetWithInput({
+  name,
+  label,
+  hint,
+  inputName,
+  placeholder,
+  type = "text",
+  defaultChecked,
+  defaultValue,
+}: {
+  name: string;
+  label: string;
+  hint?: string;
+  inputName: string;
+  placeholder?: string;
+  type?: string;
+  defaultChecked?: boolean;
+  defaultValue?: string;
+}) {
+  const [on, setOn] = useState(Boolean(defaultChecked));
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label
+        className={`rounded-control border-border hover:border-border-strong flex cursor-pointer items-start gap-2.5 border px-3 py-2.5 transition-colors`}
+      >
+        <input
+          type="checkbox"
+          name={name}
+          checked={on}
+          onChange={(e) => setOn(e.target.checked)}
+          className="mt-0.5 h-3.5 w-3.5 accent-[var(--solid)]"
+        />
+        <span className="min-w-0">
+          <span className="text-foreground block text-[13px] font-medium">
+            {label}
+          </span>
+          {hint && <span className="text-subtle block text-xs">{hint}</span>}
+        </span>
+      </label>
+      {on && (
+        <input
+          name={inputName}
+          type={type}
+          required
+          defaultValue={defaultValue}
+          placeholder={placeholder}
+          className="input ml-6 h-9"
+          aria-label={`${label} destination`}
+        />
+      )}
+    </div>
   );
 }
 

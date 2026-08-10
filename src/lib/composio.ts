@@ -6,9 +6,29 @@ import { VercelProvider } from "@composio/vercel";
 // this fixed id — there is no multi-tenant user system to plumb through.
 export const COMPOSIO_USER_ID = "aagam";
 
-export const composio = new Composio({
-  apiKey: process.env.COMPOSIO_API_KEY,
-  provider: new VercelProvider(),
+/*
+ * Constructed on first use, not at import. The SDK throws when
+ * COMPOSIO_API_KEY is missing, and eagerly constructing it meant that a
+ * missing key took down every page that transitively imports this module —
+ * including ones that never touch Composio. Lazily, a missing key fails only
+ * the call that actually needed it.
+ */
+let client: Composio<VercelProvider> | null = null;
+
+function getClient(): Composio<VercelProvider> {
+  client ??= new Composio({
+    apiKey: process.env.COMPOSIO_API_KEY,
+    provider: new VercelProvider(),
+  });
+  return client;
+}
+
+export const composio = new Proxy({} as Composio<VercelProvider>, {
+  get(_target, prop, receiver) {
+    const instance = getClient();
+    const value = Reflect.get(instance, prop, receiver);
+    return typeof value === "function" ? value.bind(instance) : value;
+  },
 });
 
 export { TOOLKITS, type Toolkit } from "@/lib/toolkits";

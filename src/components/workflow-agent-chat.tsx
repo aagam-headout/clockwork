@@ -13,7 +13,9 @@ import {
 } from "lucide-react";
 import { buttonClass } from "@/components/ui";
 
-type Proposal = WorkflowFormValues & { rationale: string };
+// The agent proposes the basics; everything it doesn't decide (delivery
+// destinations, tool filters, event triggers) keeps the form's own defaults.
+type Proposal = Partial<WorkflowFormValues> & { rationale: string };
 
 type Message =
   | { role: "user"; content: string }
@@ -233,8 +235,8 @@ function SpecSummary({ spec }: { spec: Proposal }) {
     text: string;
   }> = [
     { icon: Clock, text: `${spec.cron} · ${spec.timezone}` },
-    { icon: Wrench, text: spec.toolkits.join(", ") },
-    { icon: Cpu, text: spec.model },
+    { icon: Wrench, text: (spec.toolkits ?? []).join(", ") },
+    { icon: Cpu, text: spec.model ?? "" },
   ];
 
   return (

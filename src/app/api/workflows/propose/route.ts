@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { gateway } from "@ai-sdk/gateway";
 import { z } from "zod";
-import { auth } from "@/lib/auth/server";
+import { isOwner } from "@/lib/auth/require-owner";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
 import { getModelCatalog } from "@/lib/models";
 import { formatUsd, type ModelInfo } from "@/lib/model-tiers";
@@ -98,8 +98,7 @@ around 10-15 for a normal digest, higher only if the goal spans many toolkits.`;
 }
 
 export async function POST(req: NextRequest) {
-  const { data: session } = await auth.getSession();
-  if (session?.user?.email !== process.env.OWNER_EMAIL) {
+  if (!(await isOwner())) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

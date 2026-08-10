@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { searchToolkits } from "@/lib/composio";
-import { auth } from "@/lib/auth/server";
+import { isOwner } from "@/lib/auth/require-owner";
 
 // Backs the connector search on /connections. Owner-gated like everything
 // else — the catalog itself isn't secret, but the Composio quota is.
 export async function GET(req: NextRequest) {
-  const { data: session } = await auth.getSession();
-  if (session?.user?.email !== process.env.OWNER_EMAIL) {
+  if (!(await isOwner())) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
