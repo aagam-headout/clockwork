@@ -11,10 +11,7 @@ import { LOCAL_AUTH_BYPASS } from "@/lib/auth/local";
 // keep that development-only.
 const gate = auth.middleware({ loginUrl: "/auth/sign-in" });
 
-type Gate = (
-  req: NextRequest,
-  event: unknown,
-) => Promise<Response> | Response;
+type Gate = (req: NextRequest, event: unknown) => Promise<Response> | Response;
 
 export default async function proxy(req: NextRequest, event: unknown) {
   if (LOCAL_AUTH_BYPASS) return NextResponse.next();

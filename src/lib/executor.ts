@@ -395,7 +395,13 @@ function truncateForTrace(output: unknown): object | null {
   };
 }
 
-export type DeliveryLogEntry = { type: string; ok: boolean; error?: string };
+export type DeliveryLogEntry = {
+  type: string;
+  ok: boolean;
+  /** Not attempted (nothing new to send) — distinct from tried and failed. */
+  skipped?: boolean;
+  error?: string;
+};
 
 /**
  * Records what actually reached each target. Tool-backed targets (Slack,
@@ -425,9 +431,16 @@ async function deliverOutput({
       continue;
     }
 
-    // Nothing new means nothing to send anywhere but the dashboard.
+    // Nothing new means nothing to send anywhere but the dashboard. That is
+    // the design working, not a delivery failure — the flag is what keeps the
+    // run page from labelling a quiet morning as "slack · failed".
     if (unchanged) {
-      log.push({ type: target.type, ok: false, error: "skipped — no updates" });
+      log.push({
+        type: target.type,
+        ok: false,
+        skipped: true,
+        error: "nothing new to send",
+      });
       continue;
     }
 

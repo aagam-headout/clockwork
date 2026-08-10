@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { runs, workflows } from "@/db/schema";
 import { requireOwner } from "@/lib/auth/require-owner";
 import {
+  Alert,
   Badge,
   EmptyState,
   ListBox,
@@ -13,7 +14,7 @@ import {
   StatusDot,
   statusTone,
 } from "@/components/ui";
-import { History, ChevronRight } from "lucide-react";
+import { History, ChevronRight, Clock, Calendar } from "lucide-react";
 import { LiveRun } from "@/components/live-run";
 import { formatUsd } from "@/lib/model-tiers";
 
@@ -46,8 +47,16 @@ function dayLabel(date: Date): string {
   });
 }
 
-export default async function RunsPage() {
+export default async function RunsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ notice?: string }>;
+}) {
   await requireOwner();
+
+  // Set when "Run now" landed on a workflow that was already running — the
+  // list is the right place to be, but not without being told why.
+  const { notice } = await searchParams;
 
   const rows = await db
     .select({
@@ -100,6 +109,14 @@ export default async function RunsPage() {
         }
       />
 
+      {notice && (
+        <div className="mt-6">
+          <Alert tone="accent" title="Already running">
+            {notice}
+          </Alert>
+        </div>
+      )}
+
       {rows.length === 0 ? (
         <div className="mt-6">
           <EmptyState
@@ -112,7 +129,7 @@ export default async function RunsPage() {
         <div className="mt-6 flex flex-col gap-8">
           {groups.map((group) => (
             <section key={group.label} className="rise">
-              <SectionLabel count={group.items.length}>
+              <SectionLabel icon={Calendar} count={group.items.length}>
                 {group.label}
               </SectionLabel>
 
@@ -126,7 +143,14 @@ export default async function RunsPage() {
                       href={`/runs/${run.id}`}
                       className="group hover:bg-surface-hover flex items-center gap-3 px-4 py-3 transition-colors"
                     >
-                      <StatusDot tone={tone} live={run.status === "running"} />
+                      {/* The dot sits on the title's cap-height rather than the
+                          two-line block's midpoint. */}
+                      <span className="flex h-5 shrink-0 items-center">
+                        <StatusDot
+                          tone={tone}
+                          live={run.status === "running"}
+                        />
+                      </span>
 
                       <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-2">
@@ -135,26 +159,46 @@ export default async function RunsPage() {
                           </span>
                           <Badge tone="neutral">{run.trigger}</Badge>
                         </div>
-                        <p className="text-subtle mt-0.5 truncate font-mono text-[11px]">
-                          {at.toLocaleTimeString("en-US", {
-                            timeStyle: "short",
-                          })}
-                          {run.durationMs != null &&
-                            ` · ${(run.durationMs / 1000).toFixed(1)}s`}
+                        {/* Metadata as separate spans on a fixed gap, not a
+                            "·"-joined string: the separators used to survive
+                            when the value between them was missing. */}
+                        <div className="text-subtle mt-1 flex min-w-0 items-center gap-2.5 font-mono text-[11px] tabular-nums">
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {at.toLocaleTimeString("en-US", {
+                              timeStyle: "short",
+                            })}
+                          </span>
+                          {run.durationMs != null && (
+                            <span>{(run.durationMs / 1000).toFixed(1)}s</span>
+                          )}
                           {run.inputTokens != null &&
-                            run.outputTokens != null &&
-                            ` · ${(run.inputTokens + run.outputTokens).toLocaleString()} tok`}
-                          {run.costUsd != null &&
-                            ` · ${formatUsd(Number(run.costUsd))}`}
-                        </p>
+                            run.outputTokens != null && (
+                              <span className="hidden sm:inline">
+                                {(
+                                  run.inputTokens + run.outputTokens
+                                ).toLocaleString()}{" "}
+                                tok
+                              </span>
+                            )}
+                        </div>
                       </div>
 
-                      <span className="text-subtle hidden shrink-0 text-[11px] sm:block">
+                      {/* Fixed-width right columns so cost and time line up
+                          down the list instead of ragging off the name. */}
+                      <span className="text-subtle hidden w-16 shrink-0 text-right font-mono text-[11px] tabular-nums sm:block">
+                        {run.costUsd != null
+                          ? formatUsd(Number(run.costUsd))
+                          : ""}
+                      </span>
+                      <span className="text-subtle hidden w-20 shrink-0 text-right text-[11px] sm:block">
                         {relative(at)}
                       </span>
-                      <Badge tone={tone} dot={run.status === "running"}>
-                        {run.status}
-                      </Badge>
+                      <span className="flex w-[86px] shrink-0 justify-end">
+                        <Badge tone={tone} dot={run.status === "running"}>
+                          {run.status}
+                        </Badge>
+                      </span>
                       <ChevronRight className="text-subtle h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
                     </Link>
                   );

@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
 import { CronExpressionParser } from "cron-parser";
 import { useFormStatus } from "react-dom";
+import type { WorkflowFormState } from "@/lib/actions";
 import Link from "next/link";
 import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
 import { buttonClass } from "@/components/ui";
 import { ToolkitLogo } from "@/components/toolkit-logo";
 import { ModelPicker } from "@/components/model-picker";
+import { fetchJson } from "@/lib/fetch-json";
 import type { ModelInfo } from "@/lib/model-tiers";
 import {
   Check,
@@ -19,6 +21,7 @@ import {
   Cpu,
   Send,
   Filter,
+  TriangleAlert,
 } from "lucide-react";
 
 const CRON_PRESETS: Array<{ label: string; value: string }> = [
@@ -120,7 +123,16 @@ export function WorkflowForm({
   fillHeight = false,
   title,
 }: {
-  action: (formData: FormData) => void;
+  /**
+   * A `useActionState` action: it returns the failure instead of throwing, so
+   * a rejected save re-renders this form — with everything the user typed
+   * still in it — under an explanation, rather than swapping the page for the
+   * error boundary.
+   */
+  action: (
+    state: WorkflowFormState,
+    formData: FormData,
+  ) => Promise<WorkflowFormState>;
   defaultValues?: Partial<WorkflowFormValues>;
   submitLabel: string;
   /**
@@ -140,6 +152,42 @@ export function WorkflowForm({
    */
   fillHeight?: boolean;
 }) {
+  const [state, formAction] = useActionState<WorkflowFormState, FormData>(
+    action,
+    { error: null },
+  );
+
+  /*
+   * React resets an uncontrolled form once its action settles — including when
+   * the action came back with an error — so after a rejected save the DOM
+   * fields fall back to their `defaultValue`. Seeding those from what was just
+   * submitted is what makes "fix the one bad field and press Save again"
+   * possible instead of retyping the whole form.
+   *
+   * Only the uncontrolled fields need this. Toolkits, trigger mode, cron,
+   * timezone and the delivery checkboxes are React state, and state survives
+   * the reset untouched.
+   */
+  const sent = state.values;
+  const initial = {
+    name: sent ? (sent.name ?? "") : defaultValues?.name,
+    goal: sent ? (sent.goal ?? "") : defaultValues?.goal,
+    maxSteps: sent
+      ? Number(sent.maxSteps) || 15
+      : (defaultValues?.maxSteps ?? 15),
+    slackChannel: sent
+      ? (sent.slackChannel ?? "")
+      : defaultValues?.slackChannel,
+    emailTo: sent ? (sent.emailTo ?? "") : defaultValues?.emailTo,
+    webhookUrl: sent ? (sent.webhookUrl ?? "") : defaultValues?.webhookUrl,
+    allowTools: sent
+      ? (sent.allowTools ?? "")
+      : defaultValues?.allowTools?.join(", "),
+    denyTools: sent
+      ? (sent.denyTools ?? "")
+      : defaultValues?.denyTools?.join(", "),
+  };
+
   const [selectedToolkits, setSelectedToolkits] = useState<Set<string>>(
     new Set(defaultValues?.toolkits ?? ["composio_search"]),
   );
@@ -151,6 +199,7 @@ export function WorkflowForm({
     new Set(defaultValues?.eventTriggers ?? []),
   );
   const [triggerTypes, setTriggerTypes] = useState<TriggerTypeOption[]>([]);
+  const [triggerError, setTriggerError] = useState<string | null>(null);
 
   const [timezone, setTimezone] = useState(
     defaultValues?.timezone ?? "Asia/Kolkata",
@@ -210,12 +259,28 @@ export function WorkflowForm({
   useEffect(() => {
     if (triggerType !== "event") return;
     const controller = new AbortController();
-    fetch(`/api/trigger-types?toolkits=${encodeURIComponent(toolkitKey)}`, {
-      signal: controller.signal,
-    })
-      .then((r) => (r.ok ? r.json() : { items: [] }))
-      .then((data) => setTriggerTypes(data.items ?? []))
-      .catch(() => {});
+
+    fetchJson<{ items?: TriggerTypeOption[] }>(
+      `/api/trigger-types?toolkits=${encodeURIComponent(toolkitKey)}`,
+      { signal: controller.signal },
+    )
+      // Cleared here rather than at the top of the effect: a synchronous
+      // setState in an effect body cascades a render for every toolkit toggle.
+      .then((data) => {
+        setTriggerTypes(Array.isArray(data.items) ? data.items : []);
+        setTriggerError(null);
+      })
+      .catch((err) => {
+        // Switching toolkits aborts the in-flight request; that isn't a
+        // failure worth reporting.
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        // Previously swallowed entirely, so an unreachable Composio looked
+        // exactly like "these apps have no events" — with no way to tell that
+        // picking an event was impossible rather than unnecessary.
+        setTriggerTypes([]);
+        setTriggerError(err instanceof Error ? err.message : String(err));
+      });
+
     return () => controller.abort();
   }, [triggerType, toolkitKey]);
 
@@ -243,7 +308,7 @@ export function WorkflowForm({
     // the sticky footer. In `fillHeight` mode the card itself is the fixed frame
     // and `sections` below is the scroll port.
     <form
-      action={action}
+      action={formAction}
       className={`rounded-container border-border bg-surface @container flex flex-col overflow-clip border ${
         fillHeight ? "lg:h-full lg:min-h-0" : ""
       }`}
@@ -270,7 +335,7 @@ export function WorkflowForm({
             <input
               name="name"
               required
-              defaultValue={defaultValues?.name}
+              defaultValue={initial.name}
               placeholder="morning-brief"
               className="input"
             />
@@ -281,7 +346,7 @@ export function WorkflowForm({
               name="goal"
               required
               rows={5}
-              defaultValue={defaultValues?.goal}
+              defaultValue={initial.goal}
               placeholder="Check my calendar for today and my assigned GitHub issues. Summarize into a short digest. Flag any meeting conflicts."
               className="input font-mono text-[13px]"
             />
@@ -375,6 +440,7 @@ export function WorkflowForm({
               options={triggerTypes}
               selected={eventTriggers}
               onToggle={toggleEventTrigger}
+              error={triggerError}
             />
           )}
         </Section>
@@ -484,7 +550,7 @@ export function WorkflowForm({
                 name="maxSteps"
                 min={1}
                 max={30}
-                defaultValue={defaultValues?.maxSteps ?? 15}
+                defaultValue={initial.maxSteps}
                 className="input"
               />
             </Field>
@@ -507,7 +573,7 @@ export function WorkflowForm({
               inputName="slackChannel"
               placeholder="#general or C0123456789"
               defaultChecked={defaultValues?.deliverSlackChannel}
-              defaultValue={defaultValues?.slackChannel}
+              defaultValue={initial.slackChannel}
             />
             <TargetWithInput
               name="deliverEmail"
@@ -517,7 +583,7 @@ export function WorkflowForm({
               type="email"
               placeholder="you@example.com"
               defaultChecked={defaultValues?.deliverEmail}
-              defaultValue={defaultValues?.emailTo}
+              defaultValue={initial.emailTo}
             />
             <TargetWithInput
               name="deliverWebhook"
@@ -527,7 +593,7 @@ export function WorkflowForm({
               type="url"
               placeholder="https://example.com/hook"
               defaultChecked={defaultValues?.deliverWebhook}
-              defaultValue={defaultValues?.webhookUrl}
+              defaultValue={initial.webhookUrl}
             />
           </div>
           <p className="text-subtle text-xs leading-relaxed">
@@ -546,7 +612,7 @@ export function WorkflowForm({
             >
               <input
                 name="allowTools"
-                defaultValue={defaultValues?.allowTools?.join(", ")}
+                defaultValue={initial.allowTools}
                 placeholder="GITHUB_LIST_*, GMAIL_FETCH_EMAILS"
                 className="input font-mono text-[12px]"
               />
@@ -554,7 +620,7 @@ export function WorkflowForm({
             <Field label="Never use" hint="Wins over the allow list.">
               <input
                 name="denyTools"
-                defaultValue={defaultValues?.denyTools?.join(", ")}
+                defaultValue={initial.denyTools}
                 placeholder="SLACK_SEARCH_MESSAGES"
                 className="input font-mono text-[12px]"
               />
@@ -562,6 +628,19 @@ export function WorkflowForm({
           </div>
         </Section>
       </div>
+
+      {/* Between the scroll port and the save bar: the one place that is on
+          screen in both layouts at the moment the user has just pressed Save
+          and is looking for what happened. */}
+      {state.error && (
+        <p
+          role="alert"
+          className="border-border bg-danger-soft text-danger-text flex shrink-0 items-start gap-2 border-t px-5 py-3 text-[13px]"
+        >
+          <TriangleAlert className="mt-px h-4 w-4 shrink-0" />
+          <span className="min-w-0">{state.error}</span>
+        </p>
+      )}
 
       {/* In fillHeight mode it sits outside the scroll port, so it's simply the
           card's last row. Otherwise it sticks to the viewport bottom while the
@@ -596,10 +675,13 @@ function EventTriggerPicker({
   options,
   selected,
   onToggle,
+  error,
 }: {
   options: TriggerTypeOption[];
   selected: Set<string>;
   onToggle: (slug: string) => void;
+  /** Why the catalog is empty, when it's empty because the fetch failed. */
+  error?: string | null;
 }) {
   const known = new Set(options.map((o) => o.slug));
   const rows = [
@@ -616,10 +698,21 @@ function EventTriggerPicker({
 
   return (
     <div className="flex flex-col gap-2">
+      {error && (
+        <p className="rounded-control border-warn-line bg-warn-soft text-warn-text flex items-start gap-2 border px-3 py-2 text-xs">
+          <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0">
+            Couldn&apos;t load the event catalog from Composio — {error}. Any
+            events already saved on this workflow are still listed below.
+          </span>
+        </p>
+      )}
+
       {rows.length === 0 ? (
         <p className="text-subtle text-xs leading-relaxed">
-          No events available for the selected tools. Pick a connected app above
-          — web search has no events.
+          {error
+            ? "No events to show while the catalog is unavailable."
+            : "No events available for the selected tools. Pick a connected app above — web search has no events."}
         </p>
       ) : (
         <div className="border-border rounded-control max-h-64 overflow-y-auto border">
@@ -772,7 +865,7 @@ function Pill({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      className={`h-8 cursor-pointer rounded-full border px-3.5 text-xs font-medium transition-colors ${
+      className={`rounded-control h-8 cursor-pointer border px-3.5 text-xs font-medium transition-colors ${
         selected
           ? "border-foreground bg-surface-2 text-foreground"
           : "border-border text-muted hover:border-border-strong hover:text-foreground"

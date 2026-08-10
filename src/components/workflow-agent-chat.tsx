@@ -23,6 +23,7 @@ import { ModelPicker } from "@/components/model-picker";
 import type { ToolkitOption } from "@/components/workflow-form";
 import type { ModelInfo } from "@/lib/model-tiers";
 import { DEFAULT_BUILDER_MODEL, isBuilderModel } from "@/lib/builder-models";
+import { fetchJson } from "@/lib/fetch-json";
 
 /** Module-level so the picker's `include` prop keeps a stable identity. */
 const isBuilderModelInfo = (model: ModelInfo) => isBuilderModel(model.id);
@@ -124,7 +125,10 @@ export function WorkflowAgentChat({
     setError(null);
 
     try {
-      const res = await fetch("/api/workflows/propose", {
+      // fetchJson, not `res.json()` then `res.ok`: a proposal request that hits
+      // an auth redirect or a platform error answers with HTML, and parsing
+      // that first turned every such failure into "Unexpected token '<'".
+      const data = await fetchJson<ProposeResponse>("/api/workflows/propose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -134,8 +138,6 @@ export function WorkflowAgentChat({
           readToolkits: [...readToolkits],
         }),
       });
-      const data: ProposeResponse & { error?: string } = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to generate workflow");
 
       // A clarifying turn leaves the form alone — only a committed spec writes
       // into it, so half-answered questions can't half-fill the workflow.
@@ -411,7 +413,7 @@ function ConnectorPicker({
         aria-haspopup="dialog"
         aria-expanded={open}
         title="Apps the assistant may read while drafting — read-only"
-        className={`flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors ${
+        className={`rounded-control flex h-8 shrink-0 cursor-pointer items-center gap-1.5 border px-3 text-xs font-medium transition-colors ${
           count > 0
             ? "border-foreground bg-surface-2 text-foreground"
             : "border-border text-muted hover:border-border-strong hover:text-foreground"

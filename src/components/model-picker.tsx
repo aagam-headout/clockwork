@@ -232,7 +232,7 @@ export function ModelPicker({
           type="button"
           onClick={openPicker}
           title={`${selected.id} — click to change`}
-          className="border-border bg-surface text-muted hover:border-border-strong hover:text-foreground flex h-8 max-w-[200px] cursor-pointer items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors"
+          className="border-border bg-surface text-muted hover:border-border-strong hover:text-foreground rounded-control flex h-8 max-w-[200px] cursor-pointer items-center gap-1.5 border px-3 text-xs font-medium transition-colors"
         >
           <span className="truncate">{selected.name}</span>
           <ChevronsUpDown className="text-subtle h-3.5 w-3.5 shrink-0" />
@@ -327,7 +327,7 @@ export function ModelPicker({
                           ? TIER_HINTS[f.key as ModelTier]
                           : undefined
                       }
-                      className={`h-8 cursor-pointer rounded-full border px-3.5 text-xs font-medium transition-colors ${
+                      className={`rounded-control h-8 cursor-pointer border px-3.5 text-xs font-medium transition-colors ${
                         active
                           ? "border-border-strong bg-surface-2 text-foreground"
                           : "border-border text-muted hover:border-border-strong hover:text-foreground"
@@ -346,7 +346,7 @@ export function ModelPicker({
                   aria-label="Filter by provider"
                   value={activeProvider ?? ""}
                   onChange={(e) => setProvider(e.target.value || null)}
-                  className="border-border bg-surface text-muted h-8 cursor-pointer rounded-full border px-2.5 text-xs font-medium sm:hidden"
+                  className="border-border bg-surface text-muted rounded-control h-8 cursor-pointer border px-2.5 text-xs font-medium sm:hidden"
                 >
                   <option value="">All providers ({tierCounts.all})</option>
                   {providers.map((p) => (

@@ -11,6 +11,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { buttonClass, Badge, Skeleton } from "@/components/ui";
+import { fetchJson } from "@/lib/fetch-json";
 import { ToolkitLogo } from "@/components/toolkit-logo";
 
 export type ToolkitSummary = {
@@ -58,14 +59,14 @@ export function ConnectorBrowser({
         setLoading(true);
         setError(null);
         try {
-          const res = await fetch(
+          const data = await fetchJson<{ items?: ToolkitSummary[] }>(
             `/api/toolkits?q=${encodeURIComponent(query)}`,
           );
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error ?? "Search failed");
           // Ignore responses that a newer keystroke has already superseded.
           if (id === requestId.current) {
-            setItems(data.items);
+            // A 200 with a malformed body would otherwise put `undefined` in
+            // state, and the grid maps over it on the next render.
+            setItems(Array.isArray(data.items) ? data.items : []);
             // A category picked from the old result set may not exist in the
             // new one, which would render an empty grid with no explanation.
             setCategory(null);
@@ -158,7 +159,7 @@ export function ConnectorBrowser({
                   inputRef.current?.focus();
                 }}
                 aria-label="Clear search"
-                className="text-subtle hover:text-foreground absolute top-1/2 right-2 flex h-6 w-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full transition-colors"
+                className="text-subtle hover:text-foreground rounded-control absolute top-1/2 right-2 flex h-6 w-6 -translate-y-1/2 cursor-pointer items-center justify-center transition-colors"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -209,7 +210,7 @@ export function ConnectorBrowser({
               className="rounded-container border-border bg-surface border p-3.5"
             >
               <div className="flex items-center gap-3">
-                <Skeleton className="h-9 w-9 rounded-lg" />
+                <Skeleton className="rounded-control h-9 w-9" />
                 <div className="flex-1 space-y-1.5">
                   <Skeleton className="h-3.5 w-1/2" />
                   <Skeleton className="h-3 w-2/3" />
@@ -310,7 +311,7 @@ function FilterChip({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium capitalize transition-[background,border-color,color] duration-150 ${
+      className={`rounded-chip inline-flex h-7 cursor-pointer items-center gap-1.5 border px-2.5 text-[11px] font-medium capitalize transition-[background,border-color,color] duration-150 ${
         active
           ? // `border-solid` is Tailwind's border-*style* utility, so the
             // inverted chip names the token directly.

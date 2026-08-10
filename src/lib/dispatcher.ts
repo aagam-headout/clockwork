@@ -61,8 +61,24 @@ export async function runDueWorkflows(now: Date = new Date()) {
     // budget (maxDuration) to split across every due workflow in this
     // tick, and sequential execution keeps failures isolated and simple
     // to reason about. Revisit if the due-count per tick grows.
-    const result = await runWorkflow(workflow, "cron");
-    results.push({ workflowId: workflow.id, slug: workflow.slug, ...result });
+    try {
+      const result = await runWorkflow(workflow, "cron");
+      results.push({ workflowId: workflow.id, slug: workflow.slug, ...result });
+    } catch (err) {
+      /*
+       * `executeRun` writes its own failures to the run row, so reaching here
+       * means the claim itself failed — a dropped database connection, most
+       * likely. Unhandled, that aborted the whole tick and every workflow
+       * after this one silently missed its slot until the next one.
+       */
+      console.error(`[dispatch] ${workflow.slug} failed to start`, err);
+      results.push({
+        workflowId: workflow.id,
+        slug: workflow.slug,
+        status: "failed_to_start",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   return results;

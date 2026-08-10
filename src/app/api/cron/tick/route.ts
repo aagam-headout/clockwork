@@ -20,6 +20,19 @@ function secretMatches(header: string | null): boolean {
   return timingSafeEqual(provided, wanted);
 }
 
+/** Runs a housekeeping step, reporting its failure instead of throwing it. */
+async function settle<T>(
+  label: string,
+  step: () => Promise<T>,
+): Promise<T | { error: string }> {
+  try {
+    return await step();
+  } catch (err) {
+    console.error(`[tick] ${label} failed`, err);
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export async function POST(req: NextRequest) {
   if (!secretMatches(req.headers.get("authorization"))) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -27,9 +40,11 @@ export async function POST(req: NextRequest) {
 
   // Before dispatching: free any workflow whose previous run died without
   // reporting back, or it would stay blocked by the one-active-run index.
-  const reaped = await reapStuckRuns();
+  // Housekeeping is best-effort — neither reaping nor pruning failing is a
+  // reason to skip the dispatch this tick exists for.
+  const reaped = await settle("reap", reapStuckRuns);
   const results = await runDueWorkflows();
-  const pruned = await pruneOldRuns();
+  const pruned = await settle("prune", pruneOldRuns);
 
   return NextResponse.json({
     ranAt: new Date().toISOString(),

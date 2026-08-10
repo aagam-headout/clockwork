@@ -14,8 +14,22 @@ import {
   Stat,
   statusTone,
 } from "@/components/ui";
-import { Wrench, AlignLeft, TriangleAlert } from "lucide-react";
+import {
+  Wrench,
+  AlignLeft,
+  TriangleAlert,
+  Timer,
+  Hammer,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  DollarSign,
+  FileText,
+  ListTree,
+  Send,
+  SquarePen,
+} from "lucide-react";
 import { LiveRun } from "@/components/live-run";
+import { Markdown } from "@/components/markdown";
 import { formatUsd } from "@/lib/model-tiers";
 
 export const dynamic = "force-dynamic";
@@ -65,6 +79,7 @@ export default async function RunDetailPage({
   const deliveryLog = (output?.deliveryLog ?? []) as Array<{
     type: string;
     ok: boolean;
+    skipped?: boolean;
     error?: string;
   }>;
 
@@ -75,25 +90,30 @@ export default async function RunDetailPage({
         backLabel="Runs"
         title={run.workflowName ?? "(deleted workflow)"}
         subtitle={
-          run.startedAt
-            ? run.startedAt.toLocaleString("en-US", {
-                dateStyle: "full",
-                timeStyle: "short",
-              })
-            : "Not started"
-        }
-        actions={
-          <div className="flex items-center gap-2">
-            <LiveRun active={inFlight} />
+          <span className="inline-flex flex-wrap items-center gap-2">
             <Badge tone={tone} dot={inFlight}>
               {run.status}
             </Badge>
             <Badge tone="neutral">{run.trigger}</Badge>
+            <span>
+              {run.startedAt
+                ? run.startedAt.toLocaleString("en-US", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })
+                : "Not started"}
+            </span>
+          </span>
+        }
+        actions={
+          <div className="flex items-center gap-2">
+            <LiveRun active={inFlight} />
             {run.workflowId && (
               <ButtonLink
                 href={`/workflows/${run.workflowId}`}
                 variant="outline"
                 size="sm"
+                icon={SquarePen}
               >
                 Edit workflow
               </ButtonLink>
@@ -102,28 +122,39 @@ export default async function RunDetailPage({
         }
       />
 
-      <div className="rise mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="rise mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <Stat
+          icon={Timer}
           label="Duration"
           value={
             run.durationMs != null
               ? `${(run.durationMs / 1000).toFixed(1)}s`
               : "—"
           }
+          hint={
+            run.finishedAt
+              ? `ended ${run.finishedAt.toLocaleTimeString("en-US", { timeStyle: "short" })}`
+              : inFlight
+                ? "in flight"
+                : undefined
+          }
           tone={tone}
         />
         <Stat
+          icon={Hammer}
           label="Tool calls"
           value={toolCalls}
           hint={`${steps.length} steps total`}
         />
         <Stat
+          icon={ArrowDownToLine}
           label="Tokens in"
           value={
             run.inputTokens != null ? run.inputTokens.toLocaleString() : "—"
           }
         />
         <Stat
+          icon={ArrowUpFromLine}
           label="Tokens out"
           value={
             run.outputTokens != null ? run.outputTokens.toLocaleString() : "—"
@@ -131,6 +162,7 @@ export default async function RunDetailPage({
           hint={run.finishReason ? `finish: ${run.finishReason}` : undefined}
         />
         <Stat
+          icon={DollarSign}
           label="Cost"
           value={formatUsd(
             run.costUsd != null ? Number(run.costUsd) : undefined,
@@ -152,30 +184,41 @@ export default async function RunDetailPage({
       )}
 
       {output && (
-        <section className="mt-10">
-          <SectionLabel>Output</SectionLabel>
+        <section className="mt-8">
+          <SectionLabel icon={FileText}>Output</SectionLabel>
           <Card className="overflow-hidden">
-            <div className="text-foreground px-4 py-4 text-sm leading-relaxed whitespace-pre-wrap">
+            <div className="px-5 py-4.5">
               {output.unchanged ? (
-                <span className="text-muted italic">
+                <span className="text-muted text-sm italic">
                   Nothing new since the previous digest — nothing was sent.
                 </span>
               ) : (
-                output.body
+                // The body is markdown the agent wrote for Slack/email; the
+                // dashboard renders the same thing rather than showing source.
+                <Markdown>{output.body}</Markdown>
               )}
             </div>
-            <div className="border-border bg-bg-subtle text-subtle flex flex-wrap items-center gap-2 border-t px-4 py-2.5 text-xs">
-              Delivery
+            <div className="border-border bg-bg-subtle text-subtle flex flex-wrap items-center gap-2 border-t px-5 py-2.5 text-xs">
+              <span className="inline-flex items-center gap-1.5">
+                <Send className="h-3.5 w-3.5" />
+                Delivery
+              </span>
               {deliveryLog.length === 0 && <span>—</span>}
+              {/* Three states, not two: delivered, deliberately skipped
+                  because there was nothing new, and actually failed. */}
               {deliveryLog.map((entry) => (
                 <span
                   key={entry.type}
                   title={entry.error}
                   className="inline-flex items-center"
                 >
-                  <Badge tone={entry.ok ? "success" : "warn"}>
+                  <Badge
+                    tone={
+                      entry.ok ? "success" : entry.skipped ? "neutral" : "warn"
+                    }
+                  >
                     {entry.type}
-                    {entry.ok ? "" : " · failed"}
+                    {entry.ok ? "" : entry.skipped ? " · skipped" : " · failed"}
                   </Badge>
                 </span>
               ))}
@@ -184,8 +227,10 @@ export default async function RunDetailPage({
         </section>
       )}
 
-      <section className="mt-10">
-        <SectionLabel count={steps.length}>Trace</SectionLabel>
+      <section className="mt-8">
+        <SectionLabel icon={ListTree} count={steps.length}>
+          Trace
+        </SectionLabel>
 
         {steps.length === 0 ? (
           <p className="rounded-container border-border bg-bg-subtle text-muted border px-4 py-8 text-center text-sm">
@@ -204,8 +249,10 @@ export default async function RunDetailPage({
               const failed = Boolean(step.error);
               return (
                 <li key={step.id} className="relative">
+                  {/* Square marker, matching the chips and controls — a
+                      circle here was the last round thing on the page. */}
                   <span
-                    className={`bg-surface absolute top-3 -left-7 flex h-[22px] w-[22px] items-center justify-center rounded-full border ${
+                    className={`bg-surface rounded-chip absolute top-3 -left-7 flex h-[22px] w-[22px] items-center justify-center border ${
                       failed
                         ? "border-danger/40 text-danger"
                         : isTool
@@ -257,9 +304,11 @@ export default async function RunDetailPage({
                         )}
                       </>
                     ) : (
-                      <p className="text-foreground text-sm leading-relaxed whitespace-pre-wrap">
-                        {(step.resultJson as { text?: string } | null)?.text}
-                      </p>
+                      // The model's intermediate reasoning is markdown too.
+                      <Markdown>
+                        {(step.resultJson as { text?: string } | null)?.text ??
+                          ""}
+                      </Markdown>
                     )}
                   </Card>
                 </li>

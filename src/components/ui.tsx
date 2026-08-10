@@ -11,8 +11,8 @@ import { ArrowLeft } from "lucide-react";
 
 type Tone = "neutral" | "accent" | "success" | "danger" | "warn";
 
-// Geist badges are outlined, not filled blocks — a soft wash plus a real
-// 1px border in the same hue.
+// Badges are outlined, not filled blocks — a soft wash plus a real 1px border
+// in the same hue, on the app's squarish 4px chip radius.
 const TONE_SOFT: Record<Tone, string> = {
   neutral: "bg-surface-2 text-muted border-border",
   accent: "bg-accent-soft text-accent-text border-accent-line",
@@ -34,21 +34,27 @@ export function Badge({
   tone = "neutral",
   dot = false,
   mono = false,
+  icon: Icon,
   className = "",
 }: {
   children: React.ReactNode;
   tone?: Tone;
   dot?: boolean;
   mono?: boolean;
+  /** Leading glyph, sized and spaced by the chip rather than by the caller. */
+  icon?: React.ComponentType<{ className?: string }>;
   className?: string;
 }) {
   return (
+    // 22px tall, not 20: at 20 an 11px cap-height sits visually high against
+    // the 32px controls it shares a row with.
     <span
-      className={`inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full border px-2 text-[11px] leading-none font-medium ${
+      className={`rounded-chip inline-flex h-[22px] shrink-0 items-center gap-1.5 border px-2 text-[11px] leading-none font-medium ${
         TONE_SOFT[tone]
       } ${mono ? "font-mono tracking-tight" : ""} ${className}`}
     >
       {dot && <span className={`h-1.5 w-1.5 rounded-full ${TONE_DOT[tone]}`} />}
+      {Icon && <Icon className="h-3 w-3 shrink-0 opacity-70" />}
       {children}
     </span>
   );
@@ -169,7 +175,9 @@ export function ButtonLink({
 }) {
   return (
     <Link href={href} className={buttonClass(variant, size, className)}>
-      {Icon && <Icon className="h-4 w-4" />}
+      {/* The small control is 32px tall with 13px text; a 16px glyph next to it
+          reads as oversized, so the icon tracks the button's size. */}
+      {Icon && <Icon className={size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4"} />}
       {children}
     </Link>
   );
@@ -233,15 +241,22 @@ export function PageHeader({
           {backLabel ?? "Back"}
         </Link>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="min-w-0">
+      {/* `items-start`, not `items-center`: a two-line subtitle used to drag
+          the action buttons down to the block's midpoint. They now stay on the
+          title's line, which is where the eye looks for them. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0 flex-1">
           <h1 className="heading-24 text-foreground truncate">{title}</h1>
           {subtitle && (
-            <div className="text-muted mt-1 text-sm">{subtitle}</div>
+            <div className="text-muted mt-1.5 text-sm leading-relaxed">
+              {subtitle}
+            </div>
           )}
         </div>
         {actions && (
-          <div className="flex shrink-0 items-center gap-2">{actions}</div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {actions}
+          </div>
         )}
       </div>
       {children}
@@ -279,22 +294,31 @@ export function Stat({
   value,
   hint,
   tone = "neutral",
+  icon: Icon,
 }: {
   label: string;
   value: React.ReactNode;
   hint?: string;
   tone?: Tone;
+  icon?: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <div className="rounded-container border-border bg-surface border px-4 py-3.5">
+    // Tiles in a row rarely all carry a hint; `justify-between` on a flex
+    // column with a fixed floor keeps their numbers on one baseline instead of
+    // letting each tile shrink to its own content.
+    <div className="rounded-container border-border bg-surface flex min-h-[92px] flex-col justify-between border px-4 py-3.5">
       <div className="flex items-center gap-1.5">
-        <span className={`h-1.5 w-1.5 rounded-full ${TONE_DOT[tone]}`} />
-        <span className="text-muted text-xs font-medium">{label}</span>
+        {Icon ? (
+          <Icon className="text-subtle h-3.5 w-3.5 shrink-0" />
+        ) : (
+          <span className={`h-1.5 w-1.5 rounded-full ${TONE_DOT[tone]}`} />
+        )}
+        <span className="text-muted truncate text-xs font-medium">{label}</span>
       </div>
-      <div className="text-foreground mt-2 text-[28px] leading-none font-semibold tracking-[-1.12px] tabular-nums">
+      <div className="text-foreground mt-2 text-[26px] leading-none font-semibold tracking-[-1.04px] tabular-nums">
         {value}
       </div>
-      {hint && <div className="text-subtle mt-2 truncate text-xs">{hint}</div>}
+      <div className="text-subtle mt-2 h-4 truncate text-xs">{hint}</div>
     </div>
   );
 }
@@ -303,16 +327,21 @@ export function SectionLabel({
   children,
   count,
   action,
+  icon: Icon,
 }: {
   children: React.ReactNode;
   count?: number;
   action?: React.ReactNode;
+  icon?: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <div className="mb-3 flex items-center gap-2">
+    // The row is 32px tall whether or not it carries an action, so a section
+    // with a trailing button doesn't sit lower than the ones without.
+    <div className="mb-3 flex min-h-8 items-center gap-2">
+      {Icon && <Icon className="text-subtle h-4 w-4 shrink-0" />}
       <h2 className="heading-14 text-foreground">{children}</h2>
       {count != null && (
-        <span className="border-border bg-surface-2 text-muted rounded-full border px-1.5 text-[11px] leading-5 font-medium tabular-nums">
+        <span className="border-border bg-surface-2 text-muted rounded-chip min-w-5 border px-1.5 text-center text-[11px] leading-[18px] font-medium tabular-nums">
           {count}
         </span>
       )}
@@ -330,8 +359,10 @@ export function Mono({
   className?: string;
 }) {
   return (
+    // Same 22px box as Badge: these two sit side by side in every header and
+    // card row, and `py-0.5` on an inline <code> made them disagree by 2px.
     <code
-      className={`rounded-control border-border bg-surface-2 text-muted border px-1.5 py-0.5 font-mono text-[11px] tracking-tight ${className}`}
+      className={`rounded-chip border-border bg-surface-2 text-muted inline-flex h-[22px] shrink-0 items-center border px-1.5 font-mono text-[11px] leading-none tracking-tight ${className}`}
     >
       {children}
     </code>

@@ -5,7 +5,7 @@ import { runs, workflows } from "@/db/schema";
 import { updateWorkflow, deleteWorkflow, runWorkflowNow } from "@/lib/actions";
 import { WorkflowForm } from "@/components/workflow-form";
 import { SubmitButton } from "@/components/submit-button";
-import { Trash2, Play, ChevronRight } from "lucide-react";
+import { Trash2, Play, ChevronRight, Globe, History, Zap } from "lucide-react";
 import type { DeliverTarget } from "@/lib/read-only";
 import { requireOwner } from "@/lib/auth/require-owner";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
@@ -77,12 +77,30 @@ export default async function EditWorkflowPage({
         title={workflow.name}
         subtitle={
           <span className="inline-flex flex-wrap items-center gap-2">
-            <Mono>{workflow.cron}</Mono>
-            <span className="text-subtle">{workflow.timezone}</span>
             {workflow.enabled ? (
-              <Badge tone="success">enabled</Badge>
+              <Badge tone="success" dot>
+                enabled
+              </Badge>
             ) : (
-              <Badge tone="warn">paused</Badge>
+              <Badge tone="warn" dot>
+                paused
+              </Badge>
+            )}
+            {/* An event workflow has an empty cron column; showing it as an
+                empty code chip read as a rendering bug. */}
+            {workflow.triggerType === "event" ? (
+              <Badge tone="neutral" icon={Zap}>
+                {workflow.eventTriggers.length} event
+                {workflow.eventTriggers.length === 1 ? "" : "s"}
+              </Badge>
+            ) : (
+              <>
+                <Mono>{workflow.cron}</Mono>
+                <span className="text-subtle inline-flex items-center gap-1.5 text-xs">
+                  <Globe className="h-3.5 w-3.5" />
+                  {workflow.timezone}
+                </span>
+              </>
             )}
           </span>
         }
@@ -152,8 +170,9 @@ export default async function EditWorkflowPage({
       </div>
 
       {recentRuns.length > 0 && (
-        <section className="mt-10">
+        <section className="mt-8">
           <SectionLabel
+            icon={History}
             count={recentRuns.length}
             action={
               <ButtonLink href="/runs" variant="ghost" size="sm">
@@ -174,15 +193,28 @@ export default async function EditWorkflowPage({
                   tone={statusTone(run.status)}
                   live={run.status === "running"}
                 />
-                <span className="text-muted flex-1 truncate font-mono text-xs">
+                <span className="text-muted min-w-0 flex-1 truncate font-mono text-xs tabular-nums">
                   {(run.startedAt ?? run.createdAt).toLocaleString("en-US", {
                     dateStyle: "medium",
                     timeStyle: "short",
                   })}
-                  {run.durationMs != null &&
-                    ` · ${(run.durationMs / 1000).toFixed(1)}s`}
+                </span>
+                {/* Duration in its own column so the timestamps above it stay
+                    left-aligned and the numbers stay comparable. */}
+                <span className="text-subtle w-14 shrink-0 text-right font-mono text-[11px] tabular-nums">
+                  {run.durationMs != null
+                    ? `${(run.durationMs / 1000).toFixed(1)}s`
+                    : ""}
                 </span>
                 <Badge tone="neutral">{run.trigger}</Badge>
+                <span className="flex w-[86px] shrink-0 justify-end">
+                  <Badge
+                    tone={statusTone(run.status)}
+                    dot={run.status === "running"}
+                  >
+                    {run.status}
+                  </Badge>
+                </span>
                 <ChevronRight className="text-subtle h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </Link>
             ))}

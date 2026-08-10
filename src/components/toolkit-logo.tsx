@@ -28,7 +28,7 @@ export function ToolkitLogo({
   return (
     <span
       title={name}
-      className={`flex ${box} shrink-0 items-center justify-center overflow-hidden rounded-lg border ${
+      className={`rounded-control flex ${box} shrink-0 items-center justify-center overflow-hidden border ${
         connected
           ? "border-success/25 bg-success-soft text-success-text"
           : "border-border bg-surface-2 text-subtle"

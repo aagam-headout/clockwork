@@ -6,7 +6,17 @@ import { workflows, runs } from "@/db/schema";
 import { toggleWorkflow, runWorkflowNow, deleteWorkflow } from "@/lib/actions";
 import { requireOwner } from "@/lib/auth/require-owner";
 import { SubmitButton } from "@/components/submit-button";
-import { Plus, Play, Pause, Trash2, Workflow, Clock } from "lucide-react";
+import {
+  Plus,
+  Play,
+  Pause,
+  Pencil,
+  Trash2,
+  Workflow,
+  Clock,
+  Globe,
+  History,
+} from "lucide-react";
 import {
   Alert,
   Badge,
@@ -17,9 +27,10 @@ import {
   PageHeader,
   PageShell,
   StatusDot,
+  iconButtonClass,
   statusTone,
 } from "@/components/ui";
-import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
+import { TOOLKIT_ICONS, TOOLKIT_LABELS } from "@/lib/toolkit-labels";
 
 export const dynamic = "force-dynamic";
 // The "Run now" action finishes its work in `after()`; that work is bounded
@@ -42,13 +53,14 @@ function nextRunAt(cron: string, timezone: string): string | null {
 export default async function WorkflowsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ triggerError?: string }>;
+  searchParams: Promise<{ triggerError?: string; error?: string }>;
 }) {
   await requireOwner();
 
-  // Set when a save succeeded but Composio wouldn't register its event
+  // `triggerError`: the save succeeded but Composio wouldn't register its event
   // triggers — the workflow exists and just never fires until that's fixed.
-  const { triggerError } = await searchParams;
+  // `error`: a row action (pause, delete, run now) failed outright.
+  const { triggerError, error } = await searchParams;
 
   const rows = await db
     .select()
@@ -78,12 +90,32 @@ export default async function WorkflowsPage({
         subtitle="Scheduled agents that read your apps and report back."
         actions={
           rows.length === 0 ? undefined : (
-            <Badge tone={enabledCount > 0 ? "success" : "warn"} dot>
-              {rows.length} total · {enabledCount} active
-            </Badge>
+            <>
+              <Badge tone={enabledCount > 0 ? "success" : "warn"} dot>
+                {rows.length} total · {enabledCount} active
+              </Badge>
+              {/* Creating one was only reachable from the empty state and the
+                  sidebar; the list itself is where you are when you want it. */}
+              <ButtonLink
+                href="/workflows/new"
+                variant="primary"
+                size="sm"
+                icon={Plus}
+              >
+                New workflow
+              </ButtonLink>
+            </>
           )
         }
       />
+
+      {error && (
+        <div className="mt-6">
+          <Alert tone="danger" title="That didn't work">
+            {error}
+          </Alert>
+        </div>
+      )}
 
       {triggerError && (
         <div className="mt-6">
@@ -148,17 +180,21 @@ export default async function WorkflowsPage({
                       {wf.goal}
                     </p>
 
+                    {/* Each toolkit carries its own glyph, so the row reads as
+                        apps rather than as a wall of gray words. */}
                     <div className="mt-3 flex flex-wrap items-center gap-1.5">
                       {wf.toolkits.map((tk) => (
-                        <Badge key={tk} tone="neutral">
+                        <Badge key={tk} tone="neutral" icon={TOOLKIT_ICONS[tk]}>
                           {TOOLKIT_LABELS[tk] ?? tk}
                         </Badge>
                       ))}
                     </div>
 
-                    <div className="text-subtle mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                      <span className="inline-flex items-center gap-1">
-                        <Clock className="h-3.5 w-3.5" />
+                    {/* One icon per fact, all on the same 12px line — the
+                        schedule, the last result, the zone. */}
+                    <div className="text-subtle mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Clock className="h-3.5 w-3.5 shrink-0" />
                         {!wf.enabled
                           ? "Paused"
                           : wf.triggerType === "event"
@@ -168,7 +204,8 @@ export default async function WorkflowsPage({
                               : "Invalid cron expression"}
                       </span>
                       {wf.lastRunAt && (
-                        <span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <History className="h-3.5 w-3.5 shrink-0" />
                           Last ran{" "}
                           {wf.lastRunAt.toLocaleString("en-US", {
                             dateStyle: "medium",
@@ -176,11 +213,17 @@ export default async function WorkflowsPage({
                           })}
                         </span>
                       )}
-                      <span className="font-mono">{wf.timezone}</span>
+                      <span className="inline-flex items-center gap-1.5 font-mono">
+                        <Globe className="h-3.5 w-3.5 shrink-0" />
+                        {wf.timezone}
+                      </span>
                     </div>
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-1.5">
+                  {/* Primary action first, then the icon-only trio it is
+                      separated from by a hairline — so "Run now" doesn't read
+                      as one of four equal buttons. */}
+                  <div className="flex shrink-0 items-center gap-1">
                     <form
                       action={async () => {
                         "use server";
@@ -195,6 +238,20 @@ export default async function WorkflowsPage({
                         Run now
                       </SubmitButton>
                     </form>
+
+                    <span className="bg-border mx-1 h-5 w-px" aria-hidden />
+
+                    {/* The card title links to the same place, but a title is
+                        not where anyone looks for "change this" — the edit
+                        affordance belongs in the action row with the rest. */}
+                    <Link
+                      href={`/workflows/${wf.id}`}
+                      title="Edit workflow"
+                      aria-label="Edit workflow"
+                      className={iconButtonClass("ghost")}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Link>
 
                     <form
                       action={async () => {

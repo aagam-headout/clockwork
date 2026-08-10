@@ -38,25 +38,30 @@ export async function listTriggerTypes(
     return catalogCache.items;
   }
 
-  try {
-    const res = await composio.triggers.listTypes(
-      toolkits.length > 0 ? { toolkits, limit: 100 } : { limit: 100 },
-    );
+  const res = await composio.triggers.listTypes(
+    toolkits.length > 0 ? { toolkits, limit: 100 } : { limit: 100 },
+  );
 
-    const items = (res.items ?? []).map((t) => ({
+  const items = (res.items ?? [])
+    // Composio has shipped entries with a null toolkit; `t.toolkit.slug` threw
+    // on those and lost the whole catalog to one bad row.
+    .filter((t) => t?.slug)
+    .map((t) => ({
       slug: t.slug,
-      name: t.name,
-      description: t.description,
-      toolkit: t.toolkit.slug,
+      name: t.name || t.slug,
+      description: t.description ?? "",
+      toolkit: t.toolkit?.slug ?? "",
     }));
 
-    catalogCache = { at: Date.now(), key, items };
-    return items;
-  } catch {
-    // A missing trigger catalog shouldn't take the workflow form down.
-    return [];
-  }
+  catalogCache = { at: Date.now(), key, items };
+  return items;
 }
+/*
+ * Note: this deliberately does not swallow Composio failures. It used to
+ * return `[]` on any error, which made "Composio is down" and "these toolkits
+ * have no triggers" the same empty list — the caller (`/api/trigger-types`)
+ * turns the throw into a 502 with a reason the picker can show.
+ */
 
 /**
  * Points Composio's project webhook at this deployment. Idempotent — the SDK

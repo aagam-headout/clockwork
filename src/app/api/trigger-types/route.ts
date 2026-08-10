@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isOwner } from "@/lib/auth/require-owner";
 import { listTriggerTypes } from "@/lib/triggers";
+import { composioErrorMessage } from "@/lib/composio";
 
 /** Feeds the event-trigger picker in the workflow form. */
 export async function GET(req: NextRequest) {
@@ -13,5 +14,16 @@ export async function GET(req: NextRequest) {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  return NextResponse.json({ items: await listTriggerTypes(toolkits) });
+  try {
+    return NextResponse.json({ items: await listTriggerTypes(toolkits) });
+  } catch (err) {
+    // Composio being down here means the picker has nothing to offer; an
+    // unhandled throw made that a 500 HTML page, which the form then failed to
+    // parse as JSON. A stated reason is what lets it say why the list is empty.
+    console.error("[trigger-types]", err);
+    return NextResponse.json(
+      { error: composioErrorMessage(err) },
+      { status: 502 },
+    );
+  }
 }

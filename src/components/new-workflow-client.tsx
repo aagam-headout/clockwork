@@ -8,6 +8,7 @@ import {
 } from "@/components/workflow-form";
 import { WorkflowAgentChat } from "@/components/workflow-agent-chat";
 import type { ModelInfo } from "@/lib/model-tiers";
+import type { WorkflowFormState } from "@/lib/actions";
 
 /*
  * Two panes: the conversation on the left writes the form on the right. The
@@ -21,7 +22,10 @@ export function NewWorkflowClient({
   availableToolkits,
   models,
 }: {
-  action: (formData: FormData) => void;
+  action: (
+    state: WorkflowFormState,
+    formData: FormData,
+  ) => Promise<WorkflowFormState>;
   availableToolkits: ToolkitOption[];
   models: ModelInfo[];
 }) {
