@@ -57,7 +57,7 @@ export function NewWorkflowClient({
           defaultValues={proposal ?? undefined}
           availableToolkits={availableToolkits}
           models={models}
-          title="Settings"
+          title="Workflow config"
           fillHeight
         />
       </div>

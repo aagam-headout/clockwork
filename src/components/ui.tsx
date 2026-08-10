@@ -210,7 +210,12 @@ export function PageShell({
         // The fill variant keeps the same top offset so page titles line up
         // across tabs, but a tighter bottom so the panes get the height.
         fill
-          ? "lg:h-screen lg:overflow-hidden lg:pt-10 lg:pb-6"
+          ? // `clip`, not `hidden`: `hidden` still makes the shell a scroll
+            // container, so focusing anything inside a pane (the sr-only
+            // checkbox inputs) let the browser scroll-into-view push the whole
+            // shell off screen with no scrollbar to bring it back — the page
+            // just went blank. `clip` cannot be scrolled at all.
+            "lg:h-screen lg:overflow-clip lg:pt-10 lg:pb-6"
           : "md:py-8 lg:py-10"
       }`}
     >
