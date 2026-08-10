@@ -1,83 +1,161 @@
-import { listConnectedAccounts, TOOLKITS, type Toolkit } from "@/lib/composio";
+import { listConnectedAccounts, searchToolkits, type ToolkitSummary } from "@/lib/composio";
 import { requireOwner } from "@/lib/auth/require-owner";
-import { cardClass } from "@/lib/card-class";
-import { ConnectionsIcon } from "@/components/icons";
+import { disconnectToolkit } from "@/lib/actions";
+import { Alert, Badge, Card, EmptyState, PageHeader, SectionLabel, buttonClass } from "@/components/ui";
+import { SubmitButton } from "@/components/submit-button";
+import { ConnectorBrowser } from "@/components/connector-browser";
+import { ToolkitLogo } from "@/components/toolkit-logo";
+import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
+import { Plug, Unplug, RefreshCw } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
-const TOOLKIT_LABELS: Record<Toolkit, string> = {
-  googlecalendar: "Google Calendar",
-  gmail: "Gmail",
-  slack: "Slack",
-  notion: "Notion",
-  github: "GitHub",
+type ConnectedRow = {
+  id: string;
+  slug: string;
+  name: string;
+  status: string;
+  logo?: string;
+  createdAt?: string;
 };
 
 export default async function ConnectionsPage() {
   await requireOwner();
 
   let accounts: Awaited<ReturnType<typeof listConnectedAccounts>> = [];
+  let catalog: ToolkitSummary[] = [];
   let loadError: string | null = null;
-  try {
-    accounts = await listConnectedAccounts();
-  } catch (err) {
-    loadError = err instanceof Error ? err.message : String(err);
-  }
 
-  const statusByToolkit = new Map<string, string>();
-  for (const acc of accounts) {
-    const slug = acc.toolkit?.slug;
-    if (slug) statusByToolkit.set(slug, acc.status);
-  }
+  // The catalog powers the search grid's first paint; a failure there
+  // shouldn't hide the accounts that are already connected (or vice versa).
+  const [accountsResult, catalogResult] = await Promise.allSettled([
+    listConnectedAccounts(),
+    searchToolkits("", 12),
+  ]);
+
+  if (accountsResult.status === "fulfilled") accounts = accountsResult.value;
+  else loadError = accountsResult.reason?.message ?? String(accountsResult.reason);
+
+  if (catalogResult.status === "fulfilled") catalog = catalogResult.value;
+  else loadError ??= catalogResult.reason?.message ?? String(catalogResult.reason);
+
+  // Composio metadata is the source of truth for names/logos; fall back to the
+  // slug so an unknown connector still renders sensibly.
+  const catalogBySlug = new Map(catalog.map((t) => [t.slug, t]));
+
+  const connected: ConnectedRow[] = accounts
+    .map((acc) => {
+      const slug = acc.toolkit?.slug ?? "";
+      return {
+        id: acc.id,
+        slug,
+        name: catalogBySlug.get(slug)?.name ?? TOOLKIT_LABELS[slug] ?? slug,
+        status: acc.status,
+        logo: catalogBySlug.get(slug)?.logo,
+        createdAt: acc.createdAt,
+      };
+    })
+    .filter((row) => row.slug)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const activeCount = connected.filter((c) => c.status === "ACTIVE").length;
 
   return (
-    <main className="mx-auto max-w-3xl px-8 py-12">
-      <h1 className="text-xl font-medium tracking-tight text-foreground">Connections</h1>
-      <p className="mt-1 text-sm text-muted">Connect the apps your workflows can read from.</p>
+    <main className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-10">
+      <PageHeader
+        title="Connections"
+        subtitle="Any app in the Composio catalog."
+        actions={
+          <Badge tone={activeCount > 0 ? "success" : "warn"} dot>
+            {activeCount} active
+          </Badge>
+        }
+      />
 
       {loadError && (
-        <p className="mt-6 rounded-xl border border-red-900/40 bg-red-950/30 px-4 py-3 text-sm text-red-400">
-          Couldn&apos;t load connection status: {loadError}
-        </p>
+        <div className="mt-6">
+          <Alert tone="danger" title="Composio request failed">
+            {loadError}
+          </Alert>
+        </div>
       )}
 
-      <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {TOOLKITS.map((toolkit) => {
-          const status = statusByToolkit.get(toolkit);
-          const active = status === "ACTIVE";
-          return (
-            <div key={toolkit} className={cardClass()}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-chip">
-                    <ConnectionsIcon className="h-4 w-4 text-muted" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-foreground">
-                      {TOOLKIT_LABELS[toolkit]}
+      <section className="rise mt-8">
+        <SectionLabel count={connected.length || undefined}>Connected</SectionLabel>
+
+        {connected.length === 0 ? (
+          <EmptyState
+            icon={Plug}
+            title="Nothing connected yet"
+            description="Search below to link your first app."
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {connected.map((row) => {
+              const active = row.status === "ACTIVE";
+              return (
+                <Card key={row.id} interactive className="flex items-center gap-3 p-3">
+                  <ToolkitLogo
+                    slug={row.slug}
+                    name={row.name}
+                    logo={row.logo}
+                    size="lg"
+                    connected={active}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="heading-14 truncate text-foreground">{row.name}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`font-mono text-[11px] ${active ? "text-success-text" : "text-warn-text"}`}
+                      >
+                        {row.status.toLowerCase()}
+                      </span>
+                      <span className="truncate font-mono text-[11px] text-subtle">{row.slug}</span>
                     </div>
-                    <div className="text-xs text-muted">
-                      {active ? "Connected" : status ? status.toLowerCase() : "Not connected"}
-                    </div>
                   </div>
-                </div>
-                {active ? (
-                  <span className="shrink-0 rounded-full bg-emerald-950/50 px-2.5 py-1 text-xs font-medium text-emerald-400">
-                    Active
-                  </span>
-                ) : (
-                  <a
-                    href={`/api/connections/${toolkit}/connect`}
-                    className="shrink-0 cursor-pointer rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-85"
-                  >
-                    Connect
-                  </a>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+
+                  <div className="flex shrink-0 items-center gap-1">
+                    <a
+                      href={`/api/connections/${row.slug}/connect`}
+                      title="Reconnect"
+                      aria-label={`Reconnect ${row.name}`}
+                      className={buttonClass("ghost", "sm", "w-8 px-0")}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    </a>
+                    <form
+                      action={async () => {
+                        "use server";
+                        await disconnectToolkit(row.id);
+                      }}
+                    >
+                      <SubmitButton
+                        pendingLabel="…"
+                        variant="ghost"
+                        icon={Unplug}
+                        iconOnly
+                        danger
+                        title={`Disconnect ${row.name}`}
+                      >
+                        Disconnect
+                      </SubmitButton>
+                    </form>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section className="rise mt-10">
+        <SectionLabel>Add a connector</SectionLabel>
+        <ConnectorBrowser
+          connectedSlugs={connected.filter((c) => c.status === "ACTIVE").map((c) => c.slug)}
+          initialItems={catalog}
+        />
+      </section>
+
     </main>
   );
 }

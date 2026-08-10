@@ -1,13 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { WorkflowForm, type WorkflowFormValues } from "@/components/workflow-form";
+import {
+  WorkflowForm,
+  type WorkflowFormValues,
+  type ToolkitOption,
+} from "@/components/workflow-form";
 import { WorkflowAgentChat } from "@/components/workflow-agent-chat";
+import type { ModelInfo } from "@/lib/model-tiers";
 
 export function NewWorkflowClient({
   action,
+  availableToolkits,
+  models,
 }: {
   action: (formData: FormData) => void;
+  availableToolkits: ToolkitOption[];
+  models: ModelInfo[];
 }) {
   const [proposal, setProposal] = useState<WorkflowFormValues | null>(null);
 
@@ -22,6 +31,8 @@ export function NewWorkflowClient({
         action={action}
         submitLabel="Create workflow"
         defaultValues={proposal ?? undefined}
+        availableToolkits={availableToolkits}
+        models={models}
       />
     </div>
   );

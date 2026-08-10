@@ -1,4 +1,5 @@
 import { AuthView } from "@neondatabase/auth-ui";
+import { Logo } from "@/components/logo";
 
 // Catch-all for every Neon Auth screen: sign-in, sign-up, forgot-password,
 // reset-password, etc. AuthView switches on `pathname` — a single
@@ -12,8 +13,22 @@ export default async function AuthPage({
   const { pathname } = await params;
 
   return (
-    <main className="mx-auto flex min-h-[70vh] max-w-sm flex-col justify-center px-6">
-      <AuthView pathname={pathname} redirectTo="/" />
+    <main className="relative flex min-h-screen flex-col items-center justify-center px-6 py-16">
+      <div className="rise relative w-full max-w-sm">
+        <div className="mb-7 flex flex-col items-center gap-3 text-center">
+          <Logo size="md" />
+          <div>
+            <h1 className="heading-24 text-foreground">my-workflows</h1>
+            <p className="mt-1 text-sm text-muted">
+              Scheduled agents that read your apps and report back.
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-container border border-border bg-surface p-6">
+          <AuthView pathname={pathname} redirectTo="/" />
+        </div>
+      </div>
     </main>
   );
 }

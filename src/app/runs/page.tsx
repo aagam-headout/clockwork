@@ -3,16 +3,41 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, workflows } from "@/db/schema";
 import { requireOwner } from "@/lib/auth/require-owner";
-import { cardClass } from "@/lib/card-class";
+import {
+  Badge,
+  EmptyState,
+  ListBox,
+  PageHeader,
+  SectionLabel,
+  StatusDot,
+  statusTone,
+} from "@/components/ui";
+import { History, ChevronRight } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
-const STATUS_STYLES: Record<string, string> = {
-  ok: "bg-emerald-950/50 text-emerald-400",
-  error: "bg-red-950/40 text-red-400",
-  running: "bg-blue-950/40 text-blue-400",
-  queued: "bg-chip text-muted",
-};
+function relative(date: Date): string {
+  const diff = Date.now() - date.getTime();
+  const mins = Math.round(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function dayLabel(date: Date): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((today.getTime() - d.getTime()) / 86_400_000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  return date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+}
 
 export default async function RunsPage() {
   await requireOwner();
@@ -23,6 +48,7 @@ export default async function RunsPage() {
       trigger: runs.trigger,
       status: runs.status,
       startedAt: runs.startedAt,
+      createdAt: runs.createdAt,
       durationMs: runs.durationMs,
       inputTokens: runs.inputTokens,
       outputTokens: runs.outputTokens,
@@ -33,49 +59,83 @@ export default async function RunsPage() {
     .orderBy(desc(runs.createdAt))
     .limit(100);
 
-  return (
-    <main className="mx-auto max-w-4xl px-8 py-12">
-      <h1 className="text-xl font-medium tracking-tight text-foreground">Runs</h1>
-      <p className="mt-1 text-sm text-muted">
-        {rows.length === 0 ? "Nothing has run yet" : `Last ${rows.length} runs across all workflows`}
-      </p>
+  // Group into day buckets so a long history stays scannable.
+  const groups: Array<{ label: string; items: typeof rows }> = [];
+  for (const run of rows) {
+    const label = dayLabel(run.startedAt ?? run.createdAt);
+    const last = groups.at(-1);
+    if (last?.label === label) last.items.push(run);
+    else groups.push({ label, items: [run] });
+  }
 
-      {rows.length === 0 && (
-        <div className="mt-10 rounded-xl border border-dashed border-border px-6 py-14 text-center">
-          <p className="text-sm text-muted">Runs show up here once a workflow fires.</p>
+  const failed = rows.filter((r) => r.status === "error").length;
+
+  return (
+    <main className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-10">
+      <PageHeader
+        title="Runs"
+        subtitle={
+          rows.length === 0 ? undefined : `${rows.length} runs${failed > 0 ? ` · ${failed} failed` : ""}`
+        }
+      />
+
+      {rows.length === 0 ? (
+        <div className="mt-10">
+          <EmptyState
+            icon={History}
+            title="No runs recorded"
+            description="Runs appear here with their full tool trace."
+          />
+        </div>
+      ) : (
+        <div className="mt-6 flex flex-col gap-8">
+          {groups.map((group) => (
+            <section key={group.label} className="rise">
+              <SectionLabel count={group.items.length}>{group.label}</SectionLabel>
+
+              <ListBox>
+                {group.items.map((run) => {
+                  const tone = statusTone(run.status);
+                  const at = run.startedAt ?? run.createdAt;
+                  return (
+                    <Link
+                      key={run.id}
+                      href={`/runs/${run.id}`}
+                      className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover"
+                    >
+                      <StatusDot tone={tone} live={run.status === "running"} />
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate text-sm font-medium text-foreground">
+                            {run.workflowName ?? "(deleted workflow)"}
+                          </span>
+                          <Badge tone="neutral">{run.trigger}</Badge>
+                        </div>
+                        <p className="mt-0.5 truncate font-mono text-[11px] text-subtle">
+                          {at.toLocaleTimeString("en-US", { timeStyle: "short" })}
+                          {run.durationMs != null && ` · ${(run.durationMs / 1000).toFixed(1)}s`}
+                          {run.inputTokens != null &&
+                            run.outputTokens != null &&
+                            ` · ${(run.inputTokens + run.outputTokens).toLocaleString()} tok`}
+                        </p>
+                      </div>
+
+                      <span className="hidden shrink-0 text-[11px] text-subtle sm:block">
+                        {relative(at)}
+                      </span>
+                      <Badge tone={tone} dot={run.status === "running"}>
+                        {run.status}
+                      </Badge>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-subtle transition-transform group-hover:translate-x-0.5" />
+                    </Link>
+                  );
+                })}
+              </ListBox>
+            </section>
+          ))}
         </div>
       )}
-
-      <div className="mt-8 flex flex-col gap-3">
-        {rows.map((run) => (
-          <Link key={run.id} href={`/runs/${run.id}`} className={`block ${cardClass(true)}`}>
-            <div className="flex items-center justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-foreground">
-                    {run.workflowName ?? "(deleted workflow)"}
-                  </span>
-                  <span className="rounded bg-chip px-1.5 py-0.5 text-[11px] text-muted">
-                    {run.trigger}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-muted">
-                  {run.startedAt?.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
-                  {run.durationMs != null && ` · ${(run.durationMs / 1000).toFixed(1)}s`}
-                  {run.inputTokens != null &&
-                    run.outputTokens != null &&
-                    ` · ${run.inputTokens + run.outputTokens} tokens`}
-                </p>
-              </div>
-              <span
-                className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[run.status] ?? STATUS_STYLES.queued}`}
-              >
-                {run.status}
-              </span>
-            </div>
-          </Link>
-        ))}
-      </div>
     </main>
   );
 }

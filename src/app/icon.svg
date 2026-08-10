@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <linearGradient id="glass" x1="6" y1="0" x2="26" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f3f4f6" />
+      <stop offset="1" stop-color="#d4d7dd" />
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#glass)" />
+  <rect x="0.6" y="0.6" width="30.8" height="30.8" rx="7.4" fill="none" stroke="#ffffff" stroke-opacity="0.75" stroke-width="1.2" />
+  <g
+    transform="translate(4 4)"
+    fill="none"
+    stroke="#5b616c"
+    stroke-width="2"
+    stroke-linecap="round"
+  >
+    <path d="M4.2 6c2.6-3.2 5.2-3.2 7.8 0s5.2 3.2 7.8 0" />
+    <path d="M4.2 12c2.6-3.2 5.2-3.2 7.8 0s5.2 3.2 7.8 0" opacity="0.8" />
+    <path d="M4.2 18c2.6-3.2 5.2-3.2 7.8 0s5.2 3.2 7.8 0" opacity="0.62" />
+  </g>
+</svg>

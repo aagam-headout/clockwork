@@ -6,19 +6,22 @@ import { workflows, runs } from "@/db/schema";
 import { toggleWorkflow, runWorkflowNow, deleteWorkflow } from "@/lib/actions";
 import { requireOwner } from "@/lib/auth/require-owner";
 import { SubmitButton } from "@/components/submit-button";
-import { PlusIcon, PlayIcon, PauseIcon, TrashIcon } from "@/components/icons";
-import { cardClass } from "@/lib/card-class";
+import { Plus, Play, Pause, Trash2, Workflow, Clock } from "lucide-react";
+import {
+  Badge,
+  ButtonLink,
+  Card,
+  EmptyState,
+  Mono,
+  PageHeader,
+  StatusDot,
+  statusTone,
+} from "@/components/ui";
+import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
 
 export const dynamic = "force-dynamic";
 
-const STATUS_DOT: Record<string, string> = {
-  ok: "bg-success",
-  error: "bg-danger",
-  running: "bg-accent",
-  queued: "bg-muted",
-};
-
-function nextRunAt(cron: string, timezone: string): string {
+function nextRunAt(cron: string, timezone: string): string | null {
   try {
     const interval = CronExpressionParser.parse(cron, { tz: timezone });
     return interval.next().toDate().toLocaleString("en-US", {
@@ -27,7 +30,7 @@ function nextRunAt(cron: string, timezone: string): string {
       timeStyle: "short",
     });
   } catch {
-    return "invalid cron";
+    return null;
   }
 }
 
@@ -46,121 +49,143 @@ export default async function WorkflowsPage() {
     }
   }
 
-  return (
-    <main className="mx-auto max-w-4xl px-8 py-12">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-medium tracking-tight text-foreground">Workflows</h1>
-          <p className="mt-1 text-sm text-muted">
-            {rows.length === 0 ? "None yet" : `${rows.length} configured`}
-          </p>
-        </div>
-        <Link
-          href="/workflows/new"
-          className="flex cursor-pointer items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-85"
-        >
-          <PlusIcon className="h-3.5 w-3.5" />
-          New workflow
-        </Link>
-      </div>
+  const enabledCount = rows.filter((w) => w.enabled).length;
 
-      {rows.length === 0 && (
-        <div className="mt-10 rounded-xl border border-dashed border-border px-6 py-14 text-center">
-          <p className="text-sm text-muted">
-            Nothing configured yet.{" "}
-            <Link href="/workflows/new" className="text-accent underline">
-              Create your first workflow
-            </Link>
-            .
-          </p>
+  return (
+    <main className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-10">
+      <PageHeader
+        title="Workflows"
+        subtitle={rows.length === 0 ? undefined : `${rows.length} total · ${enabledCount} active`}
+      />
+
+      {rows.length === 0 ? (
+        <div className="mt-10">
+          <EmptyState
+            icon={Workflow}
+            title="No workflows yet"
+            description="A goal in plain English plus a schedule."
+            action={
+              <ButtonLink href="/workflows/new" variant="primary" icon={Plus}>
+                Create your first workflow
+              </ButtonLink>
+            }
+          />
+        </div>
+      ) : (
+        <div className="mt-6 flex flex-col gap-4">
+          {rows.map((wf) => {
+            const latestStatus = latestStatusByWorkflow.get(wf.id);
+            const next = wf.enabled ? nextRunAt(wf.cron, wf.timezone) : null;
+            return (
+              <Card key={wf.id} interactive className="rise p-4 md:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      {latestStatus && (
+                        <span title={`Last run: ${latestStatus}`} className="flex items-center">
+                          <StatusDot
+                            tone={statusTone(latestStatus)}
+                            live={latestStatus === "running"}
+                          />
+                        </span>
+                      )}
+                      <Link
+                        href={`/workflows/${wf.id}`}
+                        className="heading-16 truncate text-foreground hover:underline"
+                      >
+                        {wf.name}
+                      </Link>
+                      <Mono>{wf.cron}</Mono>
+                      {!wf.enabled && <Badge tone="warn">paused</Badge>}
+                    </div>
+
+                    <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-muted">
+                      {wf.goal}
+                    </p>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                      {wf.toolkits.map((tk) => (
+                        <Badge key={tk} tone="neutral">
+                          {TOOLKIT_LABELS[tk] ?? tk}
+                        </Badge>
+                      ))}
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-subtle">
+                      <span className="inline-flex items-center gap-1">
+                        <Clock className="h-3.5 w-3.5" />
+                        {wf.enabled
+                          ? next
+                            ? `Next ${next}`
+                            : "Invalid cron expression"
+                          : "Schedule paused"}
+                      </span>
+                      {wf.lastRunAt && (
+                        <span>
+                          Last ran{" "}
+                          {wf.lastRunAt.toLocaleString("en-US", {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          })}
+                        </span>
+                      )}
+                      <span className="font-mono">{wf.timezone}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <form
+                      action={async () => {
+                        "use server";
+                        await runWorkflowNow(wf.id);
+                      }}
+                    >
+                      <SubmitButton pendingLabel="Running…" icon={Play} variant="outline">
+                        Run now
+                      </SubmitButton>
+                    </form>
+
+                    <form
+                      action={async () => {
+                        "use server";
+                        await toggleWorkflow(wf.id, !wf.enabled);
+                      }}
+                    >
+                      <SubmitButton
+                        pendingLabel="…"
+                        icon={wf.enabled ? Pause : Play}
+                        variant="ghost"
+                        iconOnly
+                        title={wf.enabled ? "Pause schedule" : "Enable schedule"}
+                      >
+                        {wf.enabled ? "Pause" : "Enable"}
+                      </SubmitButton>
+                    </form>
+
+                    <form
+                      action={async () => {
+                        "use server";
+                        await deleteWorkflow(wf.id);
+                      }}
+                    >
+                      <SubmitButton
+                        pendingLabel="…"
+                        variant="ghost"
+                        icon={Trash2}
+                        iconOnly
+                        danger
+                        title="Delete workflow"
+                      >
+                        Delete
+                      </SubmitButton>
+                    </form>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
         </div>
       )}
-
-      <div className="mt-8 flex flex-col gap-3">
-        {rows.map((wf) => {
-          const latestStatus = latestStatusByWorkflow.get(wf.id);
-          return (
-            <div key={wf.id} className={cardClass(true)}>
-              <div className="flex items-center justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    {latestStatus && (
-                      <span
-                        title={`last run: ${latestStatus}`}
-                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[latestStatus] ?? STATUS_DOT.queued}`}
-                      />
-                    )}
-                    <Link
-                      href={`/workflows/${wf.id}`}
-                      className="truncate text-sm font-medium text-foreground hover:underline"
-                    >
-                      {wf.name}
-                    </Link>
-                    <span className="rounded bg-chip px-1.5 py-0.5 font-mono text-[11px] text-muted">
-                      {wf.cron}
-                    </span>
-                    {!wf.enabled && (
-                      <span className="rounded bg-chip px-1.5 py-0.5 text-[11px] text-muted">
-                        paused
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-1">
-                    {wf.toolkits.map((tk) => (
-                      <span
-                        key={tk}
-                        className="rounded bg-chip px-1.5 py-0.5 text-[10px] text-muted"
-                      >
-                        {tk}
-                      </span>
-                    ))}
-                  </div>
-                  <p className="mt-2 truncate text-xs text-muted">
-                    {wf.enabled ? `Next run: ${nextRunAt(wf.cron, wf.timezone)}` : "Disabled"}
-                    {wf.lastRunAt &&
-                      ` · Last ran: ${wf.lastRunAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`}
-                  </p>
-                </div>
-
-                <div className="flex shrink-0 items-center gap-2">
-                  <form
-                    action={async () => {
-                      "use server";
-                      await runWorkflowNow(wf.id);
-                    }}
-                  >
-                    <SubmitButton pendingLabel="Running…" icon={PlayIcon}>
-                      Run now
-                    </SubmitButton>
-                  </form>
-
-                  <form
-                    action={async () => {
-                      "use server";
-                      await toggleWorkflow(wf.id, !wf.enabled);
-                    }}
-                  >
-                    <SubmitButton pendingLabel="…" icon={wf.enabled ? PauseIcon : PlayIcon}>
-                      {wf.enabled ? "Pause" : "Enable"}
-                    </SubmitButton>
-                  </form>
-
-                  <form
-                    action={async () => {
-                      "use server";
-                      await deleteWorkflow(wf.id);
-                    }}
-                  >
-                    <SubmitButton pendingLabel="…" variant="danger" icon={TrashIcon}>
-                      Delete
-                    </SubmitButton>
-                  </form>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
     </main>
   );
 }

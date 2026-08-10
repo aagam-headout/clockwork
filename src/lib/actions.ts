@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { workflows } from "@/db/schema";
 import { runWorkflow } from "@/lib/executor";
+import { disconnectAccount } from "@/lib/composio";
 import type { DeliverTarget } from "@/lib/read-only";
 import { requireOwner } from "@/lib/auth/require-owner";
 
@@ -72,6 +73,12 @@ export async function deleteWorkflow(id: string) {
   await db.delete(workflows).where(eq(workflows.id, id));
   revalidatePath("/workflows");
   redirect("/workflows");
+}
+
+export async function disconnectToolkit(connectedAccountId: string) {
+  await requireOwner();
+  await disconnectAccount(connectedAccountId);
+  revalidatePath("/connections");
 }
 
 export async function runWorkflowNow(id: string) {

@@ -1,17 +1,31 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
+import { LoaderCircle } from "lucide-react";
+import { buttonClass, BUTTON_SIZES, BUTTON_VARIANTS } from "@/components/ui";
 
+/**
+ * Form-aware button. `iconOnly` collapses to a square icon control while
+ * keeping the label as the accessible name — used for the dense row actions.
+ */
 export function SubmitButton({
   children,
   pendingLabel,
-  variant = "default",
+  variant = "outline",
+  size = "sm",
   icon: Icon,
+  iconOnly = false,
+  danger = false,
+  title,
 }: {
   children: React.ReactNode;
   pendingLabel: string;
-  variant?: "default" | "danger";
+  variant?: keyof typeof BUTTON_VARIANTS;
+  size?: keyof typeof BUTTON_SIZES;
   icon?: React.ComponentType<{ className?: string }>;
+  iconOnly?: boolean;
+  danger?: boolean;
+  title?: string;
 }) {
   const { pending } = useFormStatus();
 
@@ -19,14 +33,22 @@ export function SubmitButton({
     <button
       type="submit"
       disabled={pending}
-      className={`flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-wait disabled:opacity-60 ${
-        variant === "danger"
-          ? "text-danger hover:border-danger"
-          : "text-foreground hover:border-foreground"
-      }`}
+      title={title ?? (typeof children === "string" ? children : undefined)}
+      aria-label={iconOnly && typeof children === "string" ? children : undefined}
+      className={buttonClass(
+        variant,
+        size,
+        `disabled:cursor-wait ${iconOnly ? "w-8 px-0" : ""} ${
+          danger ? "text-danger-text hover:bg-danger-soft hover:text-danger-text" : ""
+        }`
+      )}
     >
-      {Icon && !pending && <Icon className="h-3 w-3" />}
-      {pending ? pendingLabel : children}
+      {pending ? (
+        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        Icon && <Icon className="h-3.5 w-3.5" />
+      )}
+      {!iconOnly && (pending ? pendingLabel : children)}
     </button>
   );
 }

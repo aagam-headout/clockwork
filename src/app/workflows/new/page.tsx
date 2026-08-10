@@ -1,25 +1,35 @@
-import Link from "next/link";
 import { createWorkflow } from "@/lib/actions";
 import { NewWorkflowClient } from "@/components/new-workflow-client";
 import { requireOwner } from "@/lib/auth/require-owner";
+import { PageHeader } from "@/components/ui";
+import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
+import { getModelCatalog } from "@/lib/models";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewWorkflowPage() {
   await requireOwner();
 
-  return (
-    <main className="mx-auto max-w-3xl px-8 py-12">
-      <Link href="/workflows" className="text-xs text-muted hover:text-foreground">
-        ← Workflows
-      </Link>
-      <h1 className="mt-2 text-xl font-medium tracking-tight text-foreground">New workflow</h1>
-      <p className="mt-1 text-sm text-muted">
-        Read-only for now — the agent can look things up and deliver a digest, nothing else.
-      </p>
+  const [availableToolkits, models] = await Promise.all([
+    getConnectedToolkitOptions(),
+    getModelCatalog(),
+  ]);
 
-      <div className="mt-8">
-        <NewWorkflowClient action={createWorkflow} />
+  return (
+    <main className="mx-auto max-w-4xl px-4 py-8 md:px-6 md:py-10">
+      <PageHeader
+        backHref="/workflows"
+        backLabel="Workflows"
+        title="New workflow"
+        subtitle="Describe the job in plain English, or fill the form yourself."
+      />
+
+      <div className="rise mt-6">
+        <NewWorkflowClient
+          action={createWorkflow}
+          availableToolkits={availableToolkits}
+          models={models}
+        />
       </div>
     </main>
   );

@@ -2,67 +2,468 @@
 @import "@neondatabase/auth-ui/tailwind";
 
 /*
- * Vercel/Geist-derived neutral scale. Kept intentionally minimal: a
- * background/foreground pair, a muted text tone, one border tone, and a
- * card surface — enough for a dashboard, no decorative color.
+ * Design tokens, tuned to Vercel's Geist system.
+ *
+ * The rules that keep it looking like Vercel and not a generic dashboard:
+ *   - Pure black/white ends of the scale; grays carry no chroma.
+ *   - Structure comes from 1px borders, not shadows. Shadows only lift things
+ *     that float above the page (menus, dialogs).
+ *   - Blue is a link/info color, never the primary button. The primary action
+ *     is foreground-on-background inverted.
+ *   - 6px radius on controls, 12px on containers, full only on pills.
+ *
+ * Theme resolution: bare :root is light. `prefers-color-scheme: dark` flips it
+ * unless the user pinned light via [data-theme="light"]. [data-theme="dark"]
+ * always wins.
  */
 :root {
-  --background: #ffffff;
-  --foreground: #0a0a0a;
-  --muted: #666666;
-  --border: #eaeaea;
-  --card: #fbfbfb;
-  --chip: #f0f1f3;
-  --accent: #0070f3;
-  --danger: #e5484d;
-  --success: #17c964;
-}
+  --bg: #ffffff;
+  --bg-subtle: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f2f2f2;
+  --surface-hover: #f5f5f5;
+  --border: #ebebeb;
+  --border-strong: #d4d4d4;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-muted: var(--muted);
-  --color-border: var(--border);
-  --color-card: var(--card);
-  --color-chip: var(--chip);
-  --color-accent: var(--accent);
-  --color-danger: var(--danger);
-  --color-success: var(--success);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --fg: #000000;
+  --fg-muted: #666666;
+  --fg-subtle: #8f8f8f;
+
+  /* Inverted primary — Vercel's black button. */
+  --solid: #000000;
+  --solid-hover: #383838;
+  --solid-fg: #ffffff;
+
+  --accent: #0072f5;
+  --accent-hover: #0062d1;
+  --accent-fg: #ffffff;
+  --accent-soft: #ebf5ff;
+  --accent-text: #0068d6;
+  --accent-line: #a5cdff;
+
+  --success: #45a557;
+  --success-soft: #edf9ee;
+  --success-text: #177e35;
+  --success-line: #a8e5b6;
+
+  --danger: #e5484d;
+  --danger-soft: #fff0ef;
+  --danger-text: #c62a2f;
+  --danger-line: #f9b5b3;
+
+  --warn: #f5a623;
+  --warn-soft: #fff8e6;
+  --warn-text: #a35200;
+  --warn-line: #f7d488;
+
+  --ring: color-mix(in oklab, var(--fg) 22%, transparent);
+
+  --radius-control: 6px;
+  --radius-container: 12px;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-raised: 0 2px 4px rgb(0 0 0 / 0.06), 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-pop: 0 8px 30px rgb(0 0 0 / 0.12);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --muted: #888888;
-    --border: #262626;
-    --card: #111111;
-    --chip: #1c1e21;
-    --accent: #3291ff;
-    --danger: #ff6166;
-    --success: #45d483;
+  :root:not([data-theme="light"]) {
+    --bg: #000000;
+    --bg-subtle: #0a0a0a;
+    --surface: #0a0a0a;
+    --surface-2: #1a1a1a;
+    --surface-hover: #1f1f1f;
+    --border: #2e2e2e;
+    --border-strong: #454545;
+
+    --fg: #ededed;
+    --fg-muted: #a1a1a1;
+    --fg-subtle: #7e7e7e;
+
+    --solid: #ffffff;
+    --solid-hover: #cccccc;
+    --solid-fg: #000000;
+
+    --accent: #0072f5;
+    --accent-hover: #3291ff;
+    --accent-fg: #ffffff;
+    --accent-soft: #0f1b2d;
+    --accent-text: #52a8ff;
+    --accent-line: #17427e;
+
+    --success: #45a557;
+    --success-soft: #0b2b12;
+    --success-text: #62c073;
+    --success-line: #1c5b2a;
+
+    --danger: #e5484d;
+    --danger-soft: #2a1314;
+    --danger-text: #ff6166;
+    --danger-line: #671e21;
+
+    --warn: #f5a623;
+    --warn-soft: #2a1d05;
+    --warn-text: #f5b849;
+    --warn-line: #6b4708;
+
+    --ring: color-mix(in oklab, var(--fg) 35%, transparent);
+
+    --shadow-card: none;
+    --shadow-raised: 0 2px 6px rgb(0 0 0 / 0.6);
+    --shadow-pop: 0 12px 40px rgb(0 0 0 / 0.8);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), system-ui, sans-serif;
+:root[data-theme="dark"] {
+  --bg: #000000;
+  --bg-subtle: #0a0a0a;
+  --surface: #0a0a0a;
+  --surface-2: #1a1a1a;
+  --surface-hover: #1f1f1f;
+  --border: #2e2e2e;
+  --border-strong: #454545;
+
+  --fg: #ededed;
+  --fg-muted: #a1a1a1;
+  --fg-subtle: #7e7e7e;
+
+  --solid: #ffffff;
+  --solid-hover: #cccccc;
+  --solid-fg: #000000;
+
+  --accent: #0072f5;
+  --accent-hover: #3291ff;
+  --accent-fg: #ffffff;
+  --accent-soft: #0f1b2d;
+  --accent-text: #52a8ff;
+  --accent-line: #17427e;
+
+  --success: #45a557;
+  --success-soft: #0b2b12;
+  --success-text: #62c073;
+  --success-line: #1c5b2a;
+
+  --danger: #e5484d;
+  --danger-soft: #2a1314;
+  --danger-text: #ff6166;
+  --danger-line: #671e21;
+
+  --warn: #f5a623;
+  --warn-soft: #2a1d05;
+  --warn-text: #f5b849;
+  --warn-line: #6b4708;
+
+  --ring: color-mix(in oklab, var(--fg) 35%, transparent);
+
+  --shadow-card: none;
+  --shadow-raised: 0 2px 6px rgb(0 0 0 / 0.6);
+  --shadow-pop: 0 12px 40px rgb(0 0 0 / 0.8);
 }
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-subtle: var(--bg-subtle);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  --color-foreground: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-subtle: var(--fg-subtle);
+
+  --color-solid: var(--solid);
+  --color-solid-hover: var(--solid-hover);
+  --color-solid-fg: var(--solid-fg);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
+  --color-accent-line: var(--accent-line);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-text: var(--success-text);
+  --color-success-line: var(--success-line);
+
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-text: var(--danger-text);
+  --color-danger-line: var(--danger-line);
+
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-text: var(--warn-text);
+  --color-warn-line: var(--warn-line);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --radius-control: var(--radius-control);
+  --radius-container: var(--radius-container);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-raised: var(--shadow-raised);
+  --shadow-pop: var(--shadow-pop);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  color-scheme: light dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--accent) 30%, transparent);
+}
+
+/* Geist headings are set tight; the optical tracking below matches the
+   published ramp (24px → -0.96px, 32px → -1.28px). */
+.heading-32 {
+  font-size: 2rem;
+  line-height: 2.5rem;
+  letter-spacing: -1.28px;
+  font-weight: 600;
+}
+
+.heading-24 {
+  font-size: 1.5rem;
+  line-height: 2rem;
+  letter-spacing: -0.96px;
+  font-weight: 600;
+}
+
+.heading-16 {
+  font-size: 1rem;
+  line-height: 1.5rem;
+  letter-spacing: -0.32px;
+  font-weight: 600;
+}
+
+.heading-14 {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  letter-spacing: -0.28px;
+  font-weight: 600;
+}
+
+/* Thin, theme-aware scrollbars — the default chrome bars read as a bug next
+   to this much restraint. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-subtle);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* One focus treatment for everything interactive: a foreground ring, the way
+   Geist does it — not a colored halo. */
+:where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+/* ---------- form controls ---------- */
 
 .input {
   width: 100%;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-control);
   border: 1px solid var(--border);
-  background: var(--card);
+  background: var(--bg);
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
-  color: var(--foreground);
+  line-height: 1.4;
+  color: var(--fg);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background 150ms ease;
+}
+
+.input::placeholder {
+  color: var(--fg-subtle);
+}
+
+.input:hover:not(:focus):not(:disabled) {
+  border-color: var(--border-strong);
 }
 
 .input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
+  outline: none;
+  border-color: var(--fg-subtle);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.input:disabled {
+  background: var(--surface-2);
+  color: var(--fg-subtle);
+  cursor: not-allowed;
+}
+
+select.input {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--fg-subtle) 50%),
+    linear-gradient(135deg, var(--fg-subtle) 50%, transparent 50%);
+  background-position:
+    calc(100% - 15px) calc(50% + 1px),
+    calc(100% - 10px) calc(50% + 1px);
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 2rem;
+}
+
+textarea.input {
+  resize: vertical;
+  min-height: 5rem;
+}
+
+/* lucide ships at stroke-width 2, which reads heavy next to Geist's icon set. */
+svg.lucide {
+  stroke-width: 1.5px;
+}
+
+/* ---------- animation ---------- */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 50%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.live-dot {
+  animation: pulse-ring 1.8s ease-out infinite;
+}
+
+/* Skeletons: Geist's shimmer, a sweep over the gray-100 surface. */
+@keyframes shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  border-radius: var(--radius-control);
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 0%,
+    var(--surface-hover) 50%,
+    var(--surface-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .live-dot,
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* ---------- app mark ---------- */
+
+/* Frosted light-grey chip the logo sits in. Tints are mixed from --fg, so the
+   same rule reads as light grey glass over the light bg and over the dark one. */
+.logo-badge {
+  background: linear-gradient(
+    150deg,
+    color-mix(in oklab, var(--fg) 5%, transparent),
+    color-mix(in oklab, var(--fg) 11%, transparent)
+  );
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, #fff 55%, transparent),
+    inset 0 0 0 1px color-mix(in oklab, var(--fg) 9%, transparent),
+    0 1px 2px rgb(12 14 18 / 0.06);
+}
+
+/* On the near-black bg a 5% white wash disappears, so the dark theme gets a
+   heavier frost and a brighter rim. Same rule, twice: the media query covers
+   "follow system", the attribute covers an explicit pin. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .logo-badge {
+    background: linear-gradient(
+      150deg,
+      color-mix(in oklab, var(--fg) 20%, transparent),
+      color-mix(in oklab, var(--fg) 11%, transparent)
+    );
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklab, #fff 22%, transparent),
+      inset 0 0 0 1px color-mix(in oklab, var(--fg) 18%, transparent);
+  }
+}
+
+:root[data-theme="dark"] .logo-badge {
+  background: linear-gradient(
+    150deg,
+    color-mix(in oklab, var(--fg) 20%, transparent),
+    color-mix(in oklab, var(--fg) 11%, transparent)
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, #fff 22%, transparent),
+    inset 0 0 0 1px color-mix(in oklab, var(--fg) 18%, transparent);
 }

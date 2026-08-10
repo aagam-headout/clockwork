@@ -1,9 +1,18 @@
 import Link from "next/link";
-import { desc, eq, and, gte } from "drizzle-orm";
+import { desc, eq, and, gte, count, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { outputs, runs, workflows } from "@/db/schema";
 import { requireOwner } from "@/lib/auth/require-owner";
-import { cardClass } from "@/lib/card-class";
+import {
+  Badge,
+  ButtonLink,
+  Card,
+  EmptyState,
+  PageHeader,
+  SectionLabel,
+  Stat,
+} from "@/components/ui";
+import { Plus, Sparkles, ChevronRight } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -13,64 +22,137 @@ export default async function TodayPage() {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
-  const feed = await db
-    .select({
-      outputId: outputs.id,
-      body: outputs.body,
-      createdAt: outputs.createdAt,
-      deliveredTo: outputs.deliveredTo,
-      workflowName: workflows.name,
-      runId: runs.id,
-      runStatus: runs.status,
-    })
-    .from(outputs)
-    .innerJoin(runs, eq(outputs.runId, runs.id))
-    .innerJoin(workflows, eq(runs.workflowId, workflows.id))
-    .where(and(eq(runs.status, "ok"), gte(outputs.createdAt, startOfToday)))
-    .orderBy(desc(outputs.createdAt));
+  const [feed, runStats, workflowStats] = await Promise.all([
+    db
+      .select({
+        outputId: outputs.id,
+        body: outputs.body,
+        createdAt: outputs.createdAt,
+        deliveredTo: outputs.deliveredTo,
+        workflowName: workflows.name,
+        runId: runs.id,
+        runStatus: runs.status,
+      })
+      .from(outputs)
+      .innerJoin(runs, eq(outputs.runId, runs.id))
+      .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+      .where(and(eq(runs.status, "ok"), gte(outputs.createdAt, startOfToday)))
+      .orderBy(desc(outputs.createdAt)),
+
+    db
+      .select({
+        total: count(),
+        failed: sql<number>`count(*) filter (where ${runs.status} = 'error')`.mapWith(Number),
+      })
+      .from(runs)
+      .where(gte(runs.createdAt, startOfToday)),
+
+    db
+      .select({
+        total: count(),
+        enabled: sql<number>`count(*) filter (where ${workflows.enabled})`.mapWith(Number),
+      })
+      .from(workflows),
+  ]);
+
+  const runsToday = runStats[0]?.total ?? 0;
+  const failedToday = runStats[0]?.failed ?? 0;
+  const activeWorkflows = workflowStats[0]?.enabled ?? 0;
+  const totalWorkflows = workflowStats[0]?.total ?? 0;
+
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return "Good morning";
+    if (h < 18) return "Good afternoon";
+    return "Good evening";
+  })();
 
   return (
-    <main className="mx-auto max-w-3xl px-8 py-12">
-      <h1 className="text-xl font-medium tracking-tight text-foreground">Today</h1>
-      <p className="mt-1 text-sm text-muted">
-        {feed.length === 0
-          ? "Nothing has run yet today."
-          : `${feed.length} digest${feed.length === 1 ? "" : "s"} so far`}
-      </p>
+    <main className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-10">
+      <PageHeader
+        title="Overview"
+        subtitle={`${greeting} — ${new Date().toLocaleDateString("en-US", {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+        })}`}
+        actions={
+          <ButtonLink href="/runs" variant="outline" size="sm">
+            View all runs
+          </ButtonLink>
+        }
+      />
 
-      {feed.length === 0 && (
-        <div className="mt-10 rounded-xl border border-dashed border-border px-6 py-14 text-center">
-          <p className="text-sm text-muted">
-            Set up a workflow at{" "}
-            <Link href="/workflows/new" className="text-accent underline">
-              /workflows/new
-            </Link>{" "}
-            or check{" "}
-            <Link href="/runs" className="text-accent underline">
-              past runs
-            </Link>
-            .
-          </p>
-        </div>
-      )}
+      <div className="rise mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <Stat
+          label="Digests"
+          value={feed.length}
+          hint="delivered"
+          tone={feed.length > 0 ? "accent" : "neutral"}
+        />
+        <Stat
+          label="Runs"
+          value={runsToday}
+          hint={failedToday > 0 ? `${failedToday} failed` : "no failures"}
+          tone={failedToday > 0 ? "danger" : runsToday > 0 ? "success" : "neutral"}
+        />
+        <Stat
+          label="Active"
+          value={activeWorkflows}
+          hint={`of ${totalWorkflows}`}
+          tone={activeWorkflows > 0 ? "success" : "warn"}
+        />
+      </div>
 
-      <div className="mt-8 flex flex-col gap-3">
-        {feed.map((item) => (
-          <article key={item.outputId} className={cardClass()}>
-            <div className="flex items-center justify-between">
-              <Link
-                href={`/runs/${item.runId}`}
-                className="text-sm font-medium text-foreground hover:underline"
-              >
-                {item.workflowName}
-              </Link>
-              <span className="text-xs text-muted">
-                {item.createdAt.toLocaleTimeString("en-US", { timeStyle: "short" })}
-              </span>
-            </div>
-            <div className="mt-3 whitespace-pre-wrap text-sm text-foreground">{item.body}</div>
-          </article>
-        ))}
+      <div className="mt-8">
+        <SectionLabel count={feed.length || undefined}>Today&apos;s digests</SectionLabel>
+        {feed.length === 0 ? (
+          <EmptyState
+            icon={Sparkles}
+            title="Nothing has run yet today"
+            description="Digests land here when a workflow finishes."
+            action={
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <ButtonLink href="/workflows/new" variant="primary" icon={Plus}>
+                  Create a workflow
+                </ButtonLink>
+                <ButtonLink href="/runs" variant="ghost">
+                  See past runs
+                </ButtonLink>
+              </div>
+            }
+          />
+        ) : (
+          <div className="flex flex-col gap-4">
+            {feed.map((item) => (
+              <Card key={item.outputId} as="article" interactive className="rise overflow-hidden">
+                <div className="flex items-center justify-between gap-3 border-b border-border bg-bg-subtle px-4 py-2.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Link
+                      href={`/runs/${item.runId}`}
+                      className="group flex min-w-0 items-center gap-1 text-[13px] font-medium text-foreground"
+                    >
+                      <span className="truncate group-hover:underline">{item.workflowName}</span>
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-subtle transition-transform group-hover:translate-x-0.5" />
+                    </Link>
+                    {item.deliveredTo.length > 1 && (
+                      <Badge tone="neutral">{item.deliveredTo.join(" · ")}</Badge>
+                    )}
+                  </div>
+                  <time
+                    dateTime={item.createdAt.toISOString()}
+                    className="shrink-0 font-mono text-[11px] text-subtle"
+                  >
+                    {item.createdAt.toLocaleTimeString("en-US", { timeStyle: "short" })}
+                  </time>
+                </div>
+                <div className="whitespace-pre-wrap px-4 py-4 text-sm leading-relaxed text-foreground">
+                  {item.body}
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
     </main>
   );

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { initiateConnection, TOOLKITS } from "@/lib/composio";
+import { initiateConnection, toolkitExists } from "@/lib/composio";
 import { auth } from "@/lib/auth/server";
 
 // GET so a plain <a href> / form-less button click can hit it directly and
@@ -18,7 +18,13 @@ export async function GET(
 
   const { toolkit } = await params;
 
-  if (!TOOLKITS.includes(toolkit as (typeof TOOLKITS)[number])) {
+  // Any Composio toolkit is connectable, not just a curated few — so the slug
+  // is only shape-checked here and then verified against the live catalog.
+  if (!/^[a-z0-9_]{2,64}$/.test(toolkit)) {
+    return NextResponse.json({ error: `Malformed toolkit slug: ${toolkit}` }, { status: 400 });
+  }
+
+  if (!(await toolkitExists(toolkit))) {
     return NextResponse.json({ error: `Unknown toolkit: ${toolkit}` }, { status: 400 });
   }
 
