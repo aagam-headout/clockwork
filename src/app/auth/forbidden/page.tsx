@@ -11,7 +11,7 @@ export default function ForbiddenPage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center px-6 py-16">
       <div className="rise rounded-container border-border bg-surface w-full max-w-sm border p-6 text-center">
-        <span className="rounded-container border-warn-line bg-warn-soft text-warn-text mx-auto flex h-10 w-10 items-center justify-center border">
+        <span className="rounded-container border-warn-soft bg-warn-soft text-warn-text mx-auto flex h-10 w-10 items-center justify-center border">
           <TriangleAlert className="h-5 w-5" />
         </span>
         <h1 className="heading-16 text-foreground mt-4">Not your app</h1>

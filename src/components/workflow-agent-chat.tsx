@@ -286,19 +286,12 @@ export function WorkflowAgentChat({
                 ),
               )}
 
-              {loading && (
-                <div className="text-muted flex items-center gap-2 text-[13px]">
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />
-                  {readToolkits.size > 0
-                    ? "Looking through your apps…"
-                    : "Working on it…"}
-                </div>
-              )}
+              {loading && <PendingTurn reading={readToolkits.size > 0} />}
             </div>
           )}
 
           {error && (
-            <p className="rounded-control border-danger-line bg-danger-soft text-danger-text mt-3 flex items-start gap-1.5 border px-2.5 py-2 text-[13px]">
+            <p className="rounded-control border-danger-soft bg-danger-soft text-danger-text mt-3 flex items-start gap-1.5 border px-2.5 py-2 text-[13px]">
               <TriangleAlert className="mt-px h-4 w-4 shrink-0" />
               {error}
             </p>
@@ -347,6 +340,83 @@ export function WorkflowAgentChat({
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+/*
+ * Phases, with the second they start at. /api/workflows/propose answers in one
+ * shot — there is no progress to report — so these are honest about being a
+ * clock, not a trace: each line only claims the thing the request is *known* to
+ * be doing by then, and the last one admits it's still waiting rather than
+ * inventing a fifth step. Reading from connected apps adds a real round trip to
+ * someone's inbox, so that path gets its own, slower script.
+ */
+const PHASES_LOCAL: Array<[number, string]> = [
+  [0, "Reading your request…"],
+  [3, "Working out the schedule and tools…"],
+  [9, "Drafting the workflow…"],
+  [22, "Still working — this one's taking a while…"],
+];
+
+const PHASES_READING: Array<[number, string]> = [
+  [0, "Reading your request…"],
+  [3, "Looking through your apps…"],
+  [12, "Drafting the workflow from what it found…"],
+  [30, "Still working — big inboxes take a while…"],
+];
+
+/**
+ * The assistant's turn while it's in flight. Shaped like the bubble that will
+ * replace it — same border, wash and radius — so the reply lands in place
+ * instead of the column jumping when a plain one-line spinner is swapped for a
+ * paragraph. The elapsed counter appears only once the wait is long enough to
+ * feel like a hang (6s), which is the point where a reader starts wondering
+ * whether anything is happening at all.
+ */
+function PendingTurn({ reading }: { reading: boolean }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const started = Date.now();
+    const id = setInterval(
+      () => setElapsed(Math.floor((Date.now() - started) / 1000)),
+      1000,
+    );
+    return () => clearInterval(id);
+  }, []);
+
+  const phases = reading ? PHASES_READING : PHASES_LOCAL;
+  const label = phases.reduce(
+    (acc, [at, text]) => (elapsed >= at ? text : acc),
+    phases[0][1],
+  );
+
+  return (
+    <div
+      // `w-fit`, not a full-width row: the reply that replaces it is a bubble
+      // that hugs its text, and a pending bar stretched across the column read
+      // as a different kind of object entirely.
+      className="rounded-container border-border bg-bg-subtle flex w-fit max-w-[92%] items-center gap-2.5 border px-3 py-2"
+      role="status"
+      aria-live="polite"
+    >
+      <span className="text-subtle relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+        <Sparkles className="h-3.5 w-3.5" />
+      </span>
+      {/* `key` on the label so a phase change re-runs the rise, which is the
+          only signal that the wait moved on. */}
+      <span
+        key={label}
+        className="rise text-shimmer min-w-0 truncate text-[13px]"
+      >
+        {label}
+      </span>
+      {elapsed >= 6 && (
+        <span className="text-subtle shrink-0 font-mono text-[11px] tabular-nums">
+          {elapsed}s
+        </span>
+      )}
     </div>
   );
 }

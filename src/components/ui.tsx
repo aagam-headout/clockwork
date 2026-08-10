@@ -11,14 +11,18 @@ import { ArrowLeft } from "lucide-react";
 
 type Tone = "neutral" | "accent" | "success" | "danger" | "warn";
 
-// Badges are outlined, not filled blocks — a soft wash plus a real 1px border
-// in the same hue, on the app's squarish 4px chip radius.
+/*
+ * The 1px border is kept for geometry but painted in the wash colour itself, so
+ * a status chip or an alert reads as one flat tinted block rather than a tinted
+ * block inside a second, louder outline. The `-line` tokens stay for the places
+ * that genuinely need a visible edge (invalid inputs, danger hover states).
+ */
 const TONE_SOFT: Record<Tone, string> = {
   neutral: "bg-surface-2 text-muted border-border",
-  accent: "bg-accent-soft text-accent-text border-accent-line",
-  success: "bg-success-soft text-success-text border-success-line",
-  danger: "bg-danger-soft text-danger-text border-danger-line",
-  warn: "bg-warn-soft text-warn-text border-warn-line",
+  accent: "bg-accent-soft text-accent-text border-accent-soft",
+  success: "bg-success-soft text-success-text border-success-soft",
+  danger: "bg-danger-soft text-danger-text border-danger-soft",
+  warn: "bg-warn-soft text-warn-text border-warn-soft",
 };
 
 const TONE_DOT: Record<Tone, string> = {
@@ -400,15 +404,18 @@ export function Skeleton({ className = "" }: { className?: string }) {
 export function ListBox({
   children,
   className = "",
+  as: As = "div",
 }: {
   children: React.ReactNode;
   className?: string;
+  /** `ol`/`ul` when the rows are a real list (the run trace). */
+  as?: "div" | "ol" | "ul";
 }) {
   return (
-    <div
+    <As
       className={`divide-border rounded-container border-border bg-surface divide-y overflow-hidden border ${className}`}
     >
       {children}
-    </div>
+    </As>
   );
 }

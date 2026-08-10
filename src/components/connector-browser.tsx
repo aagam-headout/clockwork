@@ -190,7 +190,7 @@ export function ConnectorBrowser({
       </div>
 
       {error && (
-        <p className="rounded-control border-danger-line bg-danger-soft text-danger-text mt-3 flex items-center gap-1.5 border px-3 py-2 text-[13px]">
+        <p className="rounded-control border-danger-soft bg-danger-soft text-danger-text mt-3 flex items-center gap-1.5 border px-3 py-2 text-[13px]">
           <TriangleAlert className="h-4 w-4 shrink-0" />
           {error}
         </p>

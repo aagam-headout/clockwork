@@ -635,7 +635,7 @@ export function WorkflowForm({
       {state.error && (
         <p
           role="alert"
-          className="border-border bg-danger-soft text-danger-text flex shrink-0 items-start gap-2 border-t px-5 py-3 text-[13px]"
+          className="border-danger-soft bg-danger-soft text-danger-text flex shrink-0 items-start gap-2 border-t px-5 py-3 text-[13px]"
         >
           <TriangleAlert className="mt-px h-4 w-4 shrink-0" />
           <span className="min-w-0">{state.error}</span>
@@ -699,7 +699,7 @@ function EventTriggerPicker({
   return (
     <div className="flex flex-col gap-2">
       {error && (
-        <p className="rounded-control border-warn-line bg-warn-soft text-warn-text flex items-start gap-2 border px-3 py-2 text-xs">
+        <p className="rounded-control border-warn-soft bg-warn-soft text-warn-text flex items-start gap-2 border px-3 py-2 text-xs">
           <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
           <span className="min-w-0">
             Couldn&apos;t load the event catalog from Composio — {error}. Any

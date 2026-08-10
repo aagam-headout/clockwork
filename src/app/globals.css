@@ -538,11 +538,51 @@ body {
   animation: shimmer 1.6s linear infinite;
 }
 
+/*
+ * A sweep across the glyphs themselves, for the one label that stands in for
+ * work in flight. The request it reports on doesn't stream, so the text can't
+ * say anything true about progress — the motion is what says "still alive",
+ * which is cheaper and quieter than a spinner next to every phase change.
+ */
+@keyframes text-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.text-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--fg-muted) 0%,
+    var(--fg-muted) 35%,
+    var(--fg) 50%,
+    var(--fg-muted) 65%,
+    var(--fg-muted) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: text-shimmer 2.2s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rise,
   .live-dot,
-  .skeleton {
+  .skeleton,
+  .text-shimmer {
     animation: none;
+  }
+
+  /* Without the sweep the gradient would freeze mid-fade, so fall back to a
+     plain colour rather than a permanently half-lit label. */
+  .text-shimmer {
+    background: none;
+    color: var(--fg-muted);
+    -webkit-text-fill-color: currentColor;
   }
 }
 

@@ -14,7 +14,7 @@ import type { WorkflowFormState } from "@/lib/actions";
  * Two panes: the conversation on the left writes the form on the right. The
  * chat is the primary surface here — describing the job is the fast path, and
  * the form is the place you correct it — so it takes the flexible column and
- * the settings sit in a fixed 420px rail. Each pane scrolls on its own; below
+ * the settings sit in a narrow fixed rail (344–380px). Each pane scrolls on its own; below
  * `lg` they stack, chat first.
  */
 export function NewWorkflowClient({
@@ -36,7 +36,7 @@ export function NewWorkflowClient({
   return (
     // The rail is fixed rather than a fraction: the settings column has a
     // natural width, and the chat should absorb everything else.
-    <div className="grid h-full min-h-0 gap-5 max-lg:items-start lg:grid-cols-[minmax(0,1fr)_400px] xl:grid-cols-[minmax(0,1fr)_448px] xl:gap-6">
+    <div className="grid h-full min-h-0 gap-5 max-lg:items-start lg:grid-cols-[minmax(0,1fr)_344px] xl:grid-cols-[minmax(0,1fr)_380px] xl:gap-6">
       <div className="h-[min(62vh,520px)] min-h-0 lg:h-full">
         <WorkflowAgentChat
           onPropose={setProposal}
