@@ -20,7 +20,7 @@ const CATALOG: ModelInfo[] = [
 ];
 
 vi.mock("@/lib/models", () => ({
-  getModelCatalog: async () => CATALOG,
+  getModelCatalogFor: async () => CATALOG,
 }));
 
 const { runCostUsd, toCostColumn } = await import("./run-cost");

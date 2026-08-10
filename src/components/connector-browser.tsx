@@ -258,9 +258,15 @@ export function ConnectorBrowser({
 
                 <div className="border-border/70 flex items-center gap-1.5 border-t pt-2.5">
                   {toolkit.toolsCount != null && (
-                    <span className="text-subtle inline-flex items-center gap-1 text-[11px] tabular-nums">
+                    // A bare glyph and a number told nobody what was being
+                    // counted; the title and the screen-reader text do.
+                    <span
+                      title={`${toolkit.toolsCount} tools`}
+                      className="text-subtle inline-flex items-center gap-1 text-[11px] tabular-nums"
+                    >
                       <Wrench className="h-3 w-3" />
                       {toolkit.toolsCount}
+                      <span className="sr-only"> tools</span>
                     </span>
                   )}
                   {toolkit.noAuth && <Badge tone="neutral">no auth</Badge>}

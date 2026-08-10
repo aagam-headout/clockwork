@@ -6,6 +6,7 @@ import { requireOwner } from "@/lib/auth/require-owner";
 import {
   Alert,
   Badge,
+  ButtonLink,
   EmptyState,
   ListBox,
   PageHeader,
@@ -14,11 +15,12 @@ import {
   StatusDot,
   statusTone,
 } from "@/components/ui";
-import { History, ChevronRight, Clock, Calendar } from "lucide-react";
+import { History, ChevronRight, Clock, Calendar, Plus } from "lucide-react";
 import { LiveRun } from "@/components/live-run";
 import { formatUsd } from "@/lib/model-tiers";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Runs" };
 
 function relative(date: Date): string {
   const diff = Date.now() - date.getTime();
@@ -47,16 +49,34 @@ function dayLabel(date: Date): string {
   });
 }
 
+/*
+ * The statuses worth filtering by, in the order they matter when something has
+ * gone wrong. Kept as links rather than a <select>: the filter is then part of
+ * the URL (shareable, survives a refresh) and needs no client JavaScript.
+ */
+const FILTERS = [
+  { value: "", label: "All" },
+  { value: "error", label: "Failed" },
+  { value: "running", label: "Running" },
+  { value: "ok", label: "OK" },
+  { value: "truncated", label: "Truncated" },
+] as const;
+
+const PAGE_SIZE = 100;
+
 export default async function RunsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ notice?: string }>;
+  searchParams: Promise<{ notice?: string; status?: string }>;
 }) {
   await requireOwner();
 
   // Set when "Run now" landed on a workflow that was already running — the
   // list is the right place to be, but not without being told why.
-  const { notice } = await searchParams;
+  const { notice, status: statusFilter } = await searchParams;
+  const active = FILTERS.some((f) => f.value === statusFilter)
+    ? (statusFilter as string)
+    : "";
 
   const rows = await db
     .select({
@@ -73,8 +93,11 @@ export default async function RunsPage({
     })
     .from(runs)
     .leftJoin(workflows, eq(runs.workflowId, workflows.id))
+    .where(active ? eq(runs.status, active) : undefined)
     .orderBy(desc(runs.createdAt))
-    .limit(100);
+    // One page deep. Anything past this is a job for the filter above it, and
+    // the footer says so rather than letting the list end without explanation.
+    .limit(PAGE_SIZE);
 
   // Group into day buckets so a long history stays scannable.
   const groups: Array<{ label: string; items: typeof rows }> = [];
@@ -90,6 +113,9 @@ export default async function RunsPage({
     (r) => r.status === "running" || r.status === "queued",
   );
   const spend = rows.reduce((sum, r) => sum + Number(r.costUsd ?? 0), 0);
+  // The chip's own wording, so a filtered count reads "3 failed" rather than
+  // the "3 error runs" that stitching the raw status into a sentence produced.
+  const activeLabel = FILTERS.find((f) => f.value === active)?.label ?? "All";
 
   return (
     <PageShell>
@@ -100,8 +126,11 @@ export default async function RunsPage({
           rows.length === 0 ? undefined : (
             <div className="flex items-center gap-2">
               <LiveRun active={inFlight} />
+              {/* Names the filter while one is on — the same "12 runs" against
+                  a filtered list read as the total. */}
               <Badge tone={failed > 0 ? "danger" : "success"} dot>
-                {rows.length} runs{failed > 0 ? ` · ${failed} failed` : ""}
+                {rows.length} {active ? activeLabel.toLowerCase() : "runs"}
+                {!active && failed > 0 ? ` · ${failed} failed` : ""}
               </Badge>
               {spend > 0 && <Badge tone="neutral">{formatUsd(spend)}</Badge>}
             </div>
@@ -117,12 +146,29 @@ export default async function RunsPage({
         </div>
       )}
 
+      <StatusFilter active={active} />
+
       {rows.length === 0 ? (
         <div className="mt-6">
           <EmptyState
             icon={History}
-            title="No runs recorded"
-            description="Runs appear here with their full tool trace."
+            title={active ? `No ${active} runs` : "No runs recorded"}
+            description={
+              active
+                ? "Nothing matched that filter."
+                : "Runs appear here with their full tool trace — trigger one from a workflow, or wait for its schedule."
+            }
+            action={
+              active ? (
+                <ButtonLink href="/runs" variant="outline" size="sm">
+                  Clear filter
+                </ButtonLink>
+              ) : (
+                <ButtonLink href="/workflows/new" variant="primary" icon={Plus}>
+                  Create a workflow
+                </ButtonLink>
+              )
+            }
           />
         </div>
       ) : (
@@ -206,8 +252,40 @@ export default async function RunsPage({
               </ListBox>
             </section>
           ))}
+
+          {rows.length === PAGE_SIZE && (
+            <p className="text-subtle text-center text-xs">
+              Showing the {PAGE_SIZE} most recent runs. Narrow it with the
+              filter above.
+            </p>
+          )}
         </div>
       )}
     </PageShell>
+  );
+}
+
+/** The filter row: one chip per status, the active one inverted. */
+function StatusFilter({ active }: { active: string }) {
+  return (
+    <div className="rise mt-6 flex flex-wrap items-center gap-1.5">
+      {FILTERS.map((filter) => {
+        const on = filter.value === active;
+        return (
+          <Link
+            key={filter.value || "all"}
+            href={filter.value ? `/runs?status=${filter.value}` : "/runs"}
+            aria-current={on ? "true" : undefined}
+            className={`rounded-control flex h-8 items-center px-3 text-[13px] font-medium transition-colors ${
+              on
+                ? "bg-solid text-solid-fg"
+                : "border-border text-muted hover:border-border-strong hover:text-foreground border"
+            }`}
+          >
+            {filter.label}
+          </Link>
+        );
+      })}
+    </div>
   );
 }

@@ -10,7 +10,7 @@ import { enqueueRun, executeRun } from "@/lib/executor";
 import { disconnectAccount } from "@/lib/composio";
 import { syncEventTriggers } from "@/lib/triggers";
 import type { DeliverTarget } from "@/lib/read-only";
-import { requireOwner } from "@/lib/auth/require-owner";
+import { currentUserEmail, requireOwner } from "@/lib/auth/require-owner";
 
 function slugify(name: string) {
   return (
@@ -236,11 +236,17 @@ async function registerTriggers(
   }
 }
 
-/** `/workflows`, plus the trigger warning when registration didn't take. */
-function workflowsPath(triggerError: string | null) {
-  return triggerError
-    ? `/workflows?triggerError=${encodeURIComponent(triggerError)}`
-    : "/workflows";
+/**
+ * `/workflows`, plus the trigger warning when registration didn't take — or,
+ * when it did, a line saying the save landed. Every one of these actions ends
+ * in a redirect, and a redirect that changes nothing visible ("did the pause
+ * take?") is indistinguishable from a no-op, so the successful paths carry a
+ * `done` message the same way the failing ones carry `error`.
+ */
+function workflowsPath(triggerError: string | null, done?: string) {
+  if (triggerError)
+    return `/workflows?triggerError=${encodeURIComponent(triggerError)}`;
+  return done ? `/workflows?done=${encodeURIComponent(done)}` : "/workflows";
 }
 
 /** `/workflows` carrying a failure the list itself will render as an alert. */
@@ -265,7 +271,10 @@ export async function createWorkflow(
     const parsed = parseWorkflowForm(formData);
     const slug = await uniqueSlug(parsed.name);
 
-    await db.insert(workflows).values({ ...parsed, slug });
+    // Stamped at creation because a scheduled run has no session to ask: this
+    // is what tells the executor whose provider the run goes through.
+    const ownerEmail = await currentUserEmail();
+    await db.insert(workflows).values({ ...parsed, slug, ownerEmail });
     triggerError = await registerTriggers(
       parsed.eventTriggers,
       parsed.triggerType,
@@ -275,7 +284,7 @@ export async function createWorkflow(
   }
 
   revalidatePath("/workflows");
-  redirect(workflowsPath(triggerError));
+  redirect(workflowsPath(triggerError, "Workflow created."));
 }
 
 export async function updateWorkflow(
@@ -317,7 +326,7 @@ export async function updateWorkflow(
 
   revalidatePath("/workflows");
   revalidatePath(`/workflows/${id}`);
-  redirect(workflowsPath(triggerError));
+  redirect(workflowsPath(triggerError, "Changes saved."));
 }
 
 export async function toggleWorkflow(id: string, enabled: boolean) {
@@ -340,7 +349,11 @@ export async function toggleWorkflow(id: string, enabled: boolean) {
   // These buttons live on the list itself, so the message goes back to the
   // list rather than through the error boundary — the row the user clicked is
   // still on screen next to the explanation.
-  if (failure) redirect(workflowsError(failure));
+  redirect(
+    failure
+      ? workflowsError(failure)
+      : workflowsPath(null, enabled ? "Schedule enabled." : "Schedule paused."),
+  );
 }
 
 export async function deleteWorkflow(id: string) {
@@ -353,7 +366,11 @@ export async function deleteWorkflow(id: string) {
   }
 
   revalidatePath("/workflows");
-  redirect(failure ? workflowsError(failure) : "/workflows");
+  redirect(
+    failure
+      ? workflowsError(failure)
+      : workflowsPath(null, "Workflow deleted."),
+  );
 }
 
 export async function disconnectToolkit(connectedAccountId: string) {
@@ -373,6 +390,7 @@ export async function disconnectToolkit(connectedAccountId: string) {
     redirect(`/connections?error=${encodeURIComponent(message)}`);
   }
   revalidatePath("/connections");
+  redirect(`/connections?done=${encodeURIComponent("Disconnected.")}`);
 }
 
 /**

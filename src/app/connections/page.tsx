@@ -17,13 +17,14 @@ import {
   buttonClass,
   iconButtonClass,
 } from "@/components/ui";
-import { SubmitButton } from "@/components/submit-button";
+import { ConfirmSubmitButton } from "@/components/submit-button";
 import { ConnectorBrowser } from "@/components/connector-browser";
 import { ToolkitLogo } from "@/components/toolkit-logo";
 import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
 import { Plug, Trash2, RefreshCw, ArrowDown } from "lucide-react";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Connections" };
 
 type ConnectedRow = {
   id: string;
@@ -49,13 +50,15 @@ function since(iso?: string) {
 export default async function ConnectionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; notice?: string }>;
+  searchParams: Promise<{ error?: string; notice?: string; done?: string }>;
 }) {
   await requireOwner();
 
   // `error` is set by `disconnectToolkit` when Composio refuses the delete;
   // `notice` by the connect route when a toolkit needs no auth at all.
-  const { error: actionError, notice } = await searchParams;
+  // `done` is the confirmation a completed disconnect leaves behind — the card
+  // simply vanishing looked the same as a click that did nothing.
+  const { error: actionError, notice, done } = await searchParams;
 
   let accounts: Awaited<ReturnType<typeof listConnectedAccounts>> = [];
   let catalog: ToolkitSummary[] = [];
@@ -110,7 +113,7 @@ export default async function ConnectionsPage({
         subtitle="Link any app in the Composio catalog, then use its tools in a workflow."
         actions={
           <>
-            <Badge tone={activeCount > 0 ? "success" : "warn"} dot>
+            <Badge tone={activeCount > 0 ? "success" : "neutral"} dot>
               {activeCount} active
             </Badge>
             {attentionCount > 0 && (
@@ -127,6 +130,12 @@ export default async function ConnectionsPage({
           <Alert tone="accent" title="No connection needed">
             {notice}
           </Alert>
+        </div>
+      )}
+
+      {done && !actionError && (
+        <div className="rise mt-6">
+          <Alert tone="success">{done}</Alert>
         </div>
       )}
 
@@ -229,19 +238,17 @@ export default async function ConnectionsPage({
                         {/* Disconnect deletes the connected account, so the
                             trash glyph says what actually happens — `Unplug`
                             and `Unlink` both read as "temporarily detached". */}
-                        {/* The `danger` flag layers text-danger-text over the
-                            outline variant's text-foreground — same specificity,
-                            so which wins is down to stylesheet order. The danger
-                            variant states it once, unambiguously. */}
-                        <SubmitButton
+                        {/* Arms before it fires: this deletes the connected
+                            account at Composio, and every workflow reading
+                            that app stops working the moment it's gone. */}
+                        <ConfirmSubmitButton
                           pendingLabel="Removing…"
-                          variant="danger"
+                          confirmLabel={`Disconnect ${row.name}?`}
                           icon={<Trash2 className="h-3.5 w-3.5" />}
-                          iconOnly
                           title={`Disconnect ${row.name}`}
                         >
-                          Disconnect
-                        </SubmitButton>
+                          {`Disconnect ${row.name}`}
+                        </ConfirmSubmitButton>
                       </form>
                     </div>
                   </div>

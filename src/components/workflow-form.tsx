@@ -655,7 +655,9 @@ export function WorkflowForm({
             : "sticky bottom-0"
         }`}
       >
-        <p className="text-subtle min-w-0 truncate text-xs">
+        {/* Hidden on a phone rather than truncated: at 390px this clipped to
+            "Read-only — the agent nev…", which is worse than absent. */}
+        <p className="text-subtle hidden min-w-0 truncate text-xs sm:block">
           {allowWrites
             ? "Write tools allowed — the agent can change things in connected apps."
             : "Read-only — the agent never writes."}

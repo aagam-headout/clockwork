@@ -1,7 +1,8 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Trash2 } from "lucide-react";
 import {
   buttonClass,
   iconButtonClass,
@@ -56,6 +57,104 @@ export function SubmitButton({
     >
       {pending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : icon}
       {!iconOnly && (pending ? pendingLabel : children)}
+    </button>
+  );
+}
+
+/**
+ * Submit that arms before it fires. Deleting a workflow takes its whole run
+ * history with it and there was nothing between a mis-aimed click on a 32px
+ * trash glyph and that happening.
+ *
+ * Two clicks on the same control rather than a modal: the row the user is
+ * aiming at stays on screen, there's no focus trap to escape, and the armed
+ * state says what it will do ("Delete workflow?") instead of asking them to
+ * read a dialog about it. It disarms itself after `DISARM_MS` so a page left
+ * open doesn't keep a live delete under the cursor.
+ */
+const DISARM_MS = 4000;
+
+export function ConfirmSubmitButton({
+  children,
+  confirmLabel,
+  pendingLabel,
+  icon,
+  title,
+}: {
+  /** Accessible name in the resting state; also the tooltip. */
+  children: string;
+  /** What the armed button says — phrase it as the question. */
+  confirmLabel: string;
+  pendingLabel: string;
+  icon?: React.ReactNode;
+  title?: string;
+}) {
+  const { pending } = useFormStatus();
+  const [armed, setArmed] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!armed) return;
+    timer.current = setTimeout(() => setArmed(false), DISARM_MS);
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, [armed]);
+
+  /*
+   * The two states are separate elements by `key`, and the resting one cancels
+   * its own click — both are load-bearing, and the first version had neither.
+   *
+   * Without the keys, React sees a <button> in the same slot before and after
+   * and *updates that DOM node in place*, flipping `type="button"` to
+   * `type="submit"` while the click that armed it is still being dispatched.
+   * The browser resolves a click's activation behaviour after the handlers
+   * run, reads the type it finds *then* — submit — and posted the form. One
+   * click deleted the thing the confirmation exists to protect.
+   */
+  if (armed) {
+    return (
+      <button
+        key="armed"
+        type="submit"
+        disabled={pending}
+        // Focused so Enter confirms and Escape cancels. Deliberately *not*
+        // disarmed on blur: in a browser window that doesn't hold OS focus the
+        // element blurs the instant it mounts, which cancelled the confirm
+        // before it could be read. The timeout is the only auto-cancel.
+        autoFocus
+        onKeyDown={(e) => e.key === "Escape" && setArmed(false)}
+        className={buttonClass(
+          "danger",
+          "sm",
+          "border-danger-line bg-danger-soft disabled:cursor-wait",
+        )}
+      >
+        {pending ? (
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+        ) : (
+          <Trash2 className="h-3.5 w-3.5" />
+        )}
+        {pending ? pendingLabel : confirmLabel}
+      </button>
+    );
+  }
+
+  return (
+    <button
+      key="resting"
+      type="button"
+      // Belt and braces with the keys above: an explicitly cancelled click has
+      // no activation behaviour left to run, whatever the element becomes.
+      onClick={(e) => {
+        e.preventDefault();
+        setArmed(true);
+      }}
+      title={title ?? children}
+      aria-label={children}
+      className={iconButtonClass("ghost", "sm", "text-danger-text")}
+    >
+      {icon ?? <Trash2 className="h-3.5 w-3.5" />}
     </button>
   );
 }

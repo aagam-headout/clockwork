@@ -21,7 +21,9 @@
     "docker:tick": "docker compose exec ticker sh -c 'curl -fsS -X POST -H \"Authorization: Bearer $CRON_SECRET\" http://app:3000/api/cron/tick'"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.36",
     "@ai-sdk/gateway": "^4.0.46",
+    "@ai-sdk/openai": "^4.0.36",
     "@composio/core": "^0.15.0",
     "@composio/vercel": "^0.11.1",
     "@neondatabase/auth": "0.4.2-beta",

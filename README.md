@@ -83,14 +83,16 @@ drizzle-kit issues.
 
 ## Environment
 
-| Variable                                         | Purpose                                        |
-| ------------------------------------------------ | ---------------------------------------------- |
-| `DATABASE_URL` / `DATABASE_URL_UNPOOLED`         | app traffic / migrations                       |
-| `COMPOSIO_API_KEY`                               | tool calls                                     |
-| `AI_GATEWAY_API_KEY`                             | model routing and live pricing                 |
-| `CRON_SECRET`                                    | bearer token for `/api/cron/tick`              |
-| `OWNER_EMAIL`                                    | the single account allowed in                  |
-| `NEON_AUTH_BASE_URL` / `NEON_AUTH_COOKIE_SECRET` | hosted auth (not needed with the local bypass) |
-| `APP_URL` / `COMPOSIO_WEBHOOK_SECRET`            | event triggers                                 |
-| `RUN_RETENTION_DAYS`                             | how long run history is kept (default 30)      |
-| `LOCAL_AUTH_BYPASS`                              | development only — see above                   |
+| Variable                                         | Purpose                                         |
+| ------------------------------------------------ | ----------------------------------------------- |
+| `DATABASE_URL` / `DATABASE_URL_UNPOOLED`         | app traffic / migrations                        |
+| `COMPOSIO_API_KEY`                               | tool calls                                      |
+| `AI_GATEWAY_API_KEY`                             | model routing and live pricing                  |
+| `ANTHROPIC_API_KEY`                              | only if Settings → provider is set to Anthropic |
+| `OPENAI_API_KEY`                                 | only if Settings → provider is set to OpenAI    |
+| `CRON_SECRET`                                    | bearer token for `/api/cron/tick`               |
+| `OWNER_EMAIL`                                    | the single account allowed in                   |
+| `NEON_AUTH_BASE_URL` / `NEON_AUTH_COOKIE_SECRET` | hosted auth (not needed with the local bypass)  |
+| `APP_URL` / `COMPOSIO_WEBHOOK_SECRET`            | event triggers                                  |
+| `RUN_RETENTION_DAYS`                             | how long run history is kept (default 30)       |
+| `LOCAL_AUTH_BYPASS`                              | development only — see above                    |

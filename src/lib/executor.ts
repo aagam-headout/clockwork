@@ -1,10 +1,10 @@
 import { generateText, stepCountIs, type ToolSet } from "ai";
-import { gateway } from "@ai-sdk/gateway";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, runSteps, outputs, workflows } from "@/db/schema";
 import { composio, COMPOSIO_USER_ID } from "@/lib/composio";
 import { runCostUsd, toCostColumn } from "@/lib/run-cost";
+import { resolveModelFor } from "@/lib/provider";
 import {
   buildToolFilter,
   deliverInstruction,
@@ -210,7 +210,7 @@ export async function executeRun(runId: string): Promise<RunResult> {
     const previous = await previousDigest(workflow.id);
 
     const result = await generateText({
-      model: gateway(workflow.model),
+      model: await resolveModelFor(workflow.ownerEmail, workflow.model),
       system: deliverInstructions
         ? `${SYSTEM_PROMPT}\n\n${deliverInstructions}`
         : SYSTEM_PROMPT,
@@ -278,7 +278,9 @@ export async function executeRun(runId: string): Promise<RunResult> {
         durationMs: Date.now() - startedAt,
         inputTokens: usage?.inputTokens ?? null,
         outputTokens: usage?.outputTokens ?? null,
-        costUsd: toCostColumn(await runCostUsd(workflow.model, usage)),
+        costUsd: toCostColumn(
+          await runCostUsd(workflow.model, usage, workflow.ownerEmail),
+        ),
         error: truncated
           ? `stopped after ${workflow.maxSteps} steps — the digest may be incomplete`
           : null,

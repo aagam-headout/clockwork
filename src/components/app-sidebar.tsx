@@ -39,6 +39,7 @@ const LINKS = [
   { href: "/workflows", label: "Workflows", icon: Workflow },
   { href: "/runs", label: "Runs", icon: History },
   { href: "/connections", label: "Connections", icon: Plug },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function isActive(pathname: string | null, href: string) {

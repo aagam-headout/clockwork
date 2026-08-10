@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { workflows, runs } from "@/db/schema";
 import { toggleWorkflow, runWorkflowNow, deleteWorkflow } from "@/lib/actions";
 import { requireOwner } from "@/lib/auth/require-owner";
-import { SubmitButton } from "@/components/submit-button";
+import { SubmitButton, ConfirmSubmitButton } from "@/components/submit-button";
 import {
   Plus,
   Play,
@@ -33,6 +33,8 @@ import {
 import { TOOLKIT_ICONS, TOOLKIT_LABELS } from "@/lib/toolkit-labels";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Workflows" };
+
 // The "Run now" action finishes its work in `after()`; that work is bounded
 // by this segment's duration limit.
 export const maxDuration = 300;
@@ -53,14 +55,21 @@ function nextRunAt(cron: string, timezone: string): string | null {
 export default async function WorkflowsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ triggerError?: string; error?: string }>;
+  searchParams: Promise<{
+    triggerError?: string;
+    error?: string;
+    done?: string;
+  }>;
 }) {
   await requireOwner();
 
   // `triggerError`: the save succeeded but Composio wouldn't register its event
   // triggers — the workflow exists and just never fires until that's fixed.
   // `error`: a row action (pause, delete, run now) failed outright.
-  const { triggerError, error } = await searchParams;
+  // `done`: a save, pause or delete that worked. Every one of these actions
+  // ends in a redirect, and one that changes nothing on screen reads as a
+  // no-op — so the successful paths say so too, not just the failing ones.
+  const { triggerError, error, done } = await searchParams;
 
   const rows = await db
     .select()
@@ -91,7 +100,7 @@ export default async function WorkflowsPage({
         actions={
           rows.length === 0 ? undefined : (
             <>
-              <Badge tone={enabledCount > 0 ? "success" : "warn"} dot>
+              <Badge tone={enabledCount > 0 ? "success" : "neutral"} dot>
                 {rows.length} total · {enabledCount} active
               </Badge>
               {/* Creating one was only reachable from the empty state and the
@@ -114,6 +123,12 @@ export default async function WorkflowsPage({
           <Alert tone="danger" title="That didn't work">
             {error}
           </Alert>
+        </div>
+      )}
+
+      {done && !error && !triggerError && (
+        <div className="mt-6">
+          <Alert tone="success">{done}</Alert>
         </div>
       )}
 
@@ -284,16 +299,17 @@ export default async function WorkflowsPage({
                         await deleteWorkflow(wf.id);
                       }}
                     >
-                      <SubmitButton
-                        pendingLabel="…"
-                        variant="ghost"
+                      {/* Arms first: this takes the workflow and its whole run
+                          history, and it used to be one click on a 32px
+                          glyph sitting next to Pause. */}
+                      <ConfirmSubmitButton
+                        pendingLabel="Deleting…"
+                        confirmLabel="Delete workflow?"
                         icon={<Trash2 className="h-3.5 w-3.5" />}
-                        iconOnly
-                        danger
                         title="Delete workflow"
                       >
-                        Delete
-                      </SubmitButton>
+                        Delete workflow
+                      </ConfirmSubmitButton>
                     </form>
                   </div>
                 </div>

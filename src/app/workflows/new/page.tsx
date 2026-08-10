@@ -6,6 +6,7 @@ import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
 import { getModelCatalog } from "@/lib/models";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "New workflow" };
 
 export default async function NewWorkflowPage() {
   await requireOwner();

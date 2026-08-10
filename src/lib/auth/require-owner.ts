@@ -14,6 +14,18 @@ export async function isOwner(): Promise<boolean> {
 }
 
 /**
+ * Email of the signed-in user, or null. This is the account key for anything
+ * stored per user (see `user_settings`) — available under Neon Auth and under
+ * the local bypass alike, which is why it, and not the auth provider's user
+ * id, is what those rows are keyed by.
+ */
+export async function currentUserEmail(): Promise<string | null> {
+  if (LOCAL_AUTH_BYPASS) return LOCAL_OWNER_EMAIL;
+  const { data: session } = await auth.getSession();
+  return session?.user?.email ?? null;
+}
+
+/**
  * This app has exactly one legitimate user. Middleware (see proxy.ts)
  * already blocks anyone without a session; this closes the remaining gap —
  * a *different* signed-in account (anyone can sign up against the Neon Auth

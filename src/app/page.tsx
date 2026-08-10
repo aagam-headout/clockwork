@@ -16,6 +16,7 @@ import {
 import { Plus, Sparkles, ChevronRight } from "lucide-react";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Overview" };
 
 export default async function TodayPage() {
   await requireOwner();
@@ -109,7 +110,16 @@ export default async function TodayPage() {
           label="Active"
           value={activeWorkflows}
           hint={`of ${totalWorkflows}`}
-          tone={activeWorkflows > 0 ? "success" : "warn"}
+          // Amber only when there is something to warn about — workflows exist
+          // but none of them are running. A fresh install with no workflows at
+          // all isn't a fault, and the tile used to read as one.
+          tone={
+            activeWorkflows > 0
+              ? "success"
+              : totalWorkflows > 0
+                ? "warn"
+                : "neutral"
+          }
         />
       </div>
 
@@ -127,7 +137,7 @@ export default async function TodayPage() {
                 <ButtonLink href="/workflows/new" variant="primary" icon={Plus}>
                   Create a workflow
                 </ButtonLink>
-                <ButtonLink href="/runs" variant="ghost">
+                <ButtonLink href="/runs" variant="outline">
                   See past runs
                 </ButtonLink>
               </div>

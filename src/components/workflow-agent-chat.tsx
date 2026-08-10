@@ -22,7 +22,7 @@ import { buttonClass, iconButtonClass } from "@/components/ui";
 import { ModelPicker } from "@/components/model-picker";
 import type { ToolkitOption } from "@/components/workflow-form";
 import type { ModelInfo } from "@/lib/model-tiers";
-import { DEFAULT_BUILDER_MODEL, isBuilderModel } from "@/lib/builder-models";
+import { defaultBuilderModel, isBuilderModel } from "@/lib/builder-models";
 import { fetchJson } from "@/lib/fetch-json";
 
 /** Module-level so the picker's `include` prop keeps a stable identity. */
@@ -89,7 +89,9 @@ export function WorkflowAgentChat({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [current, setCurrent] = useState<Proposal | null>(null);
-  const [builderModel, setBuilderModel] = useState(DEFAULT_BUILDER_MODEL);
+  const [builderModel, setBuilderModel] = useState(() =>
+    defaultBuilderModel(models),
+  );
   // Apps the assistant may read from while it drafts. Empty by default: a
   // lookup costs a round trip to someone's real inbox, so it's opted into.
   const [readToolkits, setReadToolkits] = useState<Set<string>>(new Set());
@@ -241,10 +243,15 @@ export function WorkflowAgentChat({
         >
           {empty ? (
             <div className="flex flex-col">
+              {/* "on the right" is only true from `lg` up — below it the form
+                  is stacked underneath this pane, and the sentence was sending
+                  phone users looking for a column that isn't there. */}
               <p className="text-muted text-sm leading-relaxed">
                 Describe the job in plain English. I&apos;ll fill in the
-                schedule, tools, model and prompt on the right — then you can
-                edit anything before saving.
+                schedule, tools, model and prompt{" "}
+                <span className="lg:hidden">below</span>
+                <span className="hidden lg:inline">on the right</span> — then
+                you can edit anything before saving.
               </p>
               <div className="mt-4 flex flex-col gap-1.5">
                 {EXAMPLES.map((example) => (

@@ -21,8 +21,17 @@ export function LiveRun({ active }: { active: boolean }) {
   if (!active) return null;
 
   return (
-    <span className="text-subtle inline-flex items-center gap-1.5 text-xs">
-      <span className="bg-accent-solid h-1.5 w-1.5 animate-pulse rounded-full" />
+    // `role=status` so the polling that grows the trace is announced at all;
+    // the dot is `live-dot` (the app's one pulse idiom, a ring rather than a
+    // fade) and `bg-accent`, not the `bg-accent-solid` it used to carry —
+    // that token doesn't exist in the theme, so Tailwind emitted no rule and
+    // the dot rendered as an invisible 6px box.
+    <span
+      role="status"
+      aria-live="polite"
+      className="text-subtle inline-flex items-center gap-1.5 text-xs"
+    >
+      <span className="live-dot bg-accent h-1.5 w-1.5 rounded-full" />
       live
     </span>
   );

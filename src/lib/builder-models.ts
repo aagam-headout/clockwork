@@ -86,5 +86,20 @@ export function builderModels<T extends { id: string }>(catalog: T[]): T[] {
   return capable.length > 0 ? capable : catalog;
 }
 
+/**
+ * The builder model to start on, given the catalog the active provider serves.
+ * `DEFAULT_BUILDER_MODEL` is Anthropic-flavoured, so under a direct OpenAI
+ * provider it isn't routable at all — fall back to the cheapest capable model
+ * that provider does offer.
+ */
+export function defaultBuilderModel<T extends { id: string }>(
+  catalog: T[],
+): string {
+  if (catalog.some((m) => m.id === DEFAULT_BUILDER_MODEL)) {
+    return DEFAULT_BUILDER_MODEL;
+  }
+  return builderModels(catalog)[0]?.id ?? DEFAULT_BUILDER_MODEL;
+}
+
 /** Steps the research phase may take before the spec is written. */
 export const BUILDER_RESEARCH_STEPS = 5;

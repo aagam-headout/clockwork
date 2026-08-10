@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { notFound } from "next/navigation";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
@@ -18,7 +19,8 @@ import {
 import {
   Wrench,
   AlignLeft,
-  TriangleAlert,
+  XCircle,
+  CheckCircle2,
   Timer,
   Hammer,
   ArrowDownToLine,
@@ -30,10 +32,35 @@ import {
   SquarePen,
 } from "lucide-react";
 import { LiveRun } from "@/components/live-run";
+import { TraceToggleAll, CopyButton } from "@/components/trace-tools";
 import { Markdown } from "@/components/markdown";
 import { formatUsd } from "@/lib/model-tiers";
 
 export const dynamic = "force-dynamic";
+
+// GH Actions renders step durations as "1m 4s", not raw milliseconds.
+function formatStepDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const [row] = await db
+    .select({ status: runs.status, workflowName: workflows.name })
+    .from(runs)
+    .leftJoin(workflows, eq(runs.workflowId, workflows.id))
+    .where(eq(runs.id, id));
+  if (!row) return { title: "Run" };
+  return { title: `${row.workflowName ?? "Run"} · ${row.status}` };
+}
 
 export default async function RunDetailPage({
   params,
@@ -91,7 +118,13 @@ export default async function RunDetailPage({
         backLabel="Runs"
         title={run.workflowName ?? "(deleted workflow)"}
         subtitle={
-          <span className="inline-flex flex-wrap items-center gap-2">
+          // Announced, because LiveRun re-renders this header every 3s while
+          // the run is in flight and the status changing under a screen reader
+          // was otherwise silent.
+          <span
+            aria-live="polite"
+            className="inline-flex flex-wrap items-center gap-2"
+          >
             <Badge tone={tone} dot={inFlight}>
               {run.status}
             </Badge>
@@ -229,7 +262,13 @@ export default async function RunDetailPage({
       )}
 
       <section className="mt-8">
-        <SectionLabel icon={ListTree} count={steps.length}>
+        <SectionLabel
+          icon={ListTree}
+          count={steps.length}
+          action={
+            steps.length > 0 ? <TraceToggleAll scope="trace" /> : undefined
+          }
+        >
           Trace
         </SectionLabel>
 
@@ -239,14 +278,15 @@ export default async function RunDetailPage({
           </p>
         ) : (
           /*
-           * One bordered box with hairline rows, not a card per step: a run of
-           * twenty tool calls used to be twenty floating cards and a rail, which
-           * scrolled forever and read as twenty unrelated things. Every row is
-           * the same 36px summary line — index, glyph, name, duration — and the
-           * body only exists while it's open. Failed steps open themselves,
-           * since that's the row anyone opening a trace came for.
+           * Modeled on the GitHub Actions job log: a bordered list of steps,
+           * each a single summary line — status glyph, name, duration — that
+           * expands into a dark terminal panel. The panel stays dark in both
+           * site themes, same as GH's log viewer, so pasted JSON and reasoning
+           * text read like console output rather than another themed card.
+           * Failed steps open themselves, since that's what anyone opening a
+           * trace came for.
            */
-          <ListBox as="ol">
+          <ListBox as="ol" id="trace">
             {steps.map((step, i) => {
               const isTool = step.type === "tool";
               const failed = Boolean(step.error);
@@ -260,20 +300,19 @@ export default async function RunDetailPage({
                         {i + 1}
                       </span>
                       <span
-                        className={`shrink-0 ${
-                          failed
-                            ? "text-danger"
-                            : isTool
-                              ? "text-accent"
-                              : "text-subtle"
-                        }`}
+                        className={`shrink-0 ${failed ? "text-danger" : "text-success"}`}
                       >
                         {failed ? (
-                          <TriangleAlert className="h-3.5 w-3.5" />
-                        ) : isTool ? (
-                          <Wrench className="h-3.5 w-3.5" />
+                          <XCircle className="h-3.5 w-3.5" />
                         ) : (
-                          <AlignLeft className="h-3.5 w-3.5" />
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        )}
+                      </span>
+                      <span className="text-subtle shrink-0">
+                        {isTool ? (
+                          <Wrench className="h-3 w-3" />
+                        ) : (
+                          <AlignLeft className="h-3 w-3" />
                         )}
                       </span>
                       {isTool ? (
@@ -290,7 +329,7 @@ export default async function RunDetailPage({
                       <span className="flex-1" />
                       {step.durationMs != null && (
                         <span className="text-subtle shrink-0 font-mono text-[11px] tabular-nums">
-                          {step.durationMs}ms
+                          {formatStepDuration(step.durationMs)}
                         </span>
                       )}
                       <span className="text-subtle shrink-0 text-xs transition-transform group-open:rotate-90">
@@ -298,25 +337,51 @@ export default async function RunDetailPage({
                       </span>
                     </summary>
 
-                    {/* Indented to the glyph column so the open body reads as
-                        belonging to its row rather than to the box. */}
-                    <div className="border-border bg-bg-subtle space-y-2 border-t px-3 py-2.5 pl-[38px]">
+                    {/* Dark terminal panel, fixed colors rather than theme
+                        tokens — GH's log viewer doesn't follow site theme
+                        either, and it's what makes this read as a log. */}
+                    <div className="space-y-2 border-t border-[#30363d] bg-[#0d1117] px-3 py-2.5 pl-[38px] font-mono text-[11px] leading-relaxed">
                       {step.error && (
-                        <p className="rounded-control border-danger-soft bg-danger-soft text-danger-text border px-2.5 py-1.5 font-mono text-[11px]">
+                        <p className="text-[#ff7b72]">
+                          <span className="text-[#8b949e]">##[error] </span>
                           {step.error}
                         </p>
                       )}
                       {isTool ? (
-                        <pre className="rounded-control border-border bg-surface text-muted max-h-72 overflow-auto border p-2.5 font-mono text-[11px] leading-relaxed">
-                          {JSON.stringify(
-                            { args: step.argsJson, result: step.resultJson },
-                            null,
-                            2,
-                          )}
-                        </pre>
+                        // Two labelled blocks, not one `{args, result}` blob:
+                        // "what did it send" and "what came back" are separate
+                        // questions, and the answers are wanted one at a time.
+                        <div className="space-y-2">
+                          <Payload
+                            label="args"
+                            value={JSON.stringify(step.argsJson, null, 2)}
+                          />
+                          <Payload
+                            label="result"
+                            value={JSON.stringify(step.resultJson, null, 2)}
+                          />
+                        </div>
                       ) : (
                         // The model's intermediate reasoning is markdown too.
-                        <Markdown>{text}</Markdown>
+                        // `.markdown` in globals.css is built on theme CSS
+                        // vars, so it's pinned dark here the same way the
+                        // panel itself is — by overriding those vars locally
+                        // rather than fighting the site theme downstream.
+                        <div
+                          style={
+                            {
+                              "--fg": "#c9d1d9",
+                              "--fg-muted": "#8b949e",
+                              "--fg-subtle": "#6e7681",
+                              "--accent-text": "#58a6ff",
+                              "--border": "#30363d",
+                              "--surface-2": "rgba(255,255,255,0.08)",
+                              "--bg-subtle": "rgba(255,255,255,0.05)",
+                            } as CSSProperties
+                          }
+                        >
+                          <Markdown>{text}</Markdown>
+                        </div>
                       )}
                     </div>
                   </details>
@@ -327,5 +392,25 @@ export default async function RunDetailPage({
         )}
       </section>
     </PageShell>
+  );
+}
+
+/**
+ * One labelled block inside the log panel. Its own scroll box, so a 2,000-line
+ * result can't push the next step off the screen, and its own copy button —
+ * the payload is the thing you paste into an issue.
+ */
+function Payload({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-[10px] tracking-wider text-[#8b949e] uppercase">
+          {label}
+        </span>
+        <span className="h-px flex-1 bg-[#30363d]" />
+        <CopyButton text={value} label={`Copy ${label}`} />
+      </div>
+      <pre className="max-h-72 overflow-auto text-[#c9d1d9]">{value}</pre>
+    </div>
   );
 }

@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { runs, workflows } from "@/db/schema";
 import { updateWorkflow, deleteWorkflow, runWorkflowNow } from "@/lib/actions";
 import { WorkflowForm } from "@/components/workflow-form";
-import { SubmitButton } from "@/components/submit-button";
+import { SubmitButton, ConfirmSubmitButton } from "@/components/submit-button";
 import { Trash2, Play, ChevronRight, Globe, History, Zap } from "lucide-react";
 import type { DeliverTarget } from "@/lib/read-only";
 import { requireOwner } from "@/lib/auth/require-owner";
@@ -27,6 +27,24 @@ export const dynamic = "force-dynamic";
 // "Run now" continues in `after()` after the action responds; the run itself
 // needs the full window, and `after` work is bounded by this segment's limit.
 export const maxDuration = 300;
+
+/*
+ * Every tab in this app said "Clockwork". With three of them open — a run, the
+ * workflow it belongs to, the list — the only way to tell them apart was to
+ * click. One query for the name is cheap next to the page's own.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const [row] = await db
+    .select({ name: workflows.name })
+    .from(workflows)
+    .where(eq(workflows.id, id));
+  return { title: row?.name ?? "Workflow" };
+}
 
 export default async function EditWorkflowPage({
   params,
@@ -122,15 +140,13 @@ export default async function EditWorkflowPage({
               </SubmitButton>
             </form>
             <form action={boundDelete}>
-              <SubmitButton
+              <ConfirmSubmitButton
                 pendingLabel="Deleting…"
-                variant="ghost"
-                size="sm"
+                confirmLabel="Delete workflow?"
                 icon={<Trash2 className="h-3.5 w-3.5" />}
-                danger
               >
-                Delete
-              </SubmitButton>
+                Delete workflow
+              </ConfirmSubmitButton>
             </form>
           </>
         }

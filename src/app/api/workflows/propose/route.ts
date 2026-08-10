@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateObject, generateText, stepCountIs, type ToolSet } from "ai";
-import { gateway } from "@ai-sdk/gateway";
 import { z } from "zod";
-import { isOwner } from "@/lib/auth/require-owner";
+import { currentUserEmail, isOwner } from "@/lib/auth/require-owner";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
 import { getModelCatalog } from "@/lib/models";
+import { resolveModelFor } from "@/lib/provider";
 import { formatUsd, type ModelInfo } from "@/lib/model-tiers";
 import {
   BUILDER_RESEARCH_STEPS,
-  DEFAULT_BUILDER_MODEL,
+  defaultBuilderModel,
   isBuilderModel,
 } from "@/lib/builder-models";
 import { composio, COMPOSIO_USER_ID } from "@/lib/composio";
@@ -29,6 +29,7 @@ const RESEARCH_TIMEOUT_MS = 45_000;
  * conversation, and nothing typed here should change state in a connected app.
  */
 async function research(
+  email: string | null,
   modelId: string,
   toolkits: string[],
   history: Array<{ role: "user" | "assistant"; content: string }>,
@@ -45,7 +46,7 @@ async function research(
 
   const usedTools: string[] = [];
   const result = await generateText({
-    model: gateway(modelId),
+    model: await resolveModelFor(email, modelId),
     tools,
     stopWhen: stepCountIs(BUILDER_RESEARCH_STEPS),
     abortSignal: AbortSignal.timeout(RESEARCH_TIMEOUT_MS),
@@ -70,7 +71,17 @@ request needs no lookup, reply with "none".`,
   };
 }
 
-const DEFAULT_MODEL = "anthropic/claude-sonnet-5";
+/*
+ * Where a hallucinated model id lands. Read off the offered list rather than
+ * hardcoded, so it stays routable under whichever provider is switched on.
+ */
+function fallbackWorkflowModel(offered: ModelInfo[]): string {
+  return (
+    offered.find((m) => m.tier === "mid")?.id ??
+    offered[0]?.id ??
+    "anthropic/claude-sonnet-5"
+  );
+}
 
 /**
  * The gateway lists hundreds of models — too many to put in a prompt. Offer the
@@ -256,7 +267,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const [connected, catalog] = await Promise.all([
+    // The builder runs on the signed-in user's provider, same as the picker
+    // beside the chat — otherwise it could offer models it can't itself use.
+    const [email, connected, catalog] = await Promise.all([
+      currentUserEmail(),
       getConnectedToolkitOptions(),
       getModelCatalog(),
     ]);
@@ -273,7 +287,7 @@ export async function POST(req: NextRequest) {
       catalog.some((m) => m.id === body.builderModel) &&
       isBuilderModel(body.builderModel)
         ? body.builderModel
-        : DEFAULT_BUILDER_MODEL;
+        : defaultBuilderModel(catalog);
 
     // Only toolkits the user ticked in the chat, intersected with what's
     // actually connected. `composio_search` is a toolkit like any other here.
@@ -291,6 +305,7 @@ export async function POST(req: NextRequest) {
     if (readToolkits.length > 0) {
       try {
         ({ notes, usedTools } = await research(
+          email,
           builderModel,
           readToolkits,
           history,
@@ -301,7 +316,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { object } = await generateObject({
-      model: gateway(builderModel),
+      model: await resolveModelFor(email, builderModel),
       schema: buildProposalSchema(toolkitSlugs, modelIds),
       system: systemPrompt(toolkitSlugs, offered, body.current, notes),
       messages: history,
@@ -319,7 +334,7 @@ export async function POST(req: NextRequest) {
     );
     const model = catalog.some((m) => m.id === object.spec!.model)
       ? object.spec.model
-      : DEFAULT_MODEL;
+      : fallbackWorkflowModel(offered);
 
     return NextResponse.json({
       reply: object.reply,

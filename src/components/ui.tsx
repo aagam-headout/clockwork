@@ -12,17 +12,16 @@ import { ArrowLeft } from "lucide-react";
 type Tone = "neutral" | "accent" | "success" | "danger" | "warn";
 
 /*
- * The 1px border is kept for geometry but painted in the wash colour itself, so
- * a status chip or an alert reads as one flat tinted block rather than a tinted
- * block inside a second, louder outline. The `-line` tokens stay for the places
- * that genuinely need a visible edge (invalid inputs, danger hover states).
+ * The soft wash colours sit close to the page background, so a border painted
+ * in the same hue disappears entirely — a status chip or an alert needs the
+ * `-line` tokens for an edge that actually reads against `bg`/`surface`.
  */
 const TONE_SOFT: Record<Tone, string> = {
   neutral: "bg-surface-2 text-muted border-border",
-  accent: "bg-accent-soft text-accent-text border-accent-soft",
-  success: "bg-success-soft text-success-text border-success-soft",
-  danger: "bg-danger-soft text-danger-text border-danger-soft",
-  warn: "bg-warn-soft text-warn-text border-warn-soft",
+  accent: "bg-accent-soft text-accent-text border-accent-line",
+  success: "bg-success-soft text-success-text border-success-line",
+  danger: "bg-danger-soft text-danger-text border-danger-line",
+  warn: "bg-warn-soft text-warn-text border-warn-line",
 };
 
 const TONE_DOT: Record<Tone, string> = {
@@ -405,14 +404,18 @@ export function ListBox({
   children,
   className = "",
   as: As = "div",
+  id,
 }: {
   children: React.ReactNode;
   className?: string;
   /** `ol`/`ul` when the rows are a real list (the run trace). */
   as?: "div" | "ol" | "ul";
+  /** Anchor for controls that act on the rows (trace expand-all). */
+  id?: string;
 }) {
   return (
     <As
+      id={id}
       className={`divide-border rounded-container border-border bg-surface divide-y overflow-hidden border ${className}`}
     >
       {children}

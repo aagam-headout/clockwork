@@ -15,6 +15,13 @@ import {
 export const workflows = pgTable("workflows", {
   id: uuid("id").primaryKey().defaultRandom(),
   slug: text("slug").notNull().unique(),
+  /*
+   * Who owns this workflow. Load-bearing for scheduled runs: a cron tick has
+   * no session, so this is the only way the executor can tell whose provider
+   * setting to route the run through. Null on rows created before the column
+   * existed — those fall back to the app default.
+   */
+  ownerEmail: text("owner_email"),
   name: text("name").notNull(),
   goal: text("goal").notNull(), // the natural-language prompt
   // "cron" runs on `cron`/`timezone`; "event" runs when one of
@@ -146,6 +153,22 @@ export const connections = pgTable("connections", {
   toolkit: text("toolkit").notNull().unique(),
   composioConnectedAccountId: text("composio_connected_account_id"),
   status: text("status").notNull().default("not_connected"), // not_connected | pending | active | error
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/*
+ * Per-account settings, one row per signed-in user, keyed by email.
+ *
+ * Email rather than the auth provider's user id: it is the identity this app
+ * already gates on (OWNER_EMAIL), and it is the one identifier available both
+ * under Neon Auth and under the local bypass, which mints no user id at all.
+ */
+export const userSettings = pgTable("user_settings", {
+  email: text("email").primaryKey(),
+  /** Which SDK provider serves models: "gateway" | "anthropic" | "openai". */
+  modelProvider: text("model_provider").notNull().default("gateway"),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
