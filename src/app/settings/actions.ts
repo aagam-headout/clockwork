@@ -20,13 +20,15 @@ export async function switchProvider(formData: FormData) {
 
   const provider = formData.get("provider");
   if (!isProviderId(provider)) {
-    redirect(`/settings?error=${encodeURIComponent("Unknown provider.")}`);
+    redirect(
+      `/account/model-provider?error=${encodeURIComponent("Unknown provider.")}`,
+    );
   }
 
   if (!providerConfigured(provider)) {
     const { label, envVar } = providerMeta(provider);
     redirect(
-      `/settings?error=${encodeURIComponent(
+      `/account/model-provider?error=${encodeURIComponent(
         `${label} has no API key. Set ${envVar} and restart the app.`,
       )}`,
     );
@@ -37,10 +39,10 @@ export async function switchProvider(formData: FormData) {
   // would keep offering the old provider's models until it expired.
   clearModelCatalogCache();
 
-  revalidatePath("/settings");
+  revalidatePath("/account/model-provider");
   revalidatePath("/workflows");
   redirect(
-    `/settings?notice=${encodeURIComponent(
+    `/account/model-provider?notice=${encodeURIComponent(
       `Models now served by ${providerMeta(provider).label}.`,
     )}`,
   );

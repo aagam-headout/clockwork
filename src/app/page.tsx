@@ -3,6 +3,8 @@ import { desc, eq, and, gte, count, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { outputs, runs, workflows } from "@/db/schema";
 import { requireOwner } from "@/lib/auth/require-owner";
+import { Markdown } from "@/components/markdown";
+import { DigestCard } from "@/components/digest-card";
 import {
   Badge,
   ButtonLink,
@@ -178,9 +180,17 @@ export default async function TodayPage() {
                     })}
                   </time>
                 </div>
-                <div className="text-foreground px-4 py-4 text-sm leading-relaxed whitespace-pre-wrap">
-                  {item.body}
-                </div>
+                <DigestCard
+                  title={item.workflowName}
+                  createdAt={item.createdAt}
+                  meta={
+                    item.deliveredTo.length > 0
+                      ? `Delivered to ${item.deliveredTo.join(", ")}`
+                      : undefined
+                  }
+                  viewRunHref={`/runs/${item.runId}`}
+                  rendered={<Markdown>{item.body}</Markdown>}
+                />
               </Card>
             ))}
           </div>

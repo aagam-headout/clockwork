@@ -1,45 +1,86 @@
 import { redirect } from "next/navigation";
 import { AccountView } from "@neondatabase/auth-ui";
-import { requireOwner } from "@/lib/auth/require-owner";
-import { PageHeader, PageShell } from "@/components/ui";
+import { currentUserEmail, requireOwner } from "@/lib/auth/require-owner";
+import { AccountNav } from "@/components/account-nav";
+import { ModelProviderSection } from "@/components/model-provider-section";
+import { Alert, PageHeader, PageShell } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
+const TABS = ["settings", "security", "model-provider"] as const;
+type Tab = (typeof TABS)[number];
+
+function isTab(value: string | undefined): value is Tab {
+  return !!value && (TABS as readonly string[]).includes(value);
+}
+
 // Neon Auth's UserButton menu links to `${account.basePath}/${SETTINGS}` —
 // i.e. /account/settings, and /account/security from AccountView's own nav.
-// Without this catch-all those links 404. Bare /account has no view of its
-// own, so it redirects to the settings tab.
+// `model-provider` is our own tab, not one Auth-UI knows about — see AccountNav.
+// Without this catch-all those links 404. Bare /account, or any path Auth-UI
+// and we don't recognise, has no view of its own, so it redirects to settings.
 export default async function AccountPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ path?: string[] }>;
+  searchParams: Promise<{ error?: string; notice?: string }>;
 }) {
   await requireOwner();
 
   const { path } = await params;
-  if (!path?.length) redirect("/account/settings");
+  const tab = path?.[path.length - 1];
+  if (!isTab(tab)) redirect("/account/settings");
+
+  const { error, notice } = await searchParams;
 
   return (
     <PageShell>
       <PageHeader
         title="Account"
-        subtitle="Your profile, email, and sign-in security."
+        subtitle="Your profile, sign-in security, and model provider."
         backHref="/"
         backLabel="Overview"
       />
-      {/* `auth-surface` re-points the two shadcn token names that mean something
-          else in our scale — see the Neon Auth bridge in globals.css. */}
-      <div className="auth-surface rise mt-6">
-        <AccountView
-          path={path[path.length - 1]}
-          classNames={{
-            sidebar: {
-              buttonActive:
-                "bg-surface text-foreground ring-1 ring-border font-medium",
-            },
-          }}
-        />
+
+      {error && (
+        <div className="mt-6">
+          <Alert tone="danger">{error}</Alert>
+        </div>
+      )}
+      {notice && (
+        <div className="mt-6">
+          <Alert tone="accent">{notice}</Alert>
+        </div>
+      )}
+
+      <div className="mt-6 flex w-full flex-col gap-4 md:mt-8 md:flex-row md:gap-12">
+        <AccountNav />
+
+        <div className="min-w-0 flex-1">
+          {tab === "model-provider" ? (
+            <ModelProviderTab />
+          ) : (
+            // `auth-surface` re-points the two shadcn token names that mean
+            // something else in our scale — see the Neon Auth bridge in
+            // globals.css. `hideNav`: AccountNav above is this section's only
+            // nav now, so Auth-UI's own (which can't include our extra tab)
+            // stays off.
+            <div className="auth-surface rise">
+              <AccountView
+                hideNav
+                view={tab === "security" ? "SECURITY" : "SETTINGS"}
+              />
+            </div>
+          )}
+        </div>
       </div>
     </PageShell>
   );
+}
+
+async function ModelProviderTab() {
+  const email = await currentUserEmail();
+  if (!email) redirect("/auth/sign-in");
+  return <ModelProviderSection email={email} />;
 }

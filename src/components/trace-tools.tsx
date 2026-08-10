@@ -77,11 +77,12 @@ export function CopyButton({
       title={`${label} to clipboard`}
       aria-label={`${label} to clipboard`}
       // Sits inside the pinned-dark log panel, so its colours are fixed the
-      // same way the panel's are rather than following the site theme.
-      className="inline-flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-[5px] border border-[#30363d] px-1.5 text-[10px] font-medium text-[#8b949e] transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-[#c9d1d9]"
+      // same way the panel's are rather than following the site theme —
+      // the app's own dark palette, not a borrowed one.
+      className="inline-flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-[5px] border border-[#2e2e2e] px-1.5 text-[10px] font-medium text-[#888888] transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-[#eaeaea]"
     >
       {copied ? (
-        <Check className="h-3 w-3 text-[#3fb950]" />
+        <Check className="h-3 w-3 text-[#62c073]" />
       ) : (
         <Copy className="h-3 w-3" />
       )}

@@ -34,6 +34,7 @@ import {
 import { LiveRun } from "@/components/live-run";
 import { TraceToggleAll, CopyButton } from "@/components/trace-tools";
 import { Markdown } from "@/components/markdown";
+import { DigestCard } from "@/components/digest-card";
 import { formatUsd } from "@/lib/model-tiers";
 
 export const dynamic = "force-dynamic";
@@ -221,17 +222,22 @@ export default async function RunDetailPage({
         <section className="mt-8">
           <SectionLabel icon={FileText}>Output</SectionLabel>
           <Card className="overflow-hidden">
-            <div className="px-5 py-4.5">
-              {output.unchanged ? (
+            {output.unchanged ? (
+              <div className="px-5 py-4.5">
                 <span className="text-muted text-sm italic">
                   Nothing new since the previous digest — nothing was sent.
                 </span>
-              ) : (
-                // The body is markdown the agent wrote for Slack/email; the
-                // dashboard renders the same thing rather than showing source.
-                <Markdown>{output.body}</Markdown>
-              )}
-            </div>
+              </div>
+            ) : (
+              // The body is markdown the agent wrote for Slack/email; the
+              // dashboard renders the same thing rather than showing source.
+              // No `viewRunHref` — this digest's run is the page it's already on.
+              <DigestCard
+                title={run.workflowName ?? "(deleted workflow)"}
+                createdAt={output.createdAt}
+                rendered={<Markdown>{output.body}</Markdown>}
+              />
+            )}
             <div className="border-border bg-bg-subtle text-subtle flex flex-wrap items-center gap-2 border-t px-5 py-2.5 text-xs">
               <span className="inline-flex items-center gap-1.5">
                 <Send className="h-3.5 w-3.5" />
@@ -338,12 +344,13 @@ export default async function RunDetailPage({
                     </summary>
 
                     {/* Dark terminal panel, fixed colors rather than theme
-                        tokens — GH's log viewer doesn't follow site theme
-                        either, and it's what makes this read as a log. */}
-                    <div className="space-y-2 border-t border-[#30363d] bg-[#0d1117] px-3 py-2.5 pl-[38px] font-mono text-[11px] leading-relaxed">
+                        tokens — pinned to the app's own dark palette (Geist
+                        black surfaces, not GH's) so it reads as this app's log,
+                        not a borrowed one, regardless of site theme. */}
+                    <div className="space-y-2 border-t border-[#2e2e2e] bg-black px-3 py-2.5 pl-[38px] font-mono text-[11px] leading-relaxed">
                       {step.error && (
-                        <p className="text-[#ff7b72]">
-                          <span className="text-[#8b949e]">##[error] </span>
+                        <p className="text-[#ff6166]">
+                          <span className="text-[#888888]">##[error] </span>
                           {step.error}
                         </p>
                       )}
@@ -366,15 +373,16 @@ export default async function RunDetailPage({
                         // `.markdown` in globals.css is built on theme CSS
                         // vars, so it's pinned dark here the same way the
                         // panel itself is — by overriding those vars locally
-                        // rather than fighting the site theme downstream.
+                        // with the app's own dark palette rather than
+                        // fighting the site theme downstream.
                         <div
                           style={
                             {
-                              "--fg": "#c9d1d9",
-                              "--fg-muted": "#8b949e",
-                              "--fg-subtle": "#6e7681",
-                              "--accent-text": "#58a6ff",
-                              "--border": "#30363d",
+                              "--fg": "#eaeaea",
+                              "--fg-muted": "#888888",
+                              "--fg-subtle": "#666666",
+                              "--accent-text": "#52a8ff",
+                              "--border": "#2e2e2e",
                               "--surface-2": "rgba(255,255,255,0.08)",
                               "--bg-subtle": "rgba(255,255,255,0.05)",
                             } as CSSProperties
@@ -404,13 +412,13 @@ function Payload({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div className="mb-1 flex items-center gap-2">
-        <span className="text-[10px] tracking-wider text-[#8b949e] uppercase">
+        <span className="text-[10px] tracking-wider text-[#888888] uppercase">
           {label}
         </span>
-        <span className="h-px flex-1 bg-[#30363d]" />
+        <span className="h-px flex-1 bg-[#2e2e2e]" />
         <CopyButton text={value} label={`Copy ${label}`} />
       </div>
-      <pre className="max-h-72 overflow-auto text-[#c9d1d9]">{value}</pre>
+      <pre className="max-h-72 overflow-auto text-[#eaeaea]">{value}</pre>
     </div>
   );
 }
