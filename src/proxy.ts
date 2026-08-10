@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/server";
 import { LOCAL_AUTH_BYPASS } from "@/lib/auth/local";
 
@@ -11,26 +11,41 @@ import { LOCAL_AUTH_BYPASS } from "@/lib/auth/local";
 // keep that development-only.
 const gate = auth.middleware({ loginUrl: "/auth/sign-in" });
 
-/*
- * `fetch()` follows a 307 transparently, so an expired session turned every
- * client-side POST (e.g. /api/workflows/propose) into a POST at the sign-in
- * page and then a JSON parse failure on an HTML body — the browser reported
- * only the redirect. API routes get a 401 they can actually report instead;
- * page navigations keep the redirect, which is the right answer for them.
- */
+type Gate = (
+  req: NextRequest,
+  event: unknown,
+) => Promise<Response> | Response;
+
 export default async function proxy(req: NextRequest, event: unknown) {
   if (LOCAL_AUTH_BYPASS) return NextResponse.next();
 
-  const res = await (
-    gate as (req: NextRequest, event: unknown) => Promise<Response> | Response
-  )(req, event);
+  /*
+   * @neondatabase/auth 0.4.2-beta proxies the incoming request's *method*
+   * through to its upstream `get-session` endpoint, which only answers GET.
+   * So every POST — every server action, and every fetch to an API route —
+   * got a 404 back, read as "not signed in", and was bounced to the sign-in
+   * page: saving a workflow or disconnecting an app died with Next's generic
+   * "This page couldn't load", and POST /api/workflows/propose 307'd.
+   *
+   * The gate only ever reads cookies off the request, so it's handed a GET
+   * with the same URL and headers and its verdict is applied to the real one.
+   */
+  const probe =
+    req.method === "GET" || req.method === "HEAD"
+      ? req
+      : new NextRequest(req.url, { headers: req.headers });
 
-  const redirectedToSignIn =
+  const res = await (gate as Gate)(probe, event);
+
+  const bouncedToSignIn =
     res.status >= 300 &&
     res.status < 400 &&
     (res.headers.get("location") ?? "").includes("/auth/sign-in");
 
-  if (redirectedToSignIn && req.nextUrl.pathname.startsWith("/api/")) {
+  // `fetch` follows a redirect transparently, so an expired session used to
+  // reach the client as a JSON parse failure on the sign-in page's HTML.
+  // API routes get a status they can report instead.
+  if (bouncedToSignIn && req.nextUrl.pathname.startsWith("/api/")) {
     return NextResponse.json(
       { error: "Not signed in — reload the page and sign in again." },
       { status: 401 },
