@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+/*
+ * Vercel/Geist-derived neutral scale. Kept intentionally minimal: a
+ * background/foreground pair, a muted text tone, one border tone, and a
+ * card surface — enough for a dashboard, no decorative color.
+ */
+:root {
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --muted: #666666;
+  --border: #eaeaea;
+  --card: #fafafa;
+  --accent: #0070f3;
+  --danger: #e5484d;
+  --success: #17c964;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-card: var(--card);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+    --muted: #888888;
+    --border: #262626;
+    --card: #111111;
+    --accent: #3291ff;
+    --danger: #ff6166;
+    --success: #45d483;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}

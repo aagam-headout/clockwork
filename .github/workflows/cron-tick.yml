@@ -1,0 +1,27 @@
+name: cron-tick
+
+on:
+  schedule:
+    # Every 5 minutes. This is the scheduler; /api/cron/tick decides which
+    # workflows are actually due. See PLAN.md §2.
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit /api/cron/tick
+        run: |
+          status=$(curl -s -o /tmp/body.json -w "%{http_code}" -X POST \
+            "${APP_URL}/api/cron/tick" \
+            -H "Authorization: Bearer ${CRON_SECRET}")
+          cat /tmp/body.json
+          echo
+          if [ "$status" -ge 300 ]; then
+            echo "tick failed with HTTP $status"
+            exit 1
+          fi
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}

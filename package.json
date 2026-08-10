@@ -1,0 +1,37 @@
+{
+  "name": "my-workflows",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@ai-sdk/gateway": "^4.0.46",
+    "@composio/core": "^0.15.0",
+    "@composio/vercel": "^0.11.1",
+    "@neondatabase/serverless": "^1.1.0",
+    "ai": "^7.0.58",
+    "cron-parser": "^5.8.1",
+    "drizzle-orm": "^0.45.2",
+    "geist": "^1.7.2",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "packageManager": "pnpm@10.33.0"
+}
