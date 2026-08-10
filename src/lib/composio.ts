@@ -11,14 +11,7 @@ export const composio = new Composio({
   provider: new VercelProvider(),
 });
 
-export const TOOLKITS = [
-  "googlecalendar",
-  "gmail",
-  "slack",
-  "notion",
-  "github",
-] as const;
-export type Toolkit = (typeof TOOLKITS)[number];
+export { TOOLKITS, type Toolkit } from "@/lib/toolkits";
 
 /**
  * Finds an existing Composio-managed auth config for a toolkit, or creates
