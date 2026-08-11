@@ -2,8 +2,10 @@ import { after } from "next/server";
 import { searchToolkits, type ToolkitSummary } from "@/lib/composio";
 import { requireUser } from "@/lib/auth/user";
 import {
+  CONNECTION_STATUS_LABEL,
   dependentCountsByToolkit,
   getUserConnections,
+  type ConnectionStatus,
 } from "@/lib/data/connections";
 import { reconcileUserIfStale } from "@/lib/reconcile";
 import { APP_TIMEZONE } from "@/lib/time";
@@ -32,7 +34,7 @@ export const metadata = { title: "Connections" };
 type ConnectedRow = {
   slug: string;
   name: string;
-  status: string;
+  status: ConnectionStatus;
   usable: boolean;
   statusReason: string | null;
   dependents: number;
@@ -136,15 +138,17 @@ export default async function ConnectionsPage({
     <PageShell>
       <PageHeader
         title="Connections"
-        subtitle="Link any app in the Composio catalog, then use its tools in a workflow."
+        subtitle="Apps your workflows can act on."
         actions={
           <>
             <Badge tone={activeCount > 0 ? "success" : "neutral"} dot>
-              {activeCount} active
+              {activeCount} connected
             </Badge>
+            {/* Not "pending": these are expired, revoked or failed grants, and
+                "pending" reads as "wait and it'll sort itself out". */}
             {attentionCount > 0 && (
               <Badge tone="warn" dot>
-                {attentionCount} pending
+                {attentionCount} need attention
               </Badge>
             )}
           </>
@@ -188,7 +192,9 @@ export default async function ConnectionsPage({
           count={connected.length || undefined}
           headingClassName="heading-16"
         >
-          Connected
+          {/* Not "Connected" — every card carries a status chip, and one of
+              those chips says "Connected" too. */}
+          Your apps
         </SectionLabel>
 
         {connected.length === 0 ? (
@@ -222,16 +228,19 @@ export default async function ConnectionsPage({
                       size="lg"
                       connected={active}
                     />
-                    <div className="min-w-0 flex-1">
-                      <div className="heading-14 text-foreground truncate">
+                    {/* The slug used to sit under the name on its own line.
+                        Three text lines per card for two facts — it's the
+                        tooltip's job, not the card's. */}
+                    <div className="min-w-0 flex-1 self-center">
+                      <div
+                        className="heading-14 text-foreground truncate"
+                        title={row.slug}
+                      >
                         {row.name}
-                      </div>
-                      <div className="text-subtle mt-0.5 truncate font-mono text-[11px]">
-                        {row.slug}
                       </div>
                     </div>
                     <Badge tone={active ? "success" : "warn"} dot>
-                      {row.status}
+                      {CONNECTION_STATUS_LABEL[row.status]}
                     </Badge>
                   </div>
 
@@ -245,11 +254,13 @@ export default async function ConnectionsPage({
 
                   <div className="flex items-center gap-2">
                     <span className="text-subtle truncate text-[11px]">
-                      {added
-                        ? `Connected ${added}`
-                        : row.dependents > 0
-                          ? `${row.dependents} workflow${row.dependents === 1 ? "" : "s"}`
-                          : " "}
+                      {[
+                        added && `Added ${added}`,
+                        row.dependents > 0 &&
+                          `${row.dependents} workflow${row.dependents === 1 ? "" : "s"}`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </span>
                     <div className="flex-1" />
                     {/*

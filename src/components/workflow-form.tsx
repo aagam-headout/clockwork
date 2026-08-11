@@ -586,8 +586,12 @@ export function WorkflowForm({
                 name="allowWrites"
                 checked={allowWrites}
                 onChange={setAllowWrites}
-                label="Allow write tools"
-                hint="Off: reads only. On: any write tool but not deletes."
+                // Names the workflow, not "it" — this is the same flag the
+                // builder's "Workflow · write tools allowed" chip sets, and
+                // the whole confusion there was which of the two agents on
+                // screen a permission belonged to.
+                label="Allow this workflow write tools"
+                hint="Off, it only reads. On, it can post, send and update — never delete."
               />
             </Field>
 
@@ -678,8 +682,8 @@ export function WorkflowForm({
             "Read-only — the agent nev…", which is worse than absent. */}
         <p className="text-subtle hidden min-w-0 truncate text-xs sm:block">
           {allowWrites
-            ? "Writes on — can change connected apps."
-            : "Read-only — never writes."}
+            ? "Write tools allowed — this workflow can change your apps."
+            : "This workflow is read-only."}
         </p>
         <FormSubmitButton>{submitLabel}</FormSubmitButton>
       </div>

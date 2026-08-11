@@ -64,11 +64,10 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
     <div className="grid gap-4 md:gap-6">
       <div>
         <h2 className="heading-16 text-foreground">Model provider</h2>
-        <p className="text-muted mt-1.5 text-sm leading-relaxed">
-          Clockwork runs on your own API key — workflow runs and the builder
-          assistant alike are billed to you, and you can revoke access at any
-          time from the provider&apos;s own dashboard. Keys are encrypted before
-          they&apos;re stored and never shown again after you paste them.
+        <p className="text-muted mt-1.5 max-w-prose text-sm leading-relaxed">
+          Clockwork runs on your own key, so runs are billed to you and you can
+          revoke access from the provider at any time. Keys are encrypted before
+          they&apos;re stored and never shown again.
         </p>
 
         <ListBox as="ul" className="mt-4">
@@ -77,16 +76,39 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
             const key = keyByProvider.get(p.id);
             const verified = ago(key?.verifiedAt ?? null);
 
+            /*
+             * The paste field is the whole row for a provider with no key, and
+             * a closed disclosure for one that has a key. Rendering it open in
+             * both states put three identical password fields on the page and
+             * made "already set up" look the same as "not set up yet".
+             */
+            const keyForm = (
+              <form action={addProviderKey} className="flex gap-2">
+                <input type="hidden" name="provider" value={p.id} />
+                <input
+                  type="password"
+                  name="apiKey"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={`Paste your ${p.label} key`}
+                  className="input min-w-0 flex-1"
+                />
+                {/* Verified against the provider before it's stored, so a
+                    saved key is never a broken one. */}
+                <SubmitButton pendingLabel="Checking…">
+                  {key ? "Replace" : "Add key"}
+                </SubmitButton>
+              </form>
+            );
+
             return (
-              <li key={p.id} className="grid gap-3 px-4 py-3.5">
+              <li key={p.id} className="px-4 py-3.5">
                 <div className="flex flex-wrap items-center gap-3">
                   <span
                     className={`rounded-control flex h-9 w-9 shrink-0 items-center justify-center border ${
                       isActive
                         ? "border-accent/25 bg-accent-soft text-accent-text"
-                        : key
-                          ? "border-border bg-surface-2 text-subtle"
-                          : "border-warn-line bg-warn-soft text-warn-text"
+                        : "border-border bg-surface-2 text-subtle"
                     }`}
                   >
                     <KeyRound className="h-4 w-4" />
@@ -103,23 +125,20 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
                               that may cross to a browser. */}
                           <Mono className="text-[9px]!">••••{key.last4}</Mono>
                           <span>
-                            {verified ? `verified ${verified}` : "saved"}
+                            {verified ? `Verified ${verified}` : "Saved"}
                           </span>
                         </>
                       ) : (
-                        <span>
-                          No key —{" "}
-                          <a
-                            href={p.keyUrl}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            className="underline underline-offset-2"
-                          >
-                            get one
-                          </a>
-                        </span>
+                        <a
+                          href={p.keyUrl}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="underline underline-offset-2"
+                        >
+                          Get a key
+                        </a>
                       )}
-                      {isActive && (
+                      {isActive && catalog.length > 0 && (
                         <span>
                           · {catalog.length} model
                           {catalog.length === 1 ? "" : "s"}
@@ -128,9 +147,10 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
                     </p>
                   </div>
 
-                  <div className="shrink-0">
+                  {/* One action slot, same place in every row. */}
+                  <div className="flex shrink-0 items-center gap-1.5">
                     {isActive ? (
-                      <span className="text-muted inline-flex items-center gap-1.5 text-[13px]">
+                      <span className="text-success-text inline-flex items-center gap-1.5 text-[13px] font-medium">
                         <Check className="h-4 w-4" />
                         In use
                       </span>
@@ -138,57 +158,39 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
                       <form action={switchProvider}>
                         <input type="hidden" name="provider" value={p.id} />
                         <SubmitButton pendingLabel="Switching…">
-                          Use {p.label}
+                          Use this
                         </SubmitButton>
                       </form>
-                    ) : (
-                      // Nothing to switch to — a live button here would only
-                      // ever bounce off the action's own check.
-                      <span className="text-subtle text-[12.5px]">
-                        Add a key to enable
-                      </span>
+                    ) : null}
+
+                    {key && (
+                      <form action={removeProviderKey}>
+                        <input type="hidden" name="provider" value={p.id} />
+                        <ConfirmSubmitButton
+                          pendingLabel="Removing…"
+                          confirmLabel={`Remove ${p.label} key? Workflows using it stop running.`}
+                          icon={<Trash2 className="h-3.5 w-3.5" />}
+                          title={`Remove ${p.label} key`}
+                          size="sm"
+                          variant="danger"
+                        >
+                          {`Remove ${p.label} key`}
+                        </ConfirmSubmitButton>
+                      </form>
                     )}
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <form action={addProviderKey} className="flex flex-1 gap-2">
-                    <input type="hidden" name="provider" value={p.id} />
-                    <input
-                      type="password"
-                      name="apiKey"
-                      autoComplete="off"
-                      spellCheck={false}
-                      placeholder={
-                        key
-                          ? `Replace ${p.label} key`
-                          : `Paste your ${p.label} key`
-                      }
-                      className="input min-w-0 flex-1"
-                    />
-                    {/* Verified against the provider before it's stored, so a
-                        saved key is never a broken one. */}
-                    <SubmitButton pendingLabel="Checking…">
-                      {key ? "Replace" : "Add key"}
-                    </SubmitButton>
-                  </form>
-
-                  {key && (
-                    <form action={removeProviderKey}>
-                      <input type="hidden" name="provider" value={p.id} />
-                      <ConfirmSubmitButton
-                        pendingLabel="Removing…"
-                        confirmLabel={`Remove the ${p.label} key? Workflows using it stop running.`}
-                        icon={<Trash2 className="h-3.5 w-3.5" />}
-                        title={`Remove ${p.label} key`}
-                        size="sm"
-                        variant="danger"
-                      >
-                        {`Remove ${p.label} key`}
-                      </ConfirmSubmitButton>
-                    </form>
-                  )}
-                </div>
+                {key ? (
+                  <details className="group mt-3">
+                    <summary className="text-muted hover:text-foreground w-fit cursor-pointer text-[13px] select-none">
+                      Replace key
+                    </summary>
+                    <div className="mt-2">{keyForm}</div>
+                  </details>
+                ) : (
+                  <div className="mt-3">{keyForm}</div>
+                )}
               </li>
             );
           })}
@@ -196,9 +198,9 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
       </div>
 
       {keys.length === 0 && (
-        <Alert tone="warn" title="No API key on this account">
-          Workflows won&apos;t run until you add one. Nothing else is blocked —
-          you can build and save workflows first.
+        <Alert tone="warn" title="No key on this account">
+          You can still build and save workflows — they just won&apos;t run
+          until a key is here.
         </Alert>
       )}
 
@@ -207,11 +209,9 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
           tone="warn"
           title={`${stranded.length} workflow${
             stranded.length === 1 ? "" : "s"
-          } pinned to a model this provider can't serve`}
+          } on a model this provider can't serve`}
         >
-          <p>
-            Their runs will fail until you pick a different model on each one.
-          </p>
+          <p>Pick a different model on each one to get them running again.</p>
           <ul className="mt-2 space-y-1">
             {stranded.map((w) => (
               <li key={w.id} className="flex flex-wrap items-center gap-2">

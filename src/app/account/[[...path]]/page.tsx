@@ -36,12 +36,8 @@ export default async function AccountPage({
 
   return (
     <PageShell>
-      <PageHeader
-        title="Account"
-        subtitle="Your profile, sign-in security, and model provider."
-        backHref="/"
-        backLabel="Overview"
-      />
+      {/* No subtitle: it listed the three tabs sitting directly underneath. */}
+      <PageHeader title="Account" backHref="/" backLabel="Overview" />
 
       {error && (
         <div className="mt-6">

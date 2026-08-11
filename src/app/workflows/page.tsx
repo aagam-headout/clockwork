@@ -230,18 +230,16 @@ export default async function WorkflowsPage({
                       if (blocked.length === 0) return null;
                       return (
                         <p className="text-warn-text mt-2 text-xs">
-                          Needs a working connection to{" "}
-                          {blocked
-                            .map((tk) => TOOLKIT_LABELS[tk] ?? tk)
-                            .join(", ")}{" "}
-                          —{" "}
                           <Link
                             href="/connections"
                             className="underline underline-offset-2"
                           >
-                            reconnect
-                          </Link>
-                          .
+                            Reconnect{" "}
+                            {blocked
+                              .map((tk) => TOOLKIT_LABELS[tk] ?? tk)
+                              .join(", ")}
+                          </Link>{" "}
+                          to start this running again.
                         </p>
                       );
                     })()}

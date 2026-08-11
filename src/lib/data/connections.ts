@@ -37,6 +37,22 @@ export type UserConnection = {
   needsAttention: boolean;
 };
 
+/**
+ * What each status is called on screen. The stored values are lowercase slugs
+ * and were rendering straight into status chips — "initiated" and "inactive"
+ * are Composio's vocabulary, and reading them side by side nobody can tell
+ * which one means "nearly there" and which means "broken".
+ */
+export const CONNECTION_STATUS_LABEL: Record<ConnectionStatus, string> = {
+  active: "Connected",
+  initiated: "Finishing",
+  expired: "Expired",
+  failed: "Failed",
+  revoked: "Revoked",
+  inactive: "Inactive",
+  disconnected: "Disconnected",
+};
+
 const ACTIVE: ConnectionStatus = "active";
 
 function mapComposioStatus(

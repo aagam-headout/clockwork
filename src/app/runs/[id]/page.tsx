@@ -203,21 +203,21 @@ export default async function RunDetailPage({
         // as an opaque error string.
         (run.errorCode === "needs_reconnect" ? (
           <div className="mt-6">
-            <Alert tone="warn" title="Connection needed">
+            <Alert tone="warn" title="Connection needs reconnecting">
               <p>{run.error}</p>
-              <p className="mt-2 flex flex-wrap items-center gap-2">
-                {(run.errorToolkits.length > 0
-                  ? run.errorToolkits
-                  : ["connections"]
-                ).map((slug) => (
-                  <Link
-                    key={slug}
-                    href="/connections"
-                    className="underline underline-offset-2"
-                  >
-                    Reconnect {TOOLKIT_LABELS[slug] ?? slug}
-                  </Link>
-                ))}
+              {/* One link, not one per toolkit: they all went to the same
+                  page, so a row of them read as separate destinations. */}
+              <p className="mt-2">
+                <Link
+                  href="/connections"
+                  className="underline underline-offset-2"
+                >
+                  {run.errorToolkits.length > 0
+                    ? `Reconnect ${run.errorToolkits
+                        .map((slug) => TOOLKIT_LABELS[slug] ?? slug)
+                        .join(", ")}`
+                    : "Go to connections"}
+                </Link>
               </p>
             </Alert>
           </div>

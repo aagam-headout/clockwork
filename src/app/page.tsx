@@ -118,14 +118,6 @@ export default async function TodayPage() {
         }
       />
 
-      {/* Dissolves step by step and disappears entirely once setup is done —
-          a permanent banner would be noise for every returning visit. */}
-      {!onboarding.complete && (
-        <div className="mt-6">
-          <SetupChecklist state={onboarding} />
-        </div>
-      )}
-
       <div className="rise mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
         <Stat
           label="Digests"
@@ -157,6 +149,14 @@ export default async function TodayPage() {
           }
         />
       </div>
+
+      {/* Dissolves step by step and disappears entirely once setup is done —
+          a permanent banner would be noise for every returning visit. */}
+      {!onboarding.complete && (
+        <div className="mt-6">
+          <SetupChecklist state={onboarding} />
+        </div>
+      )}
 
       <div className="mt-10">
         <SectionLabel count={feed.length || undefined}>
