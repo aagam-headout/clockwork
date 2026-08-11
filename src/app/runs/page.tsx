@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, workflows } from "@/db/schema";
-import { requireOwner } from "@/lib/auth/require-owner";
+import { requireUser } from "@/lib/auth/user";
 import {
   Alert,
   Badge,
@@ -77,7 +77,7 @@ export default async function RunsPage({
 }: {
   searchParams: Promise<{ notice?: string; status?: string }>;
 }) {
-  await requireOwner();
+  const user = await requireUser();
 
   // Set when "Run now" landed on a workflow that was already running — the
   // list is the right place to be, but not without being told why.
@@ -100,8 +100,15 @@ export default async function RunsPage({
       workflowName: workflows.name,
     })
     .from(runs)
-    .leftJoin(workflows, eq(runs.workflowId, workflows.id))
-    .where(active ? eq(runs.status, active) : undefined)
+    // innerJoin, not leftJoin: a run's owner is its workflow's owner, so the
+    // join is how the scope is expressed at all. (A leftJoin with a WHERE on
+    // the joined table degenerates to an inner join anyway — better to say so.)
+    .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+    .where(
+      active
+        ? and(eq(workflows.userId, user.id), eq(runs.status, active))
+        : eq(workflows.userId, user.id),
+    )
     .orderBy(desc(runs.createdAt))
     // One page deep. Anything past this is a job for the filter above it, and
     // the footer says so rather than letting the list end without explanation.

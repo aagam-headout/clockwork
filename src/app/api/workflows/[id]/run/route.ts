@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { eq } from "drizzle-orm";
-import { db } from "@/db";
-import { workflows } from "@/db/schema";
 import { enqueueRun, executeRun } from "@/lib/executor";
-import { isOwner } from "@/lib/auth/require-owner";
+import { requireUserApi } from "@/lib/auth/user";
+import { ownedWorkflow } from "@/lib/data/scope";
 
 export const maxDuration = 300;
 
@@ -16,16 +14,18 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!(await isOwner())) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
+  const auth = await requireUserApi();
+  if (!auth.ok) return auth.response;
 
   const { id } = await params;
 
-  const [workflow] = await db
-    .select({ id: workflows.id })
-    .from(workflows)
-    .where(eq(workflows.id, id));
+  /*
+   * 404 for a workflow that belongs to someone else, exactly as for one that
+   * doesn't exist. This route previously answered 403 in that case, which
+   * confirmed the id was real — enough to enumerate other accounts' workflows
+   * from guessed uuids.
+   */
+  const workflow = await ownedWorkflow(id, auth.user.id);
   if (!workflow) {
     return NextResponse.json({ error: "workflow not found" }, { status: 404 });
   }
@@ -33,7 +33,14 @@ export async function POST(
   const queued = await enqueueRun(id, "manual");
   if (queued.skipped) {
     return NextResponse.json(
-      { status: "skipped", reason: queued.reason },
+      {
+        status: "skipped",
+        reason: queued.reason,
+        error: queued.message,
+        // The UI can always offer the next click rather than dead-ending on
+        // an explanation the user can't act on.
+        action: queued.action,
+      },
       { status: 409 },
     );
   }

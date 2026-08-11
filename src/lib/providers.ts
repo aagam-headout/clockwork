@@ -11,11 +11,21 @@ export const DEFAULT_PROVIDER: ProviderId = "gateway";
 export type ProviderMeta = {
   id: ProviderId;
   label: string;
-  /** Env var that must be set for this provider to route anything. */
+  /**
+   * Env var holding the app-wide key for this provider.
+   *
+   * Only used under LOCAL_AUTH_BYPASS now. Keys are per user and stored
+   * encrypted (see `user_provider_keys`); the Docker stack is the one place
+   * that can't paste one into a database it wipes on every reset.
+   */
   envVar: string;
   description: string;
   /** Used when a workflow's stored model isn't offered by this provider. */
   defaultModel: string;
+  /** Where the user gets a key, shown next to the input. */
+  keyUrl: string;
+  /** What a valid key looks like, for a cheap check before spending a call. */
+  keyPrefix?: string;
 };
 
 export const PROVIDERS: ProviderMeta[] = [
@@ -26,6 +36,7 @@ export const PROVIDERS: ProviderMeta[] = [
     description:
       "One key, every provider's catalog, live per-token pricing. The default.",
     defaultModel: "anthropic/claude-sonnet-5",
+    keyUrl: "https://vercel.com/dashboard/ai-gateway/api-keys",
   },
   {
     id: "anthropic",
@@ -34,6 +45,8 @@ export const PROVIDERS: ProviderMeta[] = [
     description:
       "Straight to api.anthropic.com. Claude models only; pricing comes from a table in the repo.",
     defaultModel: "anthropic/claude-sonnet-4-5",
+    keyUrl: "https://console.anthropic.com/settings/keys",
+    keyPrefix: "sk-ant-",
   },
   {
     id: "openai",
@@ -42,6 +55,8 @@ export const PROVIDERS: ProviderMeta[] = [
     description:
       "Straight to api.openai.com. GPT/o-series only; pricing comes from a table in the repo.",
     defaultModel: "openai/gpt-5",
+    keyUrl: "https://platform.openai.com/api-keys",
+    keyPrefix: "sk-",
   },
 ];
 

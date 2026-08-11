@@ -1,8 +1,9 @@
 import { NextResponse, after } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { workflows } from "@/db/schema";
-import { composio } from "@/lib/composio";
+import { users, workflows } from "@/db/schema";
+import { composio, appUserIdFromComposio } from "@/lib/composio";
+import { userIdForConnectedAccount } from "@/lib/data/connections";
 import { enqueueRun, executeRun } from "@/lib/executor";
 
 export const maxDuration = 300;
@@ -35,11 +36,58 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid signature" }, { status: 401 });
   }
 
+  /*
+   * Whose event is this?
+   *
+   * The payload carries the Composio user id the trigger fired for, and
+   * `metadata.connectedAccount` as a second source. Both are mapped back
+   * through the namespace this app derives its Composio ids with; anything
+   * that doesn't map — an event from another deploy sharing the API key, or an
+   * account linked before the namespace existed — falls back to a lookup on
+   * the connected account id.
+   */
+  const meta = (event as { metadata?: { connectedAccount?: { id?: string } } })
+    .metadata;
+  const rawUserId = (event as { userId?: string }).userId ?? null;
+
+  let ownerId = rawUserId ? appUserIdFromComposio(rawUserId) : null;
+  if (!ownerId && meta?.connectedAccount?.id) {
+    ownerId = await userIdForConnectedAccount(meta.connectedAccount.id);
+  }
+
+  /*
+   * Fail closed. The previous behaviour — fan out to every enabled workflow
+   * subscribed to this slug — was harmless with one user and is a cross-tenant
+   * run trigger with two: one person's new Slack message would start another
+   * person's workflow, spending their model budget on their data.
+   *
+   * 202 rather than a 4xx so Composio treats it as delivered and doesn't
+   * retry-storm an event that will never be routable.
+   */
+  if (!ownerId) {
+    console.warn("[triggers] unmapped composio user", {
+      rawUserId,
+      slug: event.triggerSlug,
+    });
+    return NextResponse.json({ skipped: "unmapped_user" }, { status: 202 });
+  }
+
+  const [owner] = await db
+    .select({ id: users.id, status: users.status })
+    .from(users)
+    .where(eq(users.id, ownerId))
+    .limit(1);
+
+  if (!owner || owner.status !== "active") {
+    return NextResponse.json({ skipped: "inactive_user" }, { status: 202 });
+  }
+
   const matches = await db
     .select()
     .from(workflows)
     .where(
       and(
+        eq(workflows.userId, ownerId),
         eq(workflows.enabled, true),
         eq(workflows.triggerType, "event"),
         sql`${workflows.eventTriggers} @> ARRAY[${event.triggerSlug}]::text[]`,

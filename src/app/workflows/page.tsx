@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { CronExpressionParser } from "cron-parser";
 import { db } from "@/db";
 import { workflows, runs } from "@/db/schema";
 import { toggleWorkflow, runWorkflowNow, deleteWorkflow } from "@/lib/actions";
-import { requireOwner } from "@/lib/auth/require-owner";
+import { requireUser } from "@/lib/auth/user";
 import { SubmitButton, ConfirmSubmitButton } from "@/components/submit-button";
 import { LocalTime } from "@/components/local-time";
 import {
@@ -62,7 +62,7 @@ export default async function WorkflowsPage({
     done?: string;
   }>;
 }) {
-  await requireOwner();
+  const user = await requireUser();
 
   // `triggerError`: the save succeeded but Composio wouldn't register its event
   // triggers — the workflow exists and just never fires until that's fixed.
@@ -75,21 +75,33 @@ export default async function WorkflowsPage({
   const rows = await db
     .select()
     .from(workflows)
+    .where(eq(workflows.userId, user.id))
     .orderBy(desc(workflows.createdAt));
 
-  // One query, reduced in JS to "latest run per workflow" — simpler than a
-  // window function and plenty fast at this scale (personal tool, low volume).
-  const recentRuns = await db
-    .select()
+  /*
+   * Latest run per workflow.
+   *
+   * `DISTINCT ON` rather than "take 300 recent runs and reduce in JS": that
+   * shortcut was already wrong for a busy account — 300 rows need not reach
+   * every workflow's most recent run — and with more than one account it
+   * would be reading across all of them to get there.
+   */
+  const latestRuns = await db
+    .selectDistinctOn([runs.workflowId], {
+      workflowId: runs.workflowId,
+      status: runs.status,
+      errorCode: runs.errorCode,
+      errorToolkits: runs.errorToolkits,
+    })
     .from(runs)
-    .orderBy(desc(runs.createdAt))
-    .limit(300);
-  const latestStatusByWorkflow = new Map<string, string>();
-  for (const run of recentRuns) {
-    if (!latestStatusByWorkflow.has(run.workflowId)) {
-      latestStatusByWorkflow.set(run.workflowId, run.status);
-    }
-  }
+    .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+    .where(eq(workflows.userId, user.id))
+    .orderBy(runs.workflowId, desc(runs.createdAt));
+
+  const latestByWorkflow = new Map(latestRuns.map((r) => [r.workflowId, r]));
+  const latestStatusByWorkflow = new Map(
+    latestRuns.map((r) => [r.workflowId, r.status]),
+  );
 
   const enabledCount = rows.filter((w) => w.enabled).length;
 
@@ -189,12 +201,50 @@ export default async function WorkflowsPage({
                           ? `${wf.eventTriggers.length} event${wf.eventTriggers.length === 1 ? "" : "s"}`
                           : wf.cron}
                       </Mono>
-                      {!wf.enabled && <Badge tone="warn">paused</Badge>}
+                      {!wf.enabled && (
+                        <Badge tone="warn">
+                          {wf.pausedReason === "needs_reconnect"
+                            ? "paused · needs reconnect"
+                            : "paused"}
+                        </Badge>
+                      )}
                     </div>
 
                     <p className="text-muted mt-2 line-clamp-2 text-sm leading-relaxed">
                       {wf.goal}
                     </p>
+
+                    {/*
+                     * A connection problem is the one failure the user can
+                     * actually fix from here, so it gets a line and a link
+                     * rather than being folded into the status dot.
+                     */}
+                    {(() => {
+                      const latest = latestByWorkflow.get(wf.id);
+                      const blocked =
+                        wf.pausedReason === "needs_reconnect"
+                          ? wf.toolkits
+                          : latest?.errorCode === "needs_reconnect"
+                            ? latest.errorToolkits
+                            : [];
+                      if (blocked.length === 0) return null;
+                      return (
+                        <p className="text-warn-text mt-2 text-xs">
+                          Needs a working connection to{" "}
+                          {blocked
+                            .map((tk) => TOOLKIT_LABELS[tk] ?? tk)
+                            .join(", ")}{" "}
+                          —{" "}
+                          <Link
+                            href="/connections"
+                            className="underline underline-offset-2"
+                          >
+                            reconnect
+                          </Link>
+                          .
+                        </p>
+                      );
+                    })()}
 
                     {/* Each toolkit carries its own glyph, so the row reads as
                         apps rather than as a wall of gray words. */}

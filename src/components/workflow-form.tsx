@@ -75,10 +75,27 @@ const TIMEZONES = [
   "Pacific/Honolulu",
 ];
 
-/** Web search needs no auth, so it's always offered. */
-const WEB_SEARCH = { slug: "composio_search", name: "Web search" };
+/** Web search needs no auth, so it's always offered — and always usable. */
+const WEB_SEARCH: ToolkitOption = {
+  slug: "composio_search",
+  name: "Web search",
+  status: "active",
+  usable: true,
+};
 
-export type ToolkitOption = { slug: string; name: string; logo?: string };
+export type ToolkitOption = {
+  slug: string;
+  name: string;
+  logo?: string;
+  /**
+   * Connection state. A toolkit that isn't `usable` is still offered and still
+   * selectable — flagged, not hidden. Hiding it meant that editing an
+   * unrelated field on a workflow silently dropped the toolkit whose token
+   * happened to be expired at that moment.
+   */
+  status?: string;
+  usable?: boolean;
+};
 
 export type TriggerTypeOption = {
   slug: string;
@@ -242,9 +259,10 @@ export function WorkflowForm({
       ? [saved, ...TIMEZONES].sort()
       : TIMEZONES;
 
-  // Only what Composio reports as ACTIVE right now, plus web search. A toolkit
-  // the workflow was saved with but that is no longer connected can't be picked
-  // — it rides along as a hidden input so saving doesn't silently drop it.
+  // Every toolkit the user has a connection row for, plus web search. Broken
+  // ones are included and flagged rather than hidden. A toolkit with no row at
+  // all — disconnected entirely — still rides along as a hidden input so an
+  // unrelated edit doesn't silently drop it.
   const options: ToolkitOption[] = [WEB_SEARCH, ...availableToolkits];
   const offline = (defaultValues?.toolkits ?? []).filter(
     (slug) => !options.some((o) => o.slug === slug),
@@ -456,15 +474,23 @@ export function WorkflowForm({
           <div className="grid grid-cols-2 gap-2">
             {options.map((toolkit) => {
               const on = selectedToolkits.has(toolkit.slug);
+              const broken = toolkit.usable === false;
               return (
                 <label
                   key={toolkit.slug}
+                  title={
+                    broken
+                      ? `${toolkit.name} needs reconnecting before this workflow can use it.`
+                      : undefined
+                  }
                   // The real checkbox is sr-only, so the label carries the
                   // focus ring — otherwise keyboard users see nothing move.
                   className={`rounded-control has-[:focus-visible]:outline-foreground relative flex h-11 cursor-pointer items-center gap-2 border px-2 text-[13px] font-medium transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 ${
-                    on
-                      ? "border-foreground bg-surface-2 text-foreground"
-                      : "border-border text-muted hover:border-border-strong hover:text-foreground"
+                    broken
+                      ? "border-warn-soft bg-warn-soft text-warn-text"
+                      : on
+                        ? "border-foreground bg-surface-2 text-foreground"
+                        : "border-border text-muted hover:border-border-strong hover:text-foreground"
                   }`}
                 >
                   <input
@@ -487,11 +513,28 @@ export function WorkflowForm({
                     />
                   )}
                   <span className="truncate">{toolkit.name}</span>
-                  {on && <Check className="ml-auto h-4 w-4 shrink-0" />}
+                  {broken ? (
+                    <TriangleAlert className="ml-auto h-4 w-4 shrink-0" />
+                  ) : (
+                    on && <Check className="ml-auto h-4 w-4 shrink-0" />
+                  )}
                 </label>
               );
             })}
           </div>
+
+          {options.some((t) => t.usable === false) && (
+            <p className="text-warn-text text-xs">
+              Some apps need reconnecting before a run can use them —{" "}
+              <Link
+                href="/connections"
+                className="underline underline-offset-2"
+              >
+                fix connections
+              </Link>
+              .
+            </p>
+          )}
 
           {availableToolkits.length === 0 && (
             <p className="text-subtle text-xs">

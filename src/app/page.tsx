@@ -1,10 +1,12 @@
 import { desc, eq, and, gte, count, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { outputs, runs, workflows } from "@/db/schema";
-import { requireOwner } from "@/lib/auth/require-owner";
+import { requireUser } from "@/lib/auth/user";
 import { Markdown } from "@/components/markdown";
 import { DigestRow } from "@/components/digest-card";
 import { LocalDayGreeting } from "@/components/local-time";
+import { SetupChecklist } from "@/components/setup-checklist";
+import { getOnboardingState } from "@/lib/onboarding";
 import { startOfDay } from "@/lib/time";
 import {
   Badge,
@@ -40,13 +42,13 @@ function previewOf(body: string): string {
 }
 
 export default async function TodayPage() {
-  await requireOwner();
+  const user = await requireUser();
 
   // The app's day, not the host's: on Vercel `setHours(0,0,0,0)` was UTC
   // midnight, so "today" didn't start until 05:30 for an IST reader.
   const startOfToday = startOfDay();
 
-  const [feed, runStats, workflowStats] = await Promise.all([
+  const [feed, runStats, workflowStats, onboarding] = await Promise.all([
     db
       .select({
         outputId: outputs.id,
@@ -60,7 +62,13 @@ export default async function TodayPage() {
       .from(outputs)
       .innerJoin(runs, eq(outputs.runId, runs.id))
       .innerJoin(workflows, eq(runs.workflowId, workflows.id))
-      .where(and(eq(runs.status, "ok"), gte(outputs.createdAt, startOfToday)))
+      .where(
+        and(
+          eq(workflows.userId, user.id),
+          eq(runs.status, "ok"),
+          gte(outputs.createdAt, startOfToday),
+        ),
+      )
       .orderBy(desc(outputs.createdAt)),
 
     db
@@ -72,7 +80,12 @@ export default async function TodayPage() {
           ),
       })
       .from(runs)
-      .where(gte(runs.createdAt, startOfToday)),
+      // Runs carry no owner of their own — they reach one through their
+      // workflow, so the stat has to join rather than read `runs` alone.
+      .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+      .where(
+        and(eq(workflows.userId, user.id), gte(runs.createdAt, startOfToday)),
+      ),
 
     db
       .select({
@@ -82,7 +95,10 @@ export default async function TodayPage() {
             Number,
           ),
       })
-      .from(workflows),
+      .from(workflows)
+      .where(eq(workflows.userId, user.id)),
+
+    getOnboardingState(user.id),
   ]);
 
   const runsToday = runStats[0]?.total ?? 0;
@@ -101,6 +117,14 @@ export default async function TodayPage() {
           </ButtonLink>
         }
       />
+
+      {/* Dissolves step by step and disappears entirely once setup is done —
+          a permanent banner would be noise for every returning visit. */}
+      {!onboarding.complete && (
+        <div className="mt-6">
+          <SetupChecklist state={onboarding} />
+        </div>
+      )}
 
       <div className="rise mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
         <Stat

@@ -1,10 +1,11 @@
 import { eq } from "drizzle-orm";
 import type { LanguageModel } from "ai";
-import { gateway } from "@ai-sdk/gateway";
-import { anthropic } from "@ai-sdk/anthropic";
-import { openai } from "@ai-sdk/openai";
+import { createGateway } from "@ai-sdk/gateway";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
 import { db } from "@/db";
 import { userSettings } from "@/db/schema";
+import { loadProviderKey } from "@/lib/provider-keys";
 import {
   DEFAULT_PROVIDER,
   isProviderId,
@@ -15,79 +16,80 @@ import {
 } from "@/lib/providers";
 
 /*
- * The provider is a per-account setting, so everything here takes the account
- * it applies to. Two kinds of caller:
+ * Model routing, per user.
  *
- * - Pages, actions and route handlers have a session: they pass nothing and
- *   get the signed-in user's provider (see `currentUserEmail`).
- * - Scheduled runs and webhook-triggered runs have no session at all. They
- *   pass `workflows.ownerEmail` explicitly — without it every cron tick would
- *   quietly run on the default provider instead of the owner's choice.
- *
- * A null/unknown account resolves to the app default rather than throwing: a
- * pre-existing workflow row has no owner recorded, and refusing to run it
- * would be a worse answer than running it the way it ran yesterday.
+ * Two things are per user here and both matter: *which* provider serves their
+ * models, and *whose key* pays for it. Every entry point takes a `users.id`
+ * because half the callers have no session at all — a cron tick and a trigger
+ * webhook read the owner off the workflow row, which is the only statement of
+ * ownership those code paths have.
  */
 
-const TTL_MS = 10_000;
-const cache = new Map<string, { at: number; provider: ProviderId }>();
+const PROVIDER_TTL_MS = 10_000;
+const providerCache = new Map<string, { at: number; provider: ProviderId }>();
 
 export function clearProviderCache() {
-  cache.clear();
+  providerCache.clear();
+  clientCache.clear();
 }
 
 /** The provider serving models for one account. */
-export async function getProviderFor(
-  email: string | null | undefined,
-): Promise<ProviderId> {
-  /*
-   * Workflows created before `owner_email` existed have no owner recorded.
-   * Access is gated to a single OWNER_EMAIL, so that account is who they
-   * belong to — reading its setting beats defaulting them to the gateway and
-   * quietly ignoring the choice the owner made in Settings.
-   */
-  const account = email || process.env.OWNER_EMAIL;
-  if (!account) return DEFAULT_PROVIDER;
-
-  const key = account.toLowerCase();
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.provider;
+export async function getProviderForUser(userId: string): Promise<ProviderId> {
+  const hit = providerCache.get(userId);
+  if (hit && Date.now() - hit.at < PROVIDER_TTL_MS) return hit.provider;
 
   let provider: ProviderId = DEFAULT_PROVIDER;
   try {
     const [row] = await db
       .select({ value: userSettings.modelProvider })
       .from(userSettings)
-      .where(eq(userSettings.email, key))
+      .where(eq(userSettings.userId, userId))
       .limit(1);
     if (isProviderId(row?.value)) provider = row.value;
   } catch {
-    // No settings row yet, or the migration hasn't run: the gateway default
-    // is exactly the behaviour this app had before the toggle existed.
+    // No settings row yet: the gateway default is exactly the behaviour this
+    // app had before the toggle existed.
   }
 
-  cache.set(key, { at: Date.now(), provider });
+  providerCache.set(userId, { at: Date.now(), provider });
   return provider;
 }
 
-export async function setProviderFor(
+export async function setProviderForUser(
+  userId: string,
   email: string,
   provider: ProviderId,
 ): Promise<void> {
-  const key = email.toLowerCase();
   await db
     .insert(userSettings)
-    .values({ email: key, modelProvider: provider, updatedAt: new Date() })
+    .values({
+      email: email.toLowerCase(),
+      userId,
+      modelProvider: provider,
+      updatedAt: new Date(),
+    })
     .onConflictDoUpdate({
       target: userSettings.email,
-      set: { modelProvider: provider, updatedAt: new Date() },
+      set: { userId, modelProvider: provider, updatedAt: new Date() },
     });
   clearProviderCache();
 }
 
-/** True if the key this provider needs is present in the environment. */
-export function providerConfigured(provider: ProviderId): boolean {
-  return Boolean(process.env[providerMeta(provider).envVar]);
+/**
+ * Thrown when the account has no key for the provider it's set to use.
+ *
+ * This app is bring-your-own-key: there is no app-wide key to fall back on, so
+ * this is a normal state for a new account rather than a misconfiguration —
+ * which is why the message says what to do rather than what went wrong.
+ */
+export class MissingProviderKeyError extends Error {
+  constructor(readonly provider: ProviderId) {
+    super(
+      `No ${providerMeta(provider).label} API key on this account. ` +
+        `Add one under Account → Model provider before running workflows.`,
+    );
+    this.name = "MissingProviderKeyError";
+  }
 }
 
 /**
@@ -109,27 +111,104 @@ export class ModelUnavailableError extends Error {
   }
 }
 
+/*
+ * Per-user provider clients, cached briefly.
+ *
+ * Be clear-eyed about what this caches: the client holds the API key
+ * internally, so plaintext key material is resident in process memory either
+ * way — it has to be, to sign the HTTPS request that uses it. Caching the
+ * client rather than decrypting per call changes nothing about that; it saves
+ * a database round trip.
+ *
+ * What actually matters is the invariants around it:
+ *   - keyed by `${userId}:${provider}`, never enumerated, never exported;
+ *   - a hard TTL, so a key the user revokes or replaces stops working within a
+ *     minute rather than whenever the instance recycles;
+ *   - a size cap, so a busy instance can't accumulate every tenant's key;
+ *   - never serialized — not to a log, a response, or an RSC payload.
+ */
+const CLIENT_TTL_MS = 60_000;
+const MAX_CLIENTS = 500;
+
+type ProviderClient =
+  | ReturnType<typeof createGateway>
+  | ReturnType<typeof createAnthropic>
+  | ReturnType<typeof createOpenAI>;
+
+const clientCache = new Map<string, { at: number; client: ProviderClient }>();
+
+function evictExpiredClients() {
+  const now = Date.now();
+  for (const [key, entry] of clientCache) {
+    if (now - entry.at > CLIENT_TTL_MS) clientCache.delete(key);
+  }
+  while (clientCache.size > MAX_CLIENTS) {
+    const oldest = clientCache.keys().next().value;
+    if (oldest === undefined) break;
+    clientCache.delete(oldest);
+  }
+}
+
+/** Drops one user's cached clients — call after their key or provider changes. */
+export function clearProviderKeyCache(userId?: string) {
+  if (!userId) {
+    clientCache.clear();
+    providerCache.clear();
+    return;
+  }
+  providerCache.delete(userId);
+  for (const key of clientCache.keys()) {
+    if (key.startsWith(`${userId}:`)) clientCache.delete(key);
+  }
+}
+
+async function clientFor(
+  userId: string,
+  provider: ProviderId,
+): Promise<ProviderClient> {
+  const cacheKey = `${userId}:${provider}`;
+  const hit = clientCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < CLIENT_TTL_MS) return hit.client;
+
+  const apiKey = await loadProviderKey(userId, provider);
+  if (!apiKey) throw new MissingProviderKeyError(provider);
+
+  const client: ProviderClient =
+    provider === "anthropic"
+      ? createAnthropic({ apiKey })
+      : provider === "openai"
+        ? createOpenAI({ apiKey })
+        : createGateway({ apiKey });
+
+  evictExpiredClients();
+  clientCache.set(cacheKey, { at: Date.now(), client });
+  return client;
+}
+
 /**
  * Turns a stored model id into something `generateText` can run, through
- * whichever provider the given account has switched on. The gateway takes the
- * full slug; direct providers take the bare model name.
+ * whichever provider the given account has switched on and on that account's
+ * own key. The gateway takes the full slug; direct providers take the bare
+ * model name.
  */
-export async function resolveModelFor(
-  email: string | null | undefined,
+export async function resolveModelForUser(
+  userId: string,
   modelId: string,
 ): Promise<LanguageModel> {
-  const provider = await getProviderFor(email);
+  const provider = await getProviderForUser(userId);
   if (!providerRoutes(provider, modelId)) {
     throw new ModelUnavailableError(modelId, provider);
   }
 
+  const client = await clientFor(userId, provider);
   const { slug } = splitModelId(modelId);
+
   switch (provider) {
     case "anthropic":
-      return anthropic(slug);
+      return (client as ReturnType<typeof createAnthropic>)(slug);
     case "openai":
-      return openai(slug);
+      return (client as ReturnType<typeof createOpenAI>)(slug);
     default:
-      return gateway(modelId);
+      return (client as ReturnType<typeof createGateway>)(modelId);
   }
 }

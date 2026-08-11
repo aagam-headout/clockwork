@@ -1,5 +1,4 @@
-import { notFound } from "next/navigation";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, workflows } from "@/db/schema";
 import { updateWorkflow, deleteWorkflow, runWorkflowNow } from "@/lib/actions";
@@ -8,9 +7,10 @@ import { SubmitButton, ConfirmSubmitButton } from "@/components/submit-button";
 import { LocalTime } from "@/components/local-time";
 import { Trash2, Play, ChevronRight, Globe, History, Zap } from "lucide-react";
 import type { DeliverTarget } from "@/lib/read-only";
-import { requireOwner } from "@/lib/auth/require-owner";
+import { currentUser, requireUser } from "@/lib/auth/user";
+import { ownedWorkflow, ownedWorkflowOr404 } from "@/lib/data/scope";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
-import { getModelCatalog } from "@/lib/models";
+import { getModelCatalogForUser } from "@/lib/models";
 import {
   Badge,
   ButtonLink,
@@ -40,10 +40,13 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [row] = await db
-    .select({ name: workflows.name })
-    .from(workflows)
-    .where(eq(workflows.id, id));
+  /*
+   * Scoped like the page itself. `generateMetadata` runs independently of the
+   * component, so leaving it unscoped leaked another user's workflow name into
+   * the browser tab title even though the page below it 404'd.
+   */
+  const user = await currentUser();
+  const row = user ? await ownedWorkflow(id, user.id) : null;
   return { title: row?.name ?? "Workflow" };
 }
 
@@ -52,14 +55,12 @@ export default async function EditWorkflowPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireOwner();
+  const user = await requireUser();
 
   const { id } = await params;
-  const [workflow] = await db
-    .select()
-    .from(workflows)
-    .where(eq(workflows.id, id));
-  if (!workflow) notFound();
+  // 404 for a workflow that isn't theirs, identical to one that doesn't exist
+  // — a distinguishable 403 would confirm the id belongs to someone.
+  const workflow = await ownedWorkflowOr404(id, user.id);
 
   const recentRuns = await db
     .select({
@@ -71,13 +72,16 @@ export default async function EditWorkflowPage({
       durationMs: runs.durationMs,
     })
     .from(runs)
-    .where(eq(runs.workflowId, id))
+    // Already implied by the ownership check above; scoped anyway so the query
+    // is correct on its own terms rather than by reading the lines above it.
+    .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+    .where(and(eq(runs.workflowId, id), eq(workflows.userId, user.id)))
     .orderBy(desc(runs.createdAt))
     .limit(5);
 
   const [availableToolkits, models] = await Promise.all([
-    getConnectedToolkitOptions(),
-    getModelCatalog(),
+    getConnectedToolkitOptions(user.id),
+    getModelCatalogForUser(user.id),
   ]);
 
   const deliver = (workflow.deliver as DeliverTarget[]) ?? [];

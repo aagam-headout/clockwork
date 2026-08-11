@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isOwner } from "@/lib/auth/require-owner";
+import { requireUserApi } from "@/lib/auth/user";
 import { listTriggerTypes } from "@/lib/triggers";
 import { composioErrorMessage } from "@/lib/composio";
 
 /** Feeds the event-trigger picker in the workflow form. */
 export async function GET(req: NextRequest) {
-  if (!(await isOwner())) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
+  const auth = await requireUserApi();
+  if (!auth.ok) return auth.response;
 
   const toolkits = (req.nextUrl.searchParams.get("toolkits") ?? "")
     .split(",")

@@ -1,4 +1,4 @@
-import { getModelCatalogFor } from "@/lib/models";
+import { getModelCatalogForUser } from "@/lib/models";
 
 export type RunUsage = {
   inputTokens?: number | null;
@@ -17,12 +17,12 @@ export type RunUsage = {
 export async function runCostUsd(
   modelId: string,
   usage: RunUsage | undefined,
-  /** Workflow owner — whose provider priced this run. */
-  ownerEmail?: string | null,
+  /** Workflow owner — whose provider, and whose key, priced this run. */
+  userId: string,
 ): Promise<number | undefined> {
   if (!usage) return undefined;
 
-  const catalog = await getModelCatalogFor(ownerEmail);
+  const catalog = await getModelCatalogForUser(userId);
   const model = catalog.find((m) => m.id === modelId);
   if (!model || model.inputPerM == null || model.outputPerM == null) {
     return undefined;

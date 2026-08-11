@@ -2,6 +2,8 @@ import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { runDueWorkflows } from "@/lib/dispatcher";
 import { pruneOldRuns, reapStuckRuns } from "@/lib/retention";
+import { reconcileStaleConnections } from "@/lib/reconcile";
+import { pruneRateLimits } from "@/lib/rate-limit";
 
 // GH Actions cron hits this every 5 minutes. Vercel Hobby cron scheduling is
 // coarser/limited, so the *scheduler* lives in GH Actions (free, unlimited
@@ -43,13 +45,27 @@ export async function POST(req: NextRequest) {
   // Housekeeping is best-effort — neither reaping nor pruning failing is a
   // reason to skip the dispatch this tick exists for.
   const reaped = await settle("reap", reapStuckRuns);
+
+  /*
+   * Reconcile *before* dispatching, so a token that was revoked overnight is
+   * reflected in the connection gate on this same tick rather than costing a
+   * round of failed runs first. Bounded per tick — see `reconcileStale`.
+   */
+  const reconciled = await settle("reconcile", () =>
+    reconcileStaleConnections(),
+  );
+
   const results = await runDueWorkflows();
+
   const pruned = await settle("prune", pruneOldRuns);
+  const prunedLimits = await settle("prune-limits", pruneRateLimits);
 
   return NextResponse.json({
     ranAt: new Date().toISOString(),
     reaped,
+    reconciled,
     pruned,
+    prunedLimits,
     results,
   });
 }

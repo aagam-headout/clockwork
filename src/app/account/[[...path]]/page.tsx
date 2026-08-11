@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { AccountView } from "@neondatabase/auth-ui";
-import { currentUserEmail, requireOwner } from "@/lib/auth/require-owner";
+import { requireUser } from "@/lib/auth/user";
 import { AccountNav } from "@/components/account-nav";
 import { ModelProviderSection } from "@/components/model-provider-section";
 import { Alert, PageHeader, PageShell } from "@/components/ui";
@@ -26,7 +26,7 @@ export default async function AccountPage({
   params: Promise<{ path?: string[] }>;
   searchParams: Promise<{ error?: string; notice?: string }>;
 }) {
-  await requireOwner();
+  await requireUser();
 
   const { path } = await params;
   const tab = path?.[path.length - 1];
@@ -80,7 +80,6 @@ export default async function AccountPage({
 }
 
 async function ModelProviderTab() {
-  const email = await currentUserEmail();
-  if (!email) redirect("/auth/sign-in");
-  return <ModelProviderSection email={email} />;
+  const user = await requireUser();
+  return <ModelProviderSection user={user} />;
 }

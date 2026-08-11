@@ -1,10 +1,19 @@
 import { generateText, stepCountIs, type ToolSet } from "ai";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, runSteps, outputs, workflows } from "@/db/schema";
-import { composio, COMPOSIO_USER_ID } from "@/lib/composio";
+import { getToolsFor } from "@/lib/composio";
 import { runCostUsd, toCostColumn } from "@/lib/run-cost";
-import { resolveModelFor } from "@/lib/provider";
+import { MissingProviderKeyError, resolveModelForUser } from "@/lib/provider";
+import { redactSecrets } from "@/lib/crypto/secrets";
+import {
+  checkConnections,
+  isAuthError,
+  requiredToolkits,
+  toolkitForSlug,
+} from "@/lib/connection-gate";
+import { markConnectionStatus } from "@/lib/data/connections";
+import { LIMITS } from "@/lib/limits";
 import {
   buildToolFilter,
   deliverInstruction,
@@ -89,7 +98,70 @@ Rules:
 
 type EnqueueResult =
   | { runId: string; skipped?: false }
-  | { runId: null; skipped: true; reason: string };
+  | {
+      runId: null;
+      skipped: true;
+      reason: string;
+      /** Human-readable, for the caller to render. */
+      message?: string;
+      /** Where the user can go to fix it, when there is somewhere. */
+      action?: { label: string; href: string };
+    };
+
+/**
+ * Per-user run quotas.
+ *
+ * Not atomic — it counts and then inserts, so two simultaneous requests can
+ * both squeeze past. That's acceptable: the dangerous duplicate (two runs of
+ * the *same* workflow) is prevented by a database index, and these ceilings
+ * exist to stop sustained abuse, not to be exact to the unit. The atomic
+ * version costs an advisory lock per run for no practical gain.
+ */
+async function runQuotaExceeded(
+  workflowId: string,
+): Promise<{ reason: string; message: string } | null> {
+  const [owner] = await db
+    .select({ userId: workflows.userId })
+    .from(workflows)
+    .where(eq(workflows.id, workflowId))
+    .limit(1);
+
+  const userId = owner?.userId;
+  if (!userId) return null;
+
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const [counts] = await db
+    .select({
+      active: sql<number>`count(*) filter (where ${runs.status} in ('queued','running'))::int`,
+      lastHour: sql<number>`count(*) filter (where ${runs.createdAt} > ${hourAgo})::int`,
+      lastDay: sql<number>`count(*) filter (where ${runs.createdAt} > ${dayAgo})::int`,
+    })
+    .from(runs)
+    .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+    .where(eq(workflows.userId, userId));
+
+  if ((counts?.active ?? 0) >= LIMITS.maxConcurrentRuns) {
+    return {
+      reason: "concurrency_limit",
+      message: `You already have ${LIMITS.maxConcurrentRuns} runs in flight. Wait for one to finish.`,
+    };
+  }
+  if ((counts?.lastHour ?? 0) >= LIMITS.maxRunsPerHour) {
+    return {
+      reason: "rate_limit",
+      message: `That's ${LIMITS.maxRunsPerHour} runs in the last hour — the hourly limit.`,
+    };
+  }
+  if ((counts?.lastDay ?? 0) >= LIMITS.maxRunsPerDay) {
+    return {
+      reason: "rate_limit",
+      message: `That's ${LIMITS.maxRunsPerDay} runs today — the daily limit.`,
+    };
+  }
+  return null;
+}
 
 /**
  * Claims a run slot for a workflow. The `runs_one_active_per_workflow`
@@ -102,6 +174,11 @@ export async function enqueueRun(
   trigger: "cron" | "manual" | "event",
   options: { triggerRef?: string; triggerPayload?: unknown } = {},
 ): Promise<EnqueueResult> {
+  const overQuota = await runQuotaExceeded(workflowId);
+  if (overQuota) {
+    return { runId: null, skipped: true, ...overQuota };
+  }
+
   try {
     const [run] = await db
       .insert(runs)
@@ -215,15 +292,37 @@ export async function executeRun(runId: string): Promise<RunResult> {
     await db.insert(runSteps).values({ runId, idx: stepIdx++, ...row });
   };
 
+  if (!workflow.userId) {
+    await failRun(runId, Date.now(), "workflow has no owner");
+    return { runId, status: "error", error: "workflow has no owner" };
+  }
+  const ownerId = workflow.userId;
+
   try {
     const deliver = (workflow.deliver as DeliverTarget[]) ?? [];
     const toolkits = [
       ...new Set([...workflow.toolkits, ...deliverToolkits(deliver)]),
     ];
 
-    const allTools = (await composio.tools.get(COMPOSIO_USER_ID, {
-      toolkits,
-    })) as ToolSet;
+    /*
+     * Preflight. Cheaper than discovering the same thing one failed tool call
+     * at a time, and — more to the point — it produces an honest verdict. A run
+     * that can't reach its apps used to end as `ok` with a digest apologising
+     * for it.
+     */
+    const required = await requiredToolkits(workflow);
+    const gate = await checkConnections(ownerId, required);
+    if (!gate.ok) {
+      const message = `Run blocked: ${gate.reason}. Reconnect and it will run again.`;
+      await failRun(runId, startedAt, message, {
+        errorCode: "needs_reconnect",
+        errorToolkits: gate.blocked,
+      });
+      await noteConnectionFailure(workflow.id);
+      return { runId, status: "error", error: message };
+    }
+
+    const allTools = await getToolsFor(ownerId, toolkits);
 
     const isAllowed = buildToolFilter(
       deliver,
@@ -247,8 +346,15 @@ export async function executeRun(runId: string): Promise<RunResult> {
     const now = new Date();
     const system = systemPrompt(workflow);
 
+    /*
+     * Toolkits whose credentials the provider rejected mid-run. Collected
+     * during the loop and acted on after it: a run can't be un-started, but it
+     * can be recorded truthfully.
+     */
+    const authFailed = new Set<string>();
+
     const result = await generateText({
-      model: await resolveModelFor(workflow.ownerEmail, workflow.model),
+      model: await resolveModelForUser(ownerId, workflow.model),
       system: deliverInstructions
         ? `${system}\n\n${deliverInstructions}`
         : system,
@@ -261,11 +367,26 @@ export async function executeRun(runId: string): Promise<RunResult> {
           const matchingResult = step.toolResults?.find(
             (r) => r.toolCallId === call.toolCallId,
           );
+
+          // Composio reports failures in the result body rather than throwing,
+          // so a rejected credential arrives here as an ordinary value.
+          const output = matchingResult?.output as
+            { successful?: boolean; error?: string | null } | undefined;
+          const failed = output?.successful === false;
+
+          if (failed && isAuthError(output?.error)) {
+            const toolkit = toolkitForSlug(call.toolName, toolkits);
+            if (toolkit) authFailed.add(toolkit);
+          }
+
           await recordStep({
             type: "tool",
             toolSlug: call.toolName,
             argsJson: call.input as object,
             resultJson: truncateForTrace(matchingResult?.output),
+            // Previously every tool step was recorded with `error: null`, so a
+            // trace showed a failed call as an ordinary one.
+            error: failed ? (output?.error ?? "tool call failed") : null,
           });
         }
         if (step.text) {
@@ -276,6 +397,46 @@ export async function executeRun(runId: string): Promise<RunResult> {
 
     const body = result.text.trim();
     const unchanged = body === NO_UPDATES || body === "";
+
+    /*
+     * The run got past the preflight but a credential was rejected while it
+     * ran — the token expired between the check and the call, or Composio's
+     * status hadn't caught up yet.
+     *
+     * This is the case that used to be recorded as a success: the agent is
+     * told to report tool failures in one line, so the run ended `ok` with a
+     * digest saying it couldn't read Slack, and the dashboard showed green.
+     * The digest is still saved as a trace, but the run is an error and the
+     * connection is marked so the next run is blocked at the gate instead.
+     */
+    if (authFailed.size > 0) {
+      const blocked = [...authFailed];
+      for (const toolkit of blocked) {
+        await markConnectionStatus(
+          ownerId,
+          toolkit,
+          "expired",
+          "a tool call was rejected: authorisation failed",
+        );
+      }
+
+      await db.insert(outputs).values({
+        runId,
+        format: "markdown",
+        body,
+        unchanged: true,
+        deliveredTo: [],
+        deliveryLog: [],
+      });
+
+      const message = `Authorisation failed for ${blocked.join(", ")} during the run — reconnect it.`;
+      await failRun(runId, startedAt, message, {
+        errorCode: "needs_reconnect",
+        errorToolkits: blocked,
+      });
+      await noteConnectionFailure(workflow.id);
+      return { runId, status: "error", error: message };
+    }
 
     // The model ran out of steps mid-task: the digest it produced is a
     // fragment, and saying "ok" about it would be a lie.
@@ -316,9 +477,7 @@ export async function executeRun(runId: string): Promise<RunResult> {
         durationMs: Date.now() - startedAt,
         inputTokens: usage?.inputTokens ?? null,
         outputTokens: usage?.outputTokens ?? null,
-        costUsd: toCostColumn(
-          await runCostUsd(workflow.model, usage, workflow.ownerEmail),
-        ),
+        costUsd: toCostColumn(await runCostUsd(workflow.model, usage, ownerId)),
         error: truncated
           ? `stopped after ${workflow.maxSteps} steps — the digest may be incomplete`
           : null,
@@ -329,24 +488,46 @@ export async function executeRun(runId: string): Promise<RunResult> {
     if (!truncated) {
       await db
         .update(workflows)
-        .set({ lastRunAt: new Date() })
+        // A run that reached its apps clears the connection-failure streak —
+        // otherwise one bad afternoon would eventually pause a workflow that
+        // has been healthy ever since.
+        .set({ lastRunAt: new Date(), connectionFailures: 0 })
         .where(eq(workflows.id, workflow.id));
     }
 
     return { runId, status: truncated ? "truncated" : "ok" };
   } catch (err) {
-    const message =
+    const raw =
       err instanceof Error
         ? err.name === "TimeoutError" || err.name === "AbortError"
           ? `run exceeded ${RUN_TIMEOUT_MS / 1000}s and was aborted`
           : err.message
         : String(err);
-    await failRun(runId, startedAt, message);
+
+    // This string is rendered on the run page. Provider SDK errors quote the
+    // request they failed on, which can include the API key.
+    const message = redactSecrets(raw);
+
+    // A missing key is a state, not a fault — the message already says what to
+    // do, and the code lets the UI link there.
+    const errorCode =
+      err instanceof MissingProviderKeyError
+        ? "missing_provider_key"
+        : isAuthError(raw)
+          ? "needs_reconnect"
+          : null;
+
+    await failRun(runId, startedAt, message, errorCode ? { errorCode } : {});
     return { runId, status: "error", error: message };
   }
 }
 
-async function failRun(runId: string, startedAt: number, message: string) {
+async function failRun(
+  runId: string,
+  startedAt: number,
+  message: string,
+  extra: { errorCode?: string; errorToolkits?: string[] } = {},
+) {
   await db
     .update(runs)
     .set({
@@ -354,8 +535,33 @@ async function failRun(runId: string, startedAt: number, message: string) {
       finishedAt: new Date(),
       durationMs: Date.now() - startedAt,
       error: message,
+      errorCode: extra.errorCode ?? null,
+      errorToolkits: extra.errorToolkits ?? [],
     })
     .where(eq(runs.id, runId));
+}
+
+/**
+ * Counts a run lost to a broken connection, and pauses the workflow once
+ * that has happened often enough in a row.
+ *
+ * Without the pause, a workflow whose Slack was revoked in January is still
+ * generating one failed run per schedule in March. The `pausedReason` is what
+ * lets a later reconnect re-enable exactly these and nothing else.
+ */
+async function noteConnectionFailure(workflowId: string) {
+  const [row] = await db
+    .update(workflows)
+    .set({ connectionFailures: sql`${workflows.connectionFailures} + 1` })
+    .where(eq(workflows.id, workflowId))
+    .returning({ failures: workflows.connectionFailures });
+
+  if ((row?.failures ?? 0) >= LIMITS.maxConnectionFailures) {
+    await db
+      .update(workflows)
+      .set({ enabled: false, pausedReason: "needs_reconnect" })
+      .where(eq(workflows.id, workflowId));
+  }
 }
 
 /** True when the loop stopped only because it ran into `maxSteps`. */
