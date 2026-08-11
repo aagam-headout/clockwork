@@ -3,7 +3,8 @@ import { AccountView } from "@neondatabase/auth-ui";
 import { requireUser } from "@/lib/auth/user";
 import { AccountNav } from "@/components/account-nav";
 import { ModelProviderSection } from "@/components/model-provider-section";
-import { Alert, PageHeader, PageShell } from "@/components/ui";
+import { PageHeader, PageShell } from "@/components/ui";
+import { DismissibleAlert } from "@/components/dismissible-alert";
 
 export const dynamic = "force-dynamic";
 
@@ -41,12 +42,16 @@ export default async function AccountPage({
 
       {error && (
         <div className="mt-6">
-          <Alert tone="danger">{error}</Alert>
+          <DismissibleAlert tone="danger" params={["error"]}>
+            {error}
+          </DismissibleAlert>
         </div>
       )}
       {notice && (
         <div className="mt-6">
-          <Alert tone="accent">{notice}</Alert>
+          <DismissibleAlert tone="accent" params={["notice"]}>
+            {notice}
+          </DismissibleAlert>
         </div>
       )}
 

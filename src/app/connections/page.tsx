@@ -23,6 +23,7 @@ import {
   iconButtonClass,
 } from "@/components/ui";
 import { ConfirmSubmitButton } from "@/components/submit-button";
+import { DismissibleAlert } from "@/components/dismissible-alert";
 import { ConnectorBrowser } from "@/components/connector-browser";
 import { ToolkitLogo } from "@/components/toolkit-logo";
 import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
@@ -157,23 +158,33 @@ export default async function ConnectionsPage({
 
       {notice && (
         <div className="rise mt-6">
-          <Alert tone="accent" title="No connection needed">
+          <DismissibleAlert
+            tone="accent"
+            title="No connection needed"
+            params={["notice"]}
+          >
             {notice}
-          </Alert>
+          </DismissibleAlert>
         </div>
       )}
 
       {done && !actionError && (
         <div className="rise mt-6">
-          <Alert tone="success">{done}</Alert>
+          <DismissibleAlert tone="success" params={["done"]}>
+            {done}
+          </DismissibleAlert>
         </div>
       )}
 
       {actionError && (
         <div className="rise mt-6">
-          <Alert tone="danger" title="Composio rejected that">
+          <DismissibleAlert
+            tone="danger"
+            title="Composio rejected that"
+            params={["error"]}
+          >
             {actionError}
-          </Alert>
+          </DismissibleAlert>
         </div>
       )}
 

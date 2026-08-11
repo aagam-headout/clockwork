@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 
 /*
  * Shared presentational primitives, in the Geist idiom: flat surfaces defined
@@ -384,17 +384,35 @@ export function Alert({
   tone = "danger",
   title,
   children,
+  onDismiss,
 }: {
   tone?: Tone;
   title?: string;
   children: React.ReactNode;
+  /**
+   * Renders a close button. Only client callers can pass this — see
+   * dismissible-alert.tsx, which clears the query param the banner came from.
+   */
+  onDismiss?: () => void;
 }) {
   return (
     <div
-      className={`rounded-container border px-4 py-3 text-sm ${TONE_SOFT[tone]}`}
+      className={`rounded-container relative border px-4 py-3 text-sm ${TONE_SOFT[tone]}`}
     >
-      {title && <p className="font-medium">{title}</p>}
-      <div className={title ? "mt-1 opacity-90" : ""}>{children}</div>
+      <div className={onDismiss ? "pr-7" : ""}>
+        {title && <p className="font-medium">{title}</p>}
+        <div className={title ? "mt-1 opacity-90" : ""}>{children}</div>
+      </div>
+      {onDismiss && (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          className="rounded-chip absolute top-2.5 right-2.5 inline-flex h-6 w-6 cursor-pointer items-center justify-center opacity-60 transition-opacity hover:opacity-100"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }

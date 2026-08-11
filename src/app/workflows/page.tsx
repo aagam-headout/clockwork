@@ -7,6 +7,7 @@ import { toggleWorkflow, runWorkflowNow, deleteWorkflow } from "@/lib/actions";
 import { requireUser } from "@/lib/auth/user";
 import { SubmitButton, ConfirmSubmitButton } from "@/components/submit-button";
 import { LocalTime } from "@/components/local-time";
+import { DismissibleAlert } from "@/components/dismissible-alert";
 import {
   Plus,
   Play,
@@ -19,7 +20,6 @@ import {
   History,
 } from "lucide-react";
 import {
-  Alert,
   Badge,
   ButtonLink,
   Card,
@@ -133,23 +133,33 @@ export default async function WorkflowsPage({
 
       {error && (
         <div className="mt-6">
-          <Alert tone="danger" title="That didn't work">
+          <DismissibleAlert
+            tone="danger"
+            title="That didn't work"
+            params={["error"]}
+          >
             {error}
-          </Alert>
+          </DismissibleAlert>
         </div>
       )}
 
       {done && !error && !triggerError && (
         <div className="mt-6">
-          <Alert tone="success">{done}</Alert>
+          <DismissibleAlert tone="success" params={["done"]}>
+            {done}
+          </DismissibleAlert>
         </div>
       )}
 
       {triggerError && (
         <div className="mt-6">
-          <Alert tone="warn" title="Saved, but event triggers didn't register">
+          <DismissibleAlert
+            tone="warn"
+            title="Saved, but event triggers didn't register"
+            params={["triggerError"]}
+          >
             {triggerError}
-          </Alert>
+          </DismissibleAlert>
         </div>
       )}
 
