@@ -1,8 +1,9 @@
-import { gateway } from "@ai-sdk/gateway";
+import { createGateway } from "@ai-sdk/gateway";
 import { blendedPerM, tierFor, type ModelInfo } from "@/lib/model-tiers";
 import { priceFor } from "@/lib/provider-pricing";
-import { getProviderFor, providerConfigured } from "@/lib/provider";
-import { currentUserEmail } from "@/lib/auth/require-owner";
+import { getProviderForUser } from "@/lib/provider";
+import { loadProviderKey } from "@/lib/provider-keys";
+import { currentUser } from "@/lib/auth/user";
 import { providerMeta, type ProviderId } from "@/lib/providers";
 
 /*
@@ -12,8 +13,16 @@ import { providerMeta, type ProviderId } from "@/lib/providers";
  * Anthropic/OpenAI: the provider's own live model list, priced from the table
  * in `provider-pricing.ts` — neither publishes prices over the API.
  *
- * Memoized for an hour, per provider, because the picker re-fetches on open
- * and the list barely moves.
+ * Fetched with the user's own key, because there is no app-wide key to fetch
+ * it with — this app is bring-your-own-key, and quietly using the operator's
+ * credentials to populate everyone's model picker would be a shared-key path
+ * shipped by accident.
+ *
+ * The *cache*, though, stays keyed by provider alone and shared across users.
+ * Its contents are a provider-wide model list containing nothing about who
+ * asked for it, so whichever user's key triggers the miss populates it for
+ * everyone on that provider. Do not "fix" this into a per-user cache — it
+ * would multiply the outbound calls by the user count for identical data.
  */
 const TTL_MS = 60 * 60 * 1000;
 const cache = new Map<ProviderId, { at: number; items: ModelInfo[] }>();
@@ -72,8 +81,8 @@ const perMillion = (perToken?: string) =>
 const byPrice = (a: ModelInfo, b: ModelInfo) =>
   (a.blendedPerM ?? Infinity) - (b.blendedPerM ?? Infinity);
 
-async function gatewayCatalog(): Promise<ModelInfo[]> {
-  const { models } = await gateway.getAvailableModels();
+async function gatewayCatalog(apiKey: string): Promise<ModelInfo[]> {
+  const { models } = await createGateway({ apiKey }).getAvailableModels();
 
   return (
     models
@@ -101,10 +110,10 @@ async function gatewayCatalog(): Promise<ModelInfo[]> {
 }
 
 /** `GET /v1/models` on api.anthropic.com — live list, static prices. */
-async function anthropicCatalog(): Promise<ModelInfo[]> {
+async function anthropicCatalog(apiKey: string): Promise<ModelInfo[]> {
   const res = await fetch("https://api.anthropic.com/v1/models?limit=1000", {
     headers: {
-      "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
+      "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     },
   });
@@ -131,9 +140,9 @@ const OPENAI_CHAT = /^(gpt-[45]|o[1345])(-|$)/;
 const OPENAI_NOT_CHAT = /audio|realtime|search|transcribe|tts|image|instruct/;
 const OPENAI_DATED = /-\d{4}-\d{2}-\d{2}$/;
 
-async function openaiCatalog(): Promise<ModelInfo[]> {
+async function openaiCatalog(apiKey: string): Promise<ModelInfo[]> {
   const res = await fetch("https://api.openai.com/v1/models", {
-    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY ?? ""}` },
+    headers: { Authorization: `Bearer ${apiKey}` },
   });
   if (!res.ok) throw new Error(`openai /v1/models: ${res.status}`);
 
@@ -156,25 +165,27 @@ async function openaiCatalog(): Promise<ModelInfo[]> {
  * must use this and pass the workflow's owner — they have no session to read
  * a provider from.
  */
-export async function getModelCatalogFor(
-  email: string | null | undefined,
+export async function getModelCatalogForUser(
+  userId: string,
 ): Promise<ModelInfo[]> {
-  const provider = await getProviderFor(email);
+  const provider = await getProviderForUser(userId);
 
   const hit = cache.get(provider);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.items;
 
-  // No key means no list to fetch — the settings page says as much, and the
-  // picker still has something routable to show.
-  if (!providerConfigured(provider)) return FALLBACK_MODELS[provider];
+  // No key means no list to fetch. The picker still needs something routable
+  // to show — a new account should be able to fill in a workflow before it
+  // goes and finds an API key.
+  const apiKey = await loadProviderKey(userId, provider);
+  if (!apiKey) return FALLBACK_MODELS[provider];
 
   try {
     const items =
       provider === "anthropic"
-        ? await anthropicCatalog()
+        ? await anthropicCatalog(apiKey)
         : provider === "openai"
-          ? await openaiCatalog()
-          : await gatewayCatalog();
+          ? await openaiCatalog(apiKey)
+          : await gatewayCatalog(apiKey);
 
     if (items.length === 0) return FALLBACK_MODELS[provider];
 
@@ -193,7 +204,9 @@ export function clearModelCatalogCache() {
 
 /** The catalog for the signed-in user — pages, actions and route handlers. */
 export async function getModelCatalog(): Promise<ModelInfo[]> {
-  return getModelCatalogFor(await currentUserEmail());
+  const user = await currentUser();
+  if (!user) return FALLBACK_MODELS[providerMeta("gateway").id];
+  return getModelCatalogForUser(user.id);
 }
 
 /** True if the id is a routable model — used to sanity-check agent output. */

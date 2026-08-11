@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { getModelCatalog } from "@/lib/models";
-import { isOwner } from "@/lib/auth/require-owner";
+import { getModelCatalogForUser } from "@/lib/models";
+import { requireUserApi } from "@/lib/auth/user";
 
-// Backs the model picker's search. Owner-gated like the rest of the app.
+// Backs the model picker's search. The catalog depends on which provider
+// the account uses and is fetched with that account's own key.
 export async function GET() {
-  if (!(await isOwner())) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
+  const auth = await requireUserApi();
+  if (!auth.ok) return auth.response;
 
-  const items = await getModelCatalog();
+  const items = await getModelCatalogForUser(auth.user.id);
   return NextResponse.json({ items });
 }

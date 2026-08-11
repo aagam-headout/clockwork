@@ -1,9 +1,11 @@
 import type { CSSProperties } from "react";
-import { notFound } from "next/navigation";
+import Link from "next/link";
+import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { runs, runSteps, outputs, workflows } from "@/db/schema";
-import { requireOwner } from "@/lib/auth/require-owner";
+import { runSteps, outputs } from "@/db/schema";
+import { currentUser, requireUser } from "@/lib/auth/user";
+import { ownedRun, ownedRunOr404 } from "@/lib/data/scope";
 import {
   Alert,
   Badge,
@@ -55,13 +57,15 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [row] = await db
-    .select({ status: runs.status, workflowName: workflows.name })
-    .from(runs)
-    .leftJoin(workflows, eq(runs.workflowId, workflows.id))
-    .where(eq(runs.id, id));
+  /*
+   * Scoped, like the page. `generateMetadata` runs on its own, so an unscoped
+   * lookup here put another user's workflow name and run status into the tab
+   * title even when the page itself 404'd.
+   */
+  const user = await currentUser();
+  const row = user ? await ownedRun(id, user.id) : null;
   if (!row) return { title: "Run" };
-  return { title: `${row.workflowName ?? "Run"} · ${row.status}` };
+  return { title: `${row.workflow.name} · ${row.run.status}` };
 }
 
 export default async function RunDetailPage({
@@ -69,31 +73,19 @@ export default async function RunDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireOwner();
+  const user = await requireUser();
 
   const { id } = await params;
 
-  const [run] = await db
-    .select({
-      id: runs.id,
-      trigger: runs.trigger,
-      status: runs.status,
-      startedAt: runs.startedAt,
-      finishedAt: runs.finishedAt,
-      durationMs: runs.durationMs,
-      inputTokens: runs.inputTokens,
-      outputTokens: runs.outputTokens,
-      costUsd: runs.costUsd,
-      finishReason: runs.finishReason,
-      error: runs.error,
-      workflowName: workflows.name,
-      workflowId: workflows.id,
-    })
-    .from(runs)
-    .leftJoin(workflows, eq(runs.workflowId, workflows.id))
-    .where(eq(runs.id, id));
-
-  if (!run) notFound();
+  // 404 for someone else's run, identical to one that never existed. This is
+  // the worst of the id-taking pages to leave unscoped — the steps and output
+  // below it carry the full digest body and every tool result.
+  const owned = await ownedRunOr404(id, user.id);
+  const run = {
+    ...owned.run,
+    workflowName: owned.workflow.name,
+    workflowId: owned.workflow.id,
+  };
 
   const steps = await db
     .select()
@@ -205,18 +197,58 @@ export default async function RunDetailPage({
         />
       </div>
 
-      {run.error && (
-        <div className="mt-6">
-          <Alert
-            tone={run.status === "truncated" ? "warn" : "danger"}
-            title={run.status === "truncated" ? "Run cut short" : "Run failed"}
-          >
-            <pre className="mt-1 overflow-x-auto font-mono text-xs leading-relaxed whitespace-pre-wrap">
-              {run.error}
-            </pre>
-          </Alert>
-        </div>
-      )}
+      {run.error &&
+        // A connection problem is the one failure the reader can fix from
+        // here, so it gets its own tone and a link rather than being rendered
+        // as an opaque error string.
+        (run.errorCode === "needs_reconnect" ? (
+          <div className="mt-6">
+            <Alert tone="warn" title="Connection needs reconnecting">
+              <p>{run.error}</p>
+              {/* One link, not one per toolkit: they all went to the same
+                  page, so a row of them read as separate destinations. */}
+              <p className="mt-2">
+                <Link
+                  href="/connections"
+                  className="underline underline-offset-2"
+                >
+                  {run.errorToolkits.length > 0
+                    ? `Reconnect ${run.errorToolkits
+                        .map((slug) => TOOLKIT_LABELS[slug] ?? slug)
+                        .join(", ")}`
+                    : "Go to connections"}
+                </Link>
+              </p>
+            </Alert>
+          </div>
+        ) : run.errorCode === "missing_provider_key" ? (
+          <div className="mt-6">
+            <Alert tone="warn" title="No API key on this account">
+              <p>{run.error}</p>
+              <p className="mt-2">
+                <Link
+                  href="/account/model-provider"
+                  className="underline underline-offset-2"
+                >
+                  Add a key
+                </Link>
+              </p>
+            </Alert>
+          </div>
+        ) : (
+          <div className="mt-6">
+            <Alert
+              tone={run.status === "truncated" ? "warn" : "danger"}
+              title={
+                run.status === "truncated" ? "Run cut short" : "Run failed"
+              }
+            >
+              <pre className="mt-1 overflow-x-auto font-mono text-xs leading-relaxed whitespace-pre-wrap">
+                {run.error}
+              </pre>
+            </Alert>
+          </div>
+        ))}
 
       {output && (
         <section className="mt-8">

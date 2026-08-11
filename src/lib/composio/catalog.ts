@@ -1,97 +1,4 @@
-import { Composio } from "@composio/core";
-import { VercelProvider } from "@composio/vercel";
-
-// Single-user personal tool: one Composio account, one logical "user".
-// Every connected account, run, and tool call in this app is scoped to
-// this fixed id — there is no multi-tenant user system to plumb through.
-export const COMPOSIO_USER_ID = "aagam";
-
-/*
- * Constructed on first use, not at import. The SDK throws when
- * COMPOSIO_API_KEY is missing, and eagerly constructing it meant that a
- * missing key took down every page that transitively imports this module —
- * including ones that never touch Composio. Lazily, a missing key fails only
- * the call that actually needed it.
- */
-let client: Composio<VercelProvider> | null = null;
-
-function getClient(): Composio<VercelProvider> {
-  client ??= new Composio({
-    apiKey: process.env.COMPOSIO_API_KEY,
-    provider: new VercelProvider(),
-  });
-  return client;
-}
-
-export const composio = new Proxy({} as Composio<VercelProvider>, {
-  get(_target, prop, receiver) {
-    const instance = getClient();
-    const value = Reflect.get(instance, prop, receiver);
-    return typeof value === "function" ? value.bind(instance) : value;
-  },
-});
-
-export { TOOLKITS, type Toolkit } from "@/lib/toolkits";
-
-/**
- * Finds an existing Composio-managed auth config for a toolkit, or creates
- * one. `link()` (not the deprecated `initiate()`) is used for the actual
- * OAuth redirect — see https://docs.composio.dev/docs/changelog/2026/04/24.
- */
-async function getOrCreateAuthConfigId(toolkit: string): Promise<string> {
-  const existing = await composio.authConfigs.list({ toolkit });
-  if (existing.items[0]?.id) return existing.items[0].id;
-
-  const created = await composio.authConfigs.create(toolkit, {
-    type: "use_composio_managed_auth",
-    name: `${toolkit} (Clockwork)`,
-  });
-  return created.id;
-}
-
-/**
- * Starts a connection for `toolkit` and returns the URL to redirect the
- * browser to. Composio redirects back to `callbackUrl` once the user
- * finishes OAuth on their hosted page.
- */
-export async function initiateConnection(toolkit: string, callbackUrl: string) {
-  const authConfigId = await getOrCreateAuthConfigId(toolkit);
-  const connectionRequest = await composio.connectedAccounts.link(
-    COMPOSIO_USER_ID,
-    authConfigId,
-    { callbackUrl, allowMultiple: true },
-  );
-  return {
-    connectedAccountId: connectionRequest.id,
-    redirectUrl: connectionRequest.redirectUrl,
-  };
-}
-
-export async function listConnectedAccounts() {
-  const res = await composio.connectedAccounts.list({
-    userIds: [COMPOSIO_USER_ID],
-  });
-  return res.items;
-}
-
-export async function disconnectAccount(connectedAccountId: string) {
-  try {
-    await composio.connectedAccounts.delete(connectedAccountId);
-  } catch (err) {
-    // The SDK's own `message` on an HTTP failure is just the status code
-    // ("403"); everything actionable — including the "grant write access to
-    // this key" hint — sits in the response body it hangs off the error.
-    throw new Error(composioErrorMessage(err));
-  }
-}
-
-/** Digs the human-readable message out of a Composio SDK error. */
-export function composioErrorMessage(err: unknown): string {
-  const body = (err as { error?: { error?: { message?: string } } })?.error
-    ?.error;
-  if (body?.message) return body.message;
-  return err instanceof Error ? err.message : String(err);
-}
+import { composio } from "./client";
 
 /** A toolkit as the UI needs it — flattened out of Composio's nested meta. */
 export type ToolkitSummary = {
@@ -109,6 +16,12 @@ export type ToolkitSummary = {
  * catalog is filtered in memory. It changes rarely, so it's memoized for an
  * hour per server instance — without this, every keystroke in the connector
  * search would re-fetch it.
+ *
+ * Shared across all users on purpose: this is app-wide toolkit metadata —
+ * names, logos, whether a toolkit needs auth at all — and contains nothing
+ * about who has connected what. That per-user question is answered from
+ * Postgres (`src/lib/data/connections.ts`), which is also why connecting or
+ * disconnecting an account does *not* need to invalidate this.
  *
  * `toolkits.get(query)` (the SDK's list overload) returns the matched
  * toolkits as a plain array capped at `limit` — there is no `{items,
@@ -130,6 +43,11 @@ type ToolkitListItem = {
 
 const CATALOG_TTL_MS = 60 * 60 * 1000;
 let catalogCache: { at: number; items: ToolkitSummary[] } | null = null;
+
+/** Escape hatch for an admin/debug path; nothing in normal operation needs it. */
+export function invalidateToolkitCatalog() {
+  catalogCache = null;
+}
 
 export async function getToolkitCatalog(): Promise<ToolkitSummary[]> {
   if (catalogCache && Date.now() - catalogCache.at < CATALOG_TTL_MS) {
@@ -197,6 +115,25 @@ export async function searchToolkits(
 export async function toolkitIsNoAuth(slug: string): Promise<boolean> {
   const catalog = await getToolkitCatalog();
   return Boolean(catalog.find((t) => t.slug === slug)?.noAuth);
+}
+
+/**
+ * Slugs that never need a connected account.
+ *
+ * Falls back to the one toolkit we know is no-auth rather than to an empty
+ * set: if the catalog can't be reached, treating every toolkit as requiring a
+ * connection would block runs that were previously fine, and treating none as
+ * requiring one would skip the preflight entirely. `composio_search` is the
+ * built-in web search every workflow can use, and it is always no-auth.
+ */
+export async function noAuthToolkitSlugs(): Promise<Set<string>> {
+  try {
+    const catalog = await getToolkitCatalog();
+    const slugs = catalog.filter((t) => t.noAuth).map((t) => t.slug);
+    return new Set([...slugs, "composio_search"]);
+  } catch {
+    return new Set(["composio_search"]);
+  }
 }
 
 export async function toolkitExists(slug: string): Promise<boolean> {

@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import { AccountView } from "@neondatabase/auth-ui";
-import { currentUserEmail, requireOwner } from "@/lib/auth/require-owner";
+import { requireUser } from "@/lib/auth/user";
 import { AccountNav } from "@/components/account-nav";
 import { ModelProviderSection } from "@/components/model-provider-section";
-import { Alert, PageHeader, PageShell } from "@/components/ui";
+import { PageHeader, PageShell } from "@/components/ui";
+import { DismissibleAlert } from "@/components/dismissible-alert";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export default async function AccountPage({
   params: Promise<{ path?: string[] }>;
   searchParams: Promise<{ error?: string; notice?: string }>;
 }) {
-  await requireOwner();
+  await requireUser();
 
   const { path } = await params;
   const tab = path?.[path.length - 1];
@@ -36,21 +37,21 @@ export default async function AccountPage({
 
   return (
     <PageShell>
-      <PageHeader
-        title="Account"
-        subtitle="Your profile, sign-in security, and model provider."
-        backHref="/"
-        backLabel="Overview"
-      />
+      {/* No subtitle: it listed the three tabs sitting directly underneath. */}
+      <PageHeader title="Account" backHref="/" backLabel="Overview" />
 
       {error && (
         <div className="mt-6">
-          <Alert tone="danger">{error}</Alert>
+          <DismissibleAlert tone="danger" params={["error"]}>
+            {error}
+          </DismissibleAlert>
         </div>
       )}
       {notice && (
         <div className="mt-6">
-          <Alert tone="accent">{notice}</Alert>
+          <DismissibleAlert tone="accent" params={["notice"]}>
+            {notice}
+          </DismissibleAlert>
         </div>
       )}
 
@@ -80,7 +81,6 @@ export default async function AccountPage({
 }
 
 async function ModelProviderTab() {
-  const email = await currentUserEmail();
-  if (!email) redirect("/auth/sign-in");
-  return <ModelProviderSection email={email} />;
+  const user = await requireUser();
+  return <ModelProviderSection user={user} />;
 }

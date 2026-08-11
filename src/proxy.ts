@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/server";
 import { LOCAL_AUTH_BYPASS } from "@/lib/auth/local";
 
-// Signed-in gate. Owner-email enforcement (there's exactly one legitimate
-// user) happens separately in requireOwner(), called from each protected
-// page/action — see src/lib/auth/require-owner.ts for why.
+// Signed-in gate, and nothing more. *Which* rows a signed-in user may see is
+// decided per query by the scoped accessors in src/lib/data/scope.ts, and
+// account status is enforced in requireUser() — see src/lib/auth/user.ts.
 //
 // The local Docker stack has no Neon Auth service to sign in against, so the
 // gate steps aside there — see src/lib/auth/local.ts for the two locks that
@@ -58,6 +58,11 @@ export const config = {
     // Neon Auth API proxy (must stay reachable to sign in at all), the
     // GH Actions cron endpoint, and the Composio trigger webhook (both
     // authenticated by their own secrets — neither has a session cookie).
-    "/((?!_next/static|_next/image|favicon.ico|auth|api/auth|api/cron/tick|api/triggers).*)",
+    //
+    // The exemptions are anchored with `(?:/|$)`. Unanchored, `api/triggers`
+    // also exempts a future `/api/triggers-admin`, which would then be
+    // reachable with no session at all. Non-capturing: Next rejects a matcher
+    // containing capturing groups.
+    "/((?!_next/static|_next/image|favicon.ico|auth(?:/|$)|api/auth(?:/|$)|api/cron/tick(?:/|$)|api/triggers(?:/|$)).*)",
   ],
 };

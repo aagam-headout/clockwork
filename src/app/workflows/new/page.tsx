@@ -2,20 +2,20 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { createWorkflow } from "@/lib/actions";
 import { NewWorkflowClient } from "@/components/new-workflow-client";
-import { requireOwner } from "@/lib/auth/require-owner";
+import { requireUser } from "@/lib/auth/user";
 import { PageShell } from "@/components/ui";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
-import { getModelCatalog } from "@/lib/models";
+import { getModelCatalogForUser } from "@/lib/models";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "New workflow" };
 
 export default async function NewWorkflowPage() {
-  await requireOwner();
+  const user = await requireUser();
 
   const [availableToolkits, models] = await Promise.all([
-    getConnectedToolkitOptions(),
-    getModelCatalog(),
+    getConnectedToolkitOptions(user.id),
+    getModelCatalogForUser(user.id),
   ]);
 
   return (

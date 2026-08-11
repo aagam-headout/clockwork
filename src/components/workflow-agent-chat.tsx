@@ -192,74 +192,50 @@ export function WorkflowAgentChat({
           <span className="rounded-control border-border bg-bg-subtle text-foreground flex h-7 w-7 items-center justify-center border">
             <Sparkles className="h-4 w-4" />
           </span>
-          {/* The controls to the right need the room on a narrow pane. */}
+          {/* "Builder", not "Assistant": the pane's whole job is to build the
+              workflow in the form beside it, and the page is already called
+              New workflow. The controls to the right need the room on a narrow
+              pane, so the word goes screen-reader-only there. */}
           <span className="heading-14 text-foreground max-sm:sr-only">
-            Assistant
+            Workflow Builder
           </span>
         </div>
-        <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
-          {/* Which apps it may read, sitting right next to what it thinks with
-              — the two things that decide what a proposal can be. Reading is
-              opt-in per app and always read-only. */}
+        {/*
+         * Two controls here, not four. The old bar carried all four as
+         * `shrink-0` on one line, so they ran over each other and past the
+         * card's edge as soon as the pane narrowed.
+         *
+         * What's left is what belongs to the *session*: which apps the builder
+         * may read from, and Reset. The two that belong to the *message* —
+         * what the workflow may do, which model drafts it — moved down onto
+         * the composer.
+         */}
+        <div className="flex min-w-0 items-center gap-1.5">
           {connectors.length > 0 && (
-            <>
-              <ConnectorPicker
-                connectors={connectors}
-                selected={readToolkits}
-                onToggle={toggleToolkit}
-                onClear={() => setReadToolkits(new Set())}
-              />
-              <span className="bg-border h-5 w-px shrink-0" />
-            </>
+            <ConnectorPicker
+              connectors={connectors}
+              selected={readToolkits}
+              onToggle={toggleToolkit}
+              onClear={() => setReadToolkits(new Set())}
+            />
           )}
-
-          {/* What the *drafted workflow* may do when it runs — distinct from
-              the picker beside it, which is only about this drafting session.
-              It rides along to the API so the spec is written for an agent
-              that can act, and lands in the form as the same permission flag
-              the form's own checkbox sets. */}
-          <button
-            type="button"
-            onClick={() => setAllowWrites((v) => !v)}
-            aria-pressed={allowWrites}
-            title={
-              allowWrites
-                ? "The workflow may call write tools — it can change things in connected apps"
-                : "The workflow only reads, plus whatever a delivery target needs"
-            }
-            className={`rounded-control flex h-8 shrink-0 cursor-pointer items-center gap-1.5 border px-3 text-xs font-medium transition-colors ${
-              allowWrites
-                ? "border-foreground bg-surface-2 text-foreground"
-                : "border-border text-muted hover:border-border-strong hover:text-foreground"
-            }`}
-          >
-            <PenLine className="h-3.5 w-3.5 shrink-0" />
-            <span>{allowWrites ? "Writes on" : "Writes off"}</span>
-          </button>
-          <span className="bg-border h-5 w-px shrink-0" />
-
-          {/* Which model does the *building* — not the model it picks for the
-              workflow, which the form on the right owns. Same dialog, but a
-              narrowed catalog: only models that can hold the conversation and
-              still emit a valid spec. */}
-          <ModelPicker
-            name={null}
-            variant="compact"
-            value={builderModel}
-            onChange={setBuilderModel}
-            initialModels={models}
-            include={isBuilderModelInfo}
-          />
           {!empty && (
-            <button
-              type="button"
-              onClick={reset}
-              className={buttonClass("ghost", "sm", "-mr-2 gap-1 px-2")}
-              title="Start over"
-            >
-              <RotateCcw className="h-4 w-4" />
-              Reset
-            </button>
+            <>
+              <span className="bg-border h-5 w-px shrink-0" />
+              <button
+                type="button"
+                onClick={reset}
+                className={buttonClass(
+                  "ghost",
+                  "sm",
+                  "-mr-2 shrink-0 gap-1 px-2",
+                )}
+                title="Start over"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Reset
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -278,11 +254,11 @@ export function WorkflowAgentChat({
                   is stacked underneath this pane, and the sentence was sending
                   phone users looking for a column that isn't there. */}
               <p className="text-muted text-sm leading-relaxed">
-                Describe the job in plain English. I&apos;ll fill in the
-                schedule, tools, model and prompt{" "}
+                Say what should happen, and when. I&apos;ll fill in the
+                schedule, apps and prompt{" "}
                 <span className="lg:hidden">below</span>
-                <span className="hidden lg:inline">on the right</span> — then
-                you can edit anything before saving.
+                <span className="hidden lg:inline">on the right</span>, and you
+                can change any of it before saving.
               </p>
               <div className="mt-4 flex flex-col gap-1.5">
                 {EXAMPLES.map((example) => (
@@ -344,7 +320,7 @@ export function WorkflowAgentChat({
         }}
         className="border-border shrink-0 border-t px-4 py-3"
       >
-        <div className="rounded-container border-border bg-bg focus-within:border-border-strong mx-auto flex w-full max-w-[680px] items-end gap-2 border p-1.5 transition-colors">
+        <div className="rounded-container border-border bg-bg focus-within:border-border-strong mx-auto flex w-full max-w-[680px] flex-col gap-1.5 border p-1.5 transition-colors">
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -368,14 +344,69 @@ export function WorkflowAgentChat({
             aria-label="Describe the workflow"
             className="text-foreground placeholder:text-subtle max-h-40 min-h-0 w-full resize-none bg-transparent px-1.5 py-1 text-[13px] leading-relaxed outline-none disabled:opacity-60"
           />
-          <button
-            type="submit"
-            disabled={loading || !draft.trim()}
-            aria-label="Send"
-            className={iconButtonClass("primary", "sm", "h-9 w-9")}
-          >
-            <ArrowUp className="h-4.5 w-4.5" />
-          </button>
+
+          {/*
+           * The composer's toolbar: both controls sit hard against Send, as
+           * one right-hand cluster, because both of them describe the message
+           * about to be sent. `justify-end` + `flex-wrap` — on a narrow pane
+           * they drop to their own line rather than colliding, which is
+           * exactly what the fixed header row couldn't do.
+           *
+           * The chip carries its subject as a muted prefix ("Workflow"), the
+           * same way the header's does ("Builder"). Without it, "read-only"
+           * doesn't say read-only *for whom*: the builder in front of you, or
+           * the workflow you're configuring. The prefix drops below `sm`,
+           * where the value alone has to carry it.
+           */}
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            {/* What the *saved workflow* may do on every run. It rides along
+                to the API so the spec is written for an agent that can act,
+                and lands in the form as the same flag the form's own checkbox
+                sets — which is why both places use these exact words. */}
+            <button
+              type="button"
+              onClick={() => setAllowWrites((v) => !v)}
+              aria-pressed={allowWrites}
+              title={
+                allowWrites
+                  ? "When it runs, this workflow can post, send and update in your connected apps. It can never delete."
+                  : "When it runs, this workflow only reads — plus whatever delivering the digest needs."
+              }
+              className={`rounded-control flex h-8 shrink-0 cursor-pointer items-center gap-1.5 border px-3 text-xs font-medium transition-colors ${
+                allowWrites
+                  ? "border-foreground bg-surface-2 text-foreground"
+                  : "border-border text-muted hover:border-border-strong hover:text-foreground"
+              }`}
+            >
+              <PenLine className="h-3.5 w-3.5 shrink-0" />
+              <span className="text-subtle font-normal max-sm:hidden">
+                Workflow
+              </span>
+              <span>{allowWrites ? "write tools allowed" : "read-only"}</span>
+            </button>
+
+            {/* Which model does the *building* — not the model it picks for
+                the workflow, which the form on the right owns. Same dialog,
+                but a narrowed catalog: only models that can hold the
+                conversation and still emit a valid spec. */}
+            <ModelPicker
+              name={null}
+              variant="compact"
+              value={builderModel}
+              onChange={setBuilderModel}
+              initialModels={models}
+              include={isBuilderModelInfo}
+            />
+
+            <button
+              type="submit"
+              disabled={loading || !draft.trim()}
+              aria-label="Send"
+              className={iconButtonClass("primary", "sm", "h-9 w-9")}
+            >
+              <ArrowUp className="h-4.5 w-4.5" />
+            </button>
+          </div>
         </div>
       </form>
     </div>
@@ -520,7 +551,7 @@ function ConnectorPicker({
         }}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Apps the assistant may read while drafting — read-only"
+        title="Apps I may look inside while we talk, so the draft fits your real calendar, inbox or repos. I only read."
         className={`rounded-control flex h-8 shrink-0 cursor-pointer items-center gap-1.5 border px-3 text-xs font-medium transition-colors ${
           count > 0
             ? "border-foreground bg-surface-2 text-foreground"
@@ -528,7 +559,8 @@ function ConnectorPicker({
         }`}
       >
         <Plug className="h-3.5 w-3.5 shrink-0" />
-        <span>{count > 0 ? `Reads ${count}` : "Reads nothing"}</span>
+        <span className="text-subtle font-normal max-sm:hidden">Builder</span>
+        <span>{count > 0 ? `reads ${count}` : "reads nothing"}</span>
         <ChevronsUpDown className="text-subtle h-3.5 w-3.5 shrink-0" />
       </button>
 
@@ -547,10 +579,32 @@ function ConnectorPicker({
             />
             <div
               role="dialog"
-              aria-label="Apps the assistant may read"
-              className="rounded-container border-border bg-surface shadow-pop fixed z-50 flex max-h-[min(60vh,380px)] w-[260px] flex-col overflow-hidden border"
+              aria-label="Apps the builder may read while drafting"
+              className="rounded-container border-border bg-surface shadow-pop fixed z-50 flex w-[260px] flex-col overflow-hidden border"
               style={{
-                top: Math.round(rect.bottom + 6),
+                // The trigger sits on the composer, at the bottom of the pane,
+                // so a panel that always dropped downward would open off the
+                // bottom of the window. It flips above the trigger when that's
+                // the taller side, and takes its height from whatever room is
+                // actually there rather than a fixed 380.
+                ...(() => {
+                  const GAP = 6;
+                  const EDGE = 8;
+                  const below = window.innerHeight - rect.bottom - GAP - EDGE;
+                  const above = rect.top - GAP - EDGE;
+                  const up = above > below;
+                  const room = Math.max(160, up ? above : below);
+                  return {
+                    maxHeight: Math.round(Math.min(room, 380)),
+                    ...(up
+                      ? {
+                          bottom: Math.round(
+                            window.innerHeight - rect.top + GAP,
+                          ),
+                        }
+                      : { top: Math.round(rect.bottom + GAP) }),
+                  };
+                })(),
                 // Right-aligned to the trigger, clamped so a narrow viewport
                 // can't push the panel off-screen.
                 left: Math.round(
@@ -615,7 +669,11 @@ function ConnectorPicker({
               </div>
 
               <div className="border-border bg-bg-subtle flex items-center justify-between gap-2 border-t px-3 py-2">
-                <span className="text-subtle text-[11px]">Read-only</span>
+                {/* The one thing worth saying in a picker full of app names:
+                    ticking one hands over read access to a real account. */}
+                <span className="text-subtle text-[11px]">
+                  Looks, never touches
+                </span>
                 <button
                   type="button"
                   onClick={onClear}

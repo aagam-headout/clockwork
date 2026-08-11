@@ -1,9 +1,13 @@
+import { after } from "next/server";
+import { searchToolkits, type ToolkitSummary } from "@/lib/composio";
+import { requireUser } from "@/lib/auth/user";
 import {
-  listConnectedAccounts,
-  searchToolkits,
-  type ToolkitSummary,
-} from "@/lib/composio";
-import { requireOwner } from "@/lib/auth/require-owner";
+  CONNECTION_STATUS_LABEL,
+  dependentCountsByToolkit,
+  getUserConnections,
+  type ConnectionStatus,
+} from "@/lib/data/connections";
+import { reconcileUserIfStale } from "@/lib/reconcile";
 import { APP_TIMEZONE } from "@/lib/time";
 import { disconnectToolkit } from "@/lib/actions";
 import {
@@ -19,6 +23,7 @@ import {
   iconButtonClass,
 } from "@/components/ui";
 import { ConfirmSubmitButton } from "@/components/submit-button";
+import { DismissibleAlert } from "@/components/dismissible-alert";
 import { ConnectorBrowser } from "@/components/connector-browser";
 import { ToolkitLogo } from "@/components/toolkit-logo";
 import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
@@ -28,18 +33,20 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Connections" };
 
 type ConnectedRow = {
-  id: string;
   slug: string;
   name: string;
-  status: string;
+  status: ConnectionStatus;
+  usable: boolean;
+  statusReason: string | null;
+  dependents: number;
   logo?: string;
-  createdAt?: string;
+  connectedAt?: Date | null;
 };
 
 /** "3d ago" / "Jan 4" — connections are dated, not timed, at this density. */
-function since(iso?: string) {
-  if (!iso) return null;
-  const then = new Date(iso);
+function since(value?: Date | string | null) {
+  if (!value) return null;
+  const then = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(then.getTime())) return null;
   const days = Math.floor((Date.now() - then.getTime()) / 86_400_000);
   if (days < 1) return "today";
@@ -59,7 +66,7 @@ export default async function ConnectionsPage({
 }: {
   searchParams: Promise<{ error?: string; notice?: string; done?: string }>;
 }) {
-  await requireOwner();
+  const user = await requireUser();
 
   // `error` is set by `disconnectToolkit` when Composio refuses the delete;
   // `notice` by the connect route when a toolkit needs no auth at all.
@@ -67,65 +74,82 @@ export default async function ConnectionsPage({
   // simply vanishing looked the same as a click that did nothing.
   const { error: actionError, notice, done } = await searchParams;
 
-  let accounts: Awaited<ReturnType<typeof listConnectedAccounts>> = [];
-  let catalog: ToolkitSummary[] = [];
-  let loadError: string | null = null;
-
-  // The catalog powers the search grid's first paint; a failure there
-  // shouldn't hide the accounts that are already connected (or vice versa).
-  const [accountsResult, catalogResult] = await Promise.allSettled([
-    listConnectedAccounts(),
-    searchToolkits("", 12),
+  /*
+   * Connection state comes from Postgres, so this page renders even when
+   * Composio is unreachable — the catalog (names, logos, the browse grid) is
+   * the only part that needs the API, and a failure there is cosmetic.
+   */
+  const [rows, dependents, catalogResult] = await Promise.all([
+    getUserConnections(user.id),
+    dependentCountsByToolkit(user.id),
+    // Only this one can fail in a way worth reporting; the other two are local
+    // reads, and a genuine database failure belongs on the error boundary.
+    searchToolkits("", 12).then(
+      (items) => ({ items, error: null as string | null }),
+      (err: unknown) => ({
+        items: [] as ToolkitSummary[],
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    ),
   ]);
 
-  if (accountsResult.status === "fulfilled") accounts = accountsResult.value;
-  else
-    loadError = accountsResult.reason?.message ?? String(accountsResult.reason);
+  const catalog = catalogResult.items;
+  const loadError = catalogResult.error;
 
-  if (catalogResult.status === "fulfilled") catalog = catalogResult.value;
-  else
-    loadError ??= catalogResult.reason?.message ?? String(catalogResult.reason);
+  /*
+   * Self-healing, after the response has gone out: anything not checked
+   * against Composio recently gets refreshed for the next render, so a visit
+   * never pays for a Composio round trip to show state we already have.
+   */
+  after(() =>
+    reconcileUserIfStale(user.id).catch((err) =>
+      console.error("[connections] background reconcile failed", err),
+    ),
+  );
 
   // Composio metadata is the source of truth for names/logos; fall back to the
   // slug so an unknown connector still renders sensibly.
   const catalogBySlug = new Map(catalog.map((t) => [t.slug, t]));
 
-  const connected: ConnectedRow[] = accounts
-    .map((acc) => {
-      const slug = acc.toolkit?.slug ?? "";
-      return {
-        id: acc.id,
-        slug,
-        name: catalogBySlug.get(slug)?.name ?? TOOLKIT_LABELS[slug] ?? slug,
-        status: acc.status,
-        logo: catalogBySlug.get(slug)?.logo,
-        createdAt: acc.createdAt,
-      };
-    })
-    .filter((row) => row.slug)
-    // Anything not ACTIVE needs the user's attention, so it sorts to the top.
+  const connected: ConnectedRow[] = rows
+    .filter((row) => row.status !== "disconnected")
+    .map((row) => ({
+      slug: row.toolkit,
+      name:
+        catalogBySlug.get(row.toolkit)?.name ??
+        TOOLKIT_LABELS[row.toolkit] ??
+        row.toolkit,
+      status: row.status,
+      usable: row.usable,
+      statusReason: row.statusReason,
+      dependents: dependents.get(row.toolkit) ?? 0,
+      logo: catalogBySlug.get(row.toolkit)?.logo,
+      connectedAt: row.connectedAt,
+    }))
+    // Anything that isn't usable needs the user's attention, so it sorts up.
     .sort(
       (a, b) =>
-        Number(a.status === "ACTIVE") - Number(b.status === "ACTIVE") ||
-        a.name.localeCompare(b.name),
+        Number(a.usable) - Number(b.usable) || a.name.localeCompare(b.name),
     );
 
-  const activeCount = connected.filter((c) => c.status === "ACTIVE").length;
+  const activeCount = connected.filter((c) => c.usable).length;
   const attentionCount = connected.length - activeCount;
 
   return (
     <PageShell>
       <PageHeader
         title="Connections"
-        subtitle="Link any app in the Composio catalog, then use its tools in a workflow."
+        subtitle="Apps your workflows can act on."
         actions={
           <>
             <Badge tone={activeCount > 0 ? "success" : "neutral"} dot>
-              {activeCount} active
+              {activeCount} connected
             </Badge>
+            {/* Not "pending": these are expired, revoked or failed grants, and
+                "pending" reads as "wait and it'll sort itself out". */}
             {attentionCount > 0 && (
               <Badge tone="warn" dot>
-                {attentionCount} pending
+                {attentionCount} need attention
               </Badge>
             )}
           </>
@@ -134,23 +158,33 @@ export default async function ConnectionsPage({
 
       {notice && (
         <div className="rise mt-6">
-          <Alert tone="accent" title="No connection needed">
+          <DismissibleAlert
+            tone="accent"
+            title="No connection needed"
+            params={["notice"]}
+          >
             {notice}
-          </Alert>
+          </DismissibleAlert>
         </div>
       )}
 
       {done && !actionError && (
         <div className="rise mt-6">
-          <Alert tone="success">{done}</Alert>
+          <DismissibleAlert tone="success" params={["done"]}>
+            {done}
+          </DismissibleAlert>
         </div>
       )}
 
       {actionError && (
         <div className="rise mt-6">
-          <Alert tone="danger" title="Composio rejected that">
+          <DismissibleAlert
+            tone="danger"
+            title="Composio rejected that"
+            params={["error"]}
+          >
             {actionError}
-          </Alert>
+          </DismissibleAlert>
         </div>
       )}
 
@@ -169,7 +203,9 @@ export default async function ConnectionsPage({
           count={connected.length || undefined}
           headingClassName="heading-16"
         >
-          Connected
+          {/* Not "Connected" — every card carries a status chip, and one of
+              those chips says "Connected" too. */}
+          Your apps
         </SectionLabel>
 
         {connected.length === 0 ? (
@@ -187,11 +223,11 @@ export default async function ConnectionsPage({
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {connected.map((row) => {
-              const active = row.status === "ACTIVE";
-              const added = since(row.createdAt);
+              const active = row.usable;
+              const added = since(row.connectedAt);
               return (
                 <Card
-                  key={row.id}
+                  key={row.slug}
                   interactive
                   className="flex flex-col gap-2 p-3"
                 >
@@ -203,22 +239,39 @@ export default async function ConnectionsPage({
                       size="lg"
                       connected={active}
                     />
-                    <div className="min-w-0 flex-1">
-                      <div className="heading-14 text-foreground truncate">
+                    {/* The slug used to sit under the name on its own line.
+                        Three text lines per card for two facts — it's the
+                        tooltip's job, not the card's. */}
+                    <div className="min-w-0 flex-1 self-center">
+                      <div
+                        className="heading-14 text-foreground truncate"
+                        title={row.slug}
+                      >
                         {row.name}
-                      </div>
-                      <div className="text-subtle mt-0.5 truncate font-mono text-[11px]">
-                        {row.slug}
                       </div>
                     </div>
                     <Badge tone={active ? "success" : "warn"} dot>
-                      {row.status.toLowerCase()}
+                      {CONNECTION_STATUS_LABEL[row.status]}
                     </Badge>
                   </div>
 
+                  {/* The reason Composio gave, when there is one — "expired"
+                      on its own doesn't tell anyone what to do about it. */}
+                  {!active && row.statusReason && (
+                    <p className="text-warn-text text-[11px] leading-snug">
+                      {row.statusReason}
+                    </p>
+                  )}
+
                   <div className="flex items-center gap-2">
                     <span className="text-subtle truncate text-[11px]">
-                      {added ? `Added ${added}` : " "}
+                      {[
+                        added && `Added ${added}`,
+                        row.dependents > 0 &&
+                          `${row.dependents} workflow${row.dependents === 1 ? "" : "s"}`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </span>
                     <div className="flex-1" />
                     {/*
@@ -243,7 +296,10 @@ export default async function ConnectionsPage({
                       <form
                         action={async () => {
                           "use server";
-                          await disconnectToolkit(row.id);
+                          // The toolkit slug, not a Composio account id: the
+                          // action resolves the account from (user, toolkit)
+                          // so the ownership check is the lookup itself.
+                          await disconnectToolkit(row.slug);
                         }}
                       >
                         {/* Disconnect deletes the connected account, so the
@@ -254,7 +310,13 @@ export default async function ConnectionsPage({
                             that app stops working the moment it's gone. */}
                         <ConfirmSubmitButton
                           pendingLabel="Removing…"
-                          confirmLabel={`Disconnect ${row.name}?`}
+                          confirmLabel={
+                            row.dependents > 0
+                              ? `Disconnect ${row.name}? ${row.dependents} workflow${
+                                  row.dependents === 1 ? "" : "s"
+                                } use it and will be paused.`
+                              : `Disconnect ${row.name}?`
+                          }
                           icon={<Trash2 className="h-3 w-3" />}
                           title={`Disconnect ${row.name}`}
                           size="xs"
@@ -288,9 +350,7 @@ export default async function ConnectionsPage({
               Add a connector
             </SectionLabel>
           }
-          connectedSlugs={connected
-            .filter((c) => c.status === "ACTIVE")
-            .map((c) => c.slug)}
+          connectedSlugs={connected.filter((c) => c.usable).map((c) => c.slug)}
           initialItems={catalog}
         />
       </section>

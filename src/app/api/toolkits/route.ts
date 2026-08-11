@@ -1,12 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { searchToolkits } from "@/lib/composio";
-import { isOwner } from "@/lib/auth/require-owner";
+import { requireUserApi } from "@/lib/auth/user";
+import { takeToken } from "@/lib/rate-limit";
 
-// Backs the connector search on /connections. Owner-gated like everything
-// else — the catalog itself isn't secret, but the Composio quota is.
+// Backs the connector search on /connections. The catalog itself isn't secret,
+// but it is fetched with the app-wide Composio key — so one account typing in
+// the search box is spending everyone's quota, and it is rate limited.
 export async function GET(req: NextRequest) {
-  if (!(await isOwner())) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  const auth = await requireUserApi();
+  if (!auth.ok) return auth.response;
+
+  const gate = await takeToken(auth.user.id, "toolkit_search");
+  if (!gate.ok) {
+    return NextResponse.json(
+      { error: "Searching too fast — slow down for a moment." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(Math.ceil(gate.retryAfterMs / 1000)) },
+      },
+    );
   }
 
   const query = req.nextUrl.searchParams.get("q") ?? "";

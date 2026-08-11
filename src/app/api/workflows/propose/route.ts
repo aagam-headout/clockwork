@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateObject, generateText, stepCountIs, type ToolSet } from "ai";
 import { z } from "zod";
-import { currentUserEmail, isOwner } from "@/lib/auth/require-owner";
+import { requireUserApi } from "@/lib/auth/user";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
-import { getModelCatalog } from "@/lib/models";
-import { resolveModelFor } from "@/lib/provider";
+import { getModelCatalogForUser } from "@/lib/models";
+import { resolveModelForUser } from "@/lib/provider";
 import { formatUsd, type ModelInfo } from "@/lib/model-tiers";
 import {
   BUILDER_RESEARCH_STEPS,
   defaultBuilderModel,
   isBuilderModel,
 } from "@/lib/builder-models";
-import { composio, COMPOSIO_USER_ID } from "@/lib/composio";
+import { getToolsFor } from "@/lib/composio";
+import { takeToken } from "@/lib/rate-limit";
 import { buildToolFilter } from "@/lib/read-only";
 
 // Two model calls now (research, then the spec), and the research one waits on
@@ -29,14 +30,12 @@ const RESEARCH_TIMEOUT_MS = 45_000;
  * conversation, and nothing typed here should change state in a connected app.
  */
 async function research(
-  email: string | null,
+  userId: string,
   modelId: string,
   toolkits: string[],
   history: Array<{ role: "user" | "assistant"; content: string }>,
 ): Promise<{ notes: string; usedTools: string[] }> {
-  const allTools = (await composio.tools.get(COMPOSIO_USER_ID, {
-    toolkits,
-  })) as ToolSet;
+  const allTools = await getToolsFor(userId, toolkits);
 
   const isAllowed = buildToolFilter([], [], [], true);
   const tools: ToolSet = Object.fromEntries(
@@ -46,7 +45,7 @@ async function research(
 
   const usedTools: string[] = [];
   const result = await generateText({
-    model: await resolveModelFor(email, modelId),
+    model: await resolveModelForUser(userId, modelId),
     tools,
     stopWhen: stepCountIs(BUILDER_RESEARCH_STEPS),
     abortSignal: AbortSignal.timeout(RESEARCH_TIMEOUT_MS),
@@ -144,6 +143,7 @@ function systemPrompt(
   current: unknown,
   notes: string,
   allowWrites: boolean,
+  brokenSlugs: string[] = [],
 ) {
   // The default audience is in Asia/Kolkata, where UTC's date is wrong for
   // almost six hours a day.
@@ -227,9 +227,19 @@ silent on real changes.
 
 Available toolkits — these are the apps the user has actually connected, pick only
 what the goal needs and never invent a slug that isn't listed:
-${toolkitSlugs.join(", ")}.
+${toolkitSlugs.filter((slug) => !brokenSlugs.includes(slug)).join(", ")}.
 "composio_search" needs no auth and covers news/web search — use it for anything about
 news, trends, or public information.
+${
+  brokenSlugs.length > 0
+    ? `\nThese are connected but currently broken — the user needs to reconnect them
+before anything can use them. Do NOT put them in the spec. Mention it in your
+reply if the goal really wants one: ${brokenSlugs.join(", ")}.`
+    : ""
+}
+Slack DM delivery (deliverSlack) requires "slack" to be in the available list
+above. If it isn't, leave deliverSlack false and say why rather than proposing
+a delivery that cannot happen.
 
 If the user gave a specific URL (a page to track, an IPO/stock page, a status
 page, anything that changes over time), say so explicitly in the goal and
@@ -273,8 +283,27 @@ deliverSlack is true — a run that hits the cap is recorded as truncated.`;
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await isOwner())) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  const auth = await requireUserApi();
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
+
+  /*
+   * The most expensive endpoint in the app: two model calls plus a round of
+   * live tool calls per request. The model spend is the user's own, but the
+   * tool calls run on the shared Composio key.
+   */
+  const gate = await takeToken(user.id, "propose");
+  if (!gate.ok) {
+    return NextResponse.json(
+      {
+        error:
+          "You've used up this hour's builder requests. Try again shortly.",
+      },
+      {
+        status: 429,
+        headers: { "Retry-After": String(Math.ceil(gate.retryAfterMs / 1000)) },
+      },
+    );
   }
 
   // The builder is a conversation: the client sends the whole turn history plus
@@ -311,12 +340,22 @@ export async function POST(req: NextRequest) {
   try {
     // The builder runs on the signed-in user's provider, same as the picker
     // beside the chat — otherwise it could offer models it can't itself use.
-    const [email, connected, catalog] = await Promise.all([
-      currentUserEmail(),
-      getConnectedToolkitOptions(),
-      getModelCatalog(),
+    const [connected, catalog] = await Promise.all([
+      getConnectedToolkitOptions(user.id),
+      getModelCatalogForUser(user.id),
     ]);
+
+    // Everything the user has a connection row for — including the broken
+    // ones, which the prompt names separately so the assistant can mention
+    // them rather than silently planning around their absence.
     const toolkitSlugs = ["composio_search", ...connected.map((t) => t.slug)];
+    const usableSlugs = new Set([
+      "composio_search",
+      ...connected.filter((t) => t.usable !== false).map((t) => t.slug),
+    ]);
+    const brokenSlugs = connected
+      .filter((t) => t.usable === false)
+      .map((t) => t.slug);
     const offered = modelChoices(catalog);
     const modelIds = offered.map((m) => m.id);
 
@@ -353,7 +392,7 @@ export async function POST(req: NextRequest) {
     if (readToolkits.length > 0) {
       try {
         ({ notes, usedTools } = await research(
-          email,
+          user.id,
           builderModel,
           readToolkits,
           history,
@@ -364,7 +403,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { object } = await generateObject({
-      model: await resolveModelFor(email, builderModel),
+      model: await resolveModelForUser(user.id, builderModel),
       schema: buildProposalSchema(toolkitSlugs, modelIds),
       system: systemPrompt(
         toolkitSlugs,
@@ -372,6 +411,7 @@ export async function POST(req: NextRequest) {
         body.current,
         notes,
         allowWrites,
+        brokenSlugs,
       ),
       messages: history,
     });
@@ -382,10 +422,17 @@ export async function POST(req: NextRequest) {
     }
 
     // The model can still hallucinate a slug despite the prompt; drop anything
-    // that isn't connected rather than proposing a workflow that can't run.
+    // that isn't *usable* rather than proposing a workflow that can't run. This
+    // is stricter than the list the prompt saw — a broken connection is fine to
+    // talk about and not fine to build on.
     const toolkits = object.spec.toolkits.filter((slug) =>
-      toolkitSlugs.includes(slug),
+      usableSlugs.has(slug),
     );
+
+    // Delivery was never validated at all: the assistant could set
+    // `deliverSlack` with no Slack connected, and the saved workflow would then
+    // fail its first delivery with nothing having warned anyone.
+    const deliverSlack = object.spec.deliverSlack && usableSlugs.has("slack");
     const model = catalog.some((m) => m.id === object.spec!.model)
       ? object.spec.model
       : fallbackWorkflowModel(offered);
@@ -395,6 +442,7 @@ export async function POST(req: NextRequest) {
       spec: {
         ...object.spec,
         model,
+        deliverSlack,
         toolkits: toolkits.length > 0 ? toolkits : ["composio_search"],
         // The form field is the flag's inverse; ship it so the prefilled form
         // shows the same permission the chat was drafting under.
