@@ -6,6 +6,7 @@ import { workflows, runs } from "@/db/schema";
 import { toggleWorkflow, runWorkflowNow, deleteWorkflow } from "@/lib/actions";
 import { requireOwner } from "@/lib/auth/require-owner";
 import { SubmitButton, ConfirmSubmitButton } from "@/components/submit-button";
+import { LocalTime } from "@/components/local-time";
 import {
   Plus,
   Play,
@@ -221,11 +222,11 @@ export default async function WorkflowsPage({
                       {wf.lastRunAt && (
                         <span className="inline-flex items-center gap-1.5">
                           <History className="h-3.5 w-3.5 shrink-0" />
-                          Last ran{" "}
-                          {wf.lastRunAt.toLocaleString("en-US", {
-                            dateStyle: "medium",
-                            timeStyle: "short",
-                          })}
+                          <LocalTime
+                            value={wf.lastRunAt}
+                            format="datetime"
+                            prefix="Last ran "
+                          />
                         </span>
                       )}
                       <span className="inline-flex items-center gap-1.5 font-mono">

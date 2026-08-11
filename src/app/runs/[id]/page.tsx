@@ -35,6 +35,7 @@ import { LiveRun } from "@/components/live-run";
 import { TraceToggleAll, CopyButton } from "@/components/trace-tools";
 import { Markdown } from "@/components/markdown";
 import { DigestCard } from "@/components/digest-card";
+import { LocalTime } from "@/components/local-time";
 import { formatUsd } from "@/lib/model-tiers";
 
 export const dynamic = "force-dynamic";
@@ -131,12 +132,11 @@ export default async function RunDetailPage({
             </Badge>
             <Badge tone="neutral">{run.trigger}</Badge>
             <span>
-              {run.startedAt
-                ? run.startedAt.toLocaleString("en-US", {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })
-                : "Not started"}
+              {run.startedAt ? (
+                <LocalTime value={run.startedAt} format="datetime" />
+              ) : (
+                "Not started"
+              )}
             </span>
           </span>
         }
@@ -167,11 +167,11 @@ export default async function RunDetailPage({
               : "—"
           }
           hint={
-            run.finishedAt
-              ? `ended ${run.finishedAt.toLocaleTimeString("en-US", { timeStyle: "short" })}`
-              : inFlight
-                ? "in flight"
-                : undefined
+            run.finishedAt ? (
+              <LocalTime value={run.finishedAt} format="time" prefix="ended " />
+            ) : inFlight ? (
+              "in flight"
+            ) : undefined
           }
           tone={tone}
         />

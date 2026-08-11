@@ -4,6 +4,7 @@ import {
   type ToolkitSummary,
 } from "@/lib/composio";
 import { requireOwner } from "@/lib/auth/require-owner";
+import { APP_TIMEZONE } from "@/lib/time";
 import { disconnectToolkit } from "@/lib/actions";
 import {
   Alert,
@@ -44,7 +45,13 @@ function since(iso?: string) {
   if (days < 1) return "today";
   if (days === 1) return "yesterday";
   if (days < 30) return `${days}d ago`;
-  return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return then.toLocaleDateString("en-US", {
+    // The host is UTC in production; the app's day is the one the rest of the
+    // UI counts in.
+    timeZone: APP_TIMEZONE,
+    month: "short",
+    day: "numeric",
+  });
 }
 
 export default async function ConnectionsPage({

@@ -1,10 +1,11 @@
-import Link from "next/link";
 import { desc, eq, and, gte, count, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { outputs, runs, workflows } from "@/db/schema";
 import { requireOwner } from "@/lib/auth/require-owner";
 import { Markdown } from "@/components/markdown";
-import { DigestCard } from "@/components/digest-card";
+import { DigestRow } from "@/components/digest-card";
+import { LocalDayGreeting } from "@/components/local-time";
+import { startOfDay } from "@/lib/time";
 import {
   Badge,
   ButtonLink,
@@ -15,16 +16,35 @@ import {
   SectionLabel,
   Stat,
 } from "@/components/ui";
-import { Plus, Sparkles, ChevronRight } from "lucide-react";
+import { Plus, Sparkles } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Overview" };
 
+/**
+ * A row's teaser: the digest's first real line of prose, with the markdown
+ * furniture (headings, bullets, emphasis, links) stripped so it reads as one
+ * plain sentence at 12.5px. Cheap and approximate on purpose — it's a hint
+ * about which digest to open, not a rendering.
+ */
+function previewOf(body: string): string {
+  for (const line of body.split("\n")) {
+    const text = line
+      .replace(/^[#>\s]*[-*+]?\s*/, "")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/[*_`]/g, "")
+      .trim();
+    if (text) return text.length > 160 ? `${text.slice(0, 159)}…` : text;
+  }
+  return "";
+}
+
 export default async function TodayPage() {
   await requireOwner();
 
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
+  // The app's day, not the host's: on Vercel `setHours(0,0,0,0)` was UTC
+  // midnight, so "today" didn't start until 05:30 for an IST reader.
+  const startOfToday = startOfDay();
 
   const [feed, runStats, workflowStats] = await Promise.all([
     db
@@ -70,22 +90,11 @@ export default async function TodayPage() {
   const activeWorkflows = workflowStats[0]?.enabled ?? 0;
   const totalWorkflows = workflowStats[0]?.total ?? 0;
 
-  const greeting = (() => {
-    const h = new Date().getHours();
-    if (h < 12) return "Good morning";
-    if (h < 18) return "Good afternoon";
-    return "Good evening";
-  })();
-
   return (
     <PageShell>
       <PageHeader
         title="Overview"
-        subtitle={`${greeting} — ${new Date().toLocaleDateString("en-US", {
-          weekday: "long",
-          month: "long",
-          day: "numeric",
-        })}`}
+        subtitle={<LocalDayGreeting />}
         actions={
           <ButtonLink href="/runs" variant="outline" size="sm">
             View all runs
@@ -146,54 +155,31 @@ export default async function TodayPage() {
             }
           />
         ) : (
-          <div className="flex flex-col gap-4">
+          /* One row per digest, not one card: the feed's job is "what ran
+             today", and a dozen clamped card bodies buried that under half a
+             screen of prose each. The body is one click away in the dialog. */
+          <Card className="rise overflow-hidden">
             {feed.map((item) => (
-              <Card
+              <DigestRow
                 key={item.outputId}
-                as="article"
-                interactive
-                className="rise overflow-hidden"
-              >
-                <div className="border-border bg-bg-subtle flex items-center justify-between gap-3 border-b px-4 py-2.5">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Link
-                      href={`/runs/${item.runId}`}
-                      className="group text-foreground flex min-w-0 items-center gap-1 text-[13px] font-medium"
-                    >
-                      <span className="truncate group-hover:underline">
-                        {item.workflowName}
-                      </span>
-                      <ChevronRight className="text-subtle h-3.5 w-3.5 shrink-0 transition-transform group-hover:translate-x-0.5" />
-                    </Link>
-                    {item.deliveredTo.length > 1 && (
-                      <Badge tone="neutral">
-                        {item.deliveredTo.join(" · ")}
-                      </Badge>
-                    )}
-                  </div>
-                  <time
-                    dateTime={item.createdAt.toISOString()}
-                    className="text-subtle shrink-0 font-mono text-[11px]"
-                  >
-                    {item.createdAt.toLocaleTimeString("en-US", {
-                      timeStyle: "short",
-                    })}
-                  </time>
-                </div>
-                <DigestCard
-                  title={item.workflowName}
-                  createdAt={item.createdAt}
-                  meta={
-                    item.deliveredTo.length > 0
-                      ? `Delivered to ${item.deliveredTo.join(", ")}`
-                      : undefined
-                  }
-                  viewRunHref={`/runs/${item.runId}`}
-                  rendered={<Markdown>{item.body}</Markdown>}
-                />
-              </Card>
+                title={item.workflowName}
+                createdAt={item.createdAt}
+                preview={previewOf(item.body)}
+                badge={
+                  item.deliveredTo.length > 0 ? (
+                    <Badge tone="neutral">{item.deliveredTo.join(" · ")}</Badge>
+                  ) : undefined
+                }
+                meta={
+                  item.deliveredTo.length > 0
+                    ? `Delivered to ${item.deliveredTo.join(", ")}`
+                    : undefined
+                }
+                viewRunHref={`/runs/${item.runId}`}
+                rendered={<Markdown>{item.body}</Markdown>}
+              />
             ))}
-          </div>
+          </Card>
         )}
       </div>
     </PageShell>

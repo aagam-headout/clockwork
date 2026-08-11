@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildToolFilter,
   deliverToolkits,
+  isDestructiveToolSlug,
   isReadOnlyToolSlug,
   type DeliverTarget,
 } from "./read-only";
@@ -46,6 +47,31 @@ describe("isReadOnlyToolSlug", () => {
   });
 });
 
+describe("isDestructiveToolSlug", () => {
+  it("flags irreversible verbs", () => {
+    for (const slug of [
+      "SLACK_DELETE_MESSAGE",
+      "GMAIL_TRASH_MESSAGE",
+      "GITHUB_REMOVE_COLLABORATOR",
+      "NOTION_ARCHIVE_AND_DELETE_PAGE",
+    ]) {
+      expect(isDestructiveToolSlug(slug), slug).toBe(true);
+    }
+  });
+
+  it("leaves ordinary writes and reads alone", () => {
+    for (const slug of [
+      "GITHUB_CREATE_ISSUE",
+      "NOTION_UPDATE_PAGE",
+      "SLACK_SEND_MESSAGE",
+      "GMAIL_FETCH_EMAILS",
+      "COMPOSIO_SEARCH_TAVILY_SEARCH",
+    ]) {
+      expect(isDestructiveToolSlug(slug), slug).toBe(false);
+    }
+  });
+});
+
 describe("buildToolFilter", () => {
   const slackDm: DeliverTarget[] = [
     { type: "dashboard" },
@@ -69,10 +95,40 @@ describe("buildToolFilter", () => {
     expect(allowed("GITHUB_GET_REPO")).toBe(false);
   });
 
-  it("allows any tool when read-only is off", () => {
+  it("allows non-destructive writes when read-only is off", () => {
     const allowed = buildToolFilter(slackDm, [], [], false);
-    expect(allowed("SLACK_DELETE_MESSAGE")).toBe(true);
     expect(allowed("GITHUB_CREATE_ISSUE")).toBe(true);
+    expect(allowed("NOTION_UPDATE_PAGE")).toBe(true);
+  });
+
+  it("still blocks destructive tools with read-only off", () => {
+    const allowed = buildToolFilter(slackDm, [], [], false);
+    expect(allowed("SLACK_DELETE_MESSAGE")).toBe(false);
+    expect(allowed("GMAIL_TRASH_MESSAGE")).toBe(false);
+  });
+
+  it("takes an exact allow-list entry as the opt-in for a destructive tool", () => {
+    const allowed = buildToolFilter(
+      slackDm,
+      ["SLACK_DELETE_MESSAGE", "SLACK_*"],
+      [],
+      false,
+    );
+    expect(allowed("SLACK_DELETE_MESSAGE")).toBe(true);
+    // Swept in by the wildcard, but never named — a broad grant is not consent
+    // to an unattended delete.
+    expect(allowed("SLACK_REMOVE_REACTION")).toBe(false);
+    expect(allowed("SLACK_SEND_MESSAGE")).toBe(true);
+  });
+
+  it("keeps the deny list ahead of an exact destructive opt-in", () => {
+    const allowed = buildToolFilter(
+      [],
+      ["GMAIL_DELETE_DRAFT"],
+      ["GMAIL_DELETE_DRAFT"],
+      false,
+    );
+    expect(allowed("GMAIL_DELETE_DRAFT")).toBe(false);
   });
 
   it("still honours the deny list with read-only off", () => {

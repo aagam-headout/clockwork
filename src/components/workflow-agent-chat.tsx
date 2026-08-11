@@ -17,6 +17,7 @@ import {
   Plug,
   Check,
   ChevronsUpDown,
+  PenLine,
 } from "lucide-react";
 import { buttonClass, iconButtonClass } from "@/components/ui";
 import { ModelPicker } from "@/components/model-picker";
@@ -95,6 +96,10 @@ export function WorkflowAgentChat({
   // Apps the assistant may read from while it drafts. Empty by default: a
   // lookup costs a round trip to someone's real inbox, so it's opted into.
   const [readToolkits, setReadToolkits] = useState<Set<string>>(new Set());
+  // Whether the workflow it drafts is allowed to call write tools at runtime.
+  // Off by default — same default as the form's own permission checkbox, which
+  // this writes into via the proposed spec's `readOnly`.
+  const [allowWrites, setAllowWrites] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const connectors = [WEB_SEARCH, ...availableToolkits];
@@ -138,6 +143,7 @@ export function WorkflowAgentChat({
           current,
           builderModel,
           readToolkits: [...readToolkits],
+          allowWrites,
         }),
       });
 
@@ -206,6 +212,31 @@ export function WorkflowAgentChat({
               <span className="bg-border h-5 w-px shrink-0" />
             </>
           )}
+
+          {/* What the *drafted workflow* may do when it runs — distinct from
+              the picker beside it, which is only about this drafting session.
+              It rides along to the API so the spec is written for an agent
+              that can act, and lands in the form as the same permission flag
+              the form's own checkbox sets. */}
+          <button
+            type="button"
+            onClick={() => setAllowWrites((v) => !v)}
+            aria-pressed={allowWrites}
+            title={
+              allowWrites
+                ? "The workflow may call write tools — it can change things in connected apps"
+                : "The workflow only reads, plus whatever a delivery target needs"
+            }
+            className={`rounded-control flex h-8 shrink-0 cursor-pointer items-center gap-1.5 border px-3 text-xs font-medium transition-colors ${
+              allowWrites
+                ? "border-foreground bg-surface-2 text-foreground"
+                : "border-border text-muted hover:border-border-strong hover:text-foreground"
+            }`}
+          >
+            <PenLine className="h-3.5 w-3.5 shrink-0" />
+            <span>{allowWrites ? "Writes on" : "Writes off"}</span>
+          </button>
+          <span className="bg-border h-5 w-px shrink-0" />
 
           {/* Which model does the *building* — not the model it picks for the
               workflow, which the form on the right owns. Same dialog, but a
@@ -612,6 +643,11 @@ function SpecSummary({ spec }: { spec: Proposal }) {
     { icon: Wrench, text: (spec.toolkits ?? []).join(", ") },
     { icon: Cpu, text: spec.model ?? "" },
   ];
+
+  // Only worth a line when it's the non-default, riskier setting.
+  if (spec.readOnly === false) {
+    items.push({ icon: PenLine, text: "write tools allowed" });
+  }
 
   return (
     <div className="rounded-container border-border flex flex-col gap-1 border px-3 py-2">

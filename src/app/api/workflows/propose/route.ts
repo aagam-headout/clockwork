@@ -143,6 +143,7 @@ function systemPrompt(
   models: ModelInfo[],
   current: unknown,
   notes: string,
+  allowWrites: boolean,
 ) {
   // The default audience is in Asia/Kolkata, where UTC's date is wrong for
   // almost six hours a day.
@@ -155,8 +156,10 @@ your own training data.
 
 You are a colleague helping someone set up a recurring personal automation. You
 talk it through first, and only write the spec once you both know what it should
-do. The spec drives a read-only agent that will run unattended, so a wrong
-assumption here quietly produces a useless digest every morning.
+do. The spec drives an agent that will run unattended, so a wrong assumption
+here quietly produces a useless digest every morning${
+    allowWrites ? " — or a wrong action in a real app" : ""
+  }.
 
 Every turn you return two things: "reply" — what you say in the chat — and
 "spec" — the structured workflow, or null.
@@ -234,10 +237,26 @@ state that the agent must fetch that URL fresh on every run rather than rely
 on what it already knows about it — stale numbers from memory are the #1 way
 these workflows go wrong.
 
-The agent that will run this workflow is READ-ONLY except that it may send itself a
+${
+  allowWrites
+    ? `The user has switched WRITE TOOLS ON for this workflow: the agent may call any
+tool the toolkits above expose, including ones that create, update, send, or
+delete. Only ask it to write when the user actually asked for an action — a
+digest stays a digest. When it does write, say in the goal exactly what it may
+change and under what condition, and tell it to do nothing rather than guess:
+an unattended run has nobody to confirm with. Say plainly in your reply which
+writes it will perform.
+
+Deleting is still off: tools that delete, remove, trash, purge, reset, or revoke
+are blocked at the runtime gate no matter what the goal says, until the user
+names that exact tool slug in the workflow's "Allow only" list. If they ask for
+one, write the rest of the workflow and tell them the one line they need to add
+there — never write a goal that assumes a delete will go through.`
+    : `The agent that will run this workflow is READ-ONLY except that it may send itself a
 Slack DM if deliverSlack is true. It cannot send email, create issues, post to
 channels, or modify anything. Write the goal accordingly — do not ask it to take
-actions it can't take.
+actions it can't take.`
+}
 
 Models available, cheapest first (blended cost per 1M tokens):
 ${models.map((m) => `- ${m.id} [${m.tier}] ${formatUsd(m.blendedPerM)}/1M`).join("\n")}
@@ -321,6 +340,12 @@ export async function POST(req: NextRequest) {
         )
       : [];
 
+    // The chat's own toggle, not something the model decides: letting a
+    // proposal grant itself write access would put the safety default behind a
+    // sentence of prose. Drafting stays read-only regardless (see `research`);
+    // this only describes what the *saved workflow* may do.
+    const allowWrites = body.allowWrites === true;
+
     // Research is best-effort: a flaky app API should downgrade the proposal to
     // a guess, not fail the whole request.
     let notes = "";
@@ -341,7 +366,13 @@ export async function POST(req: NextRequest) {
     const { object } = await generateObject({
       model: await resolveModelFor(email, builderModel),
       schema: buildProposalSchema(toolkitSlugs, modelIds),
-      system: systemPrompt(toolkitSlugs, offered, body.current, notes),
+      system: systemPrompt(
+        toolkitSlugs,
+        offered,
+        body.current,
+        notes,
+        allowWrites,
+      ),
       messages: history,
     });
 
@@ -365,6 +396,9 @@ export async function POST(req: NextRequest) {
         ...object.spec,
         model,
         toolkits: toolkits.length > 0 ? toolkits : ["composio_search"],
+        // The form field is the flag's inverse; ship it so the prefilled form
+        // shows the same permission the chat was drafting under.
+        readOnly: !allowWrites,
       },
       // Shown in the chat so the user can see the proposal was grounded in a
       // real lookup rather than invented.

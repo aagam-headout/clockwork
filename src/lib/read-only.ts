@@ -23,6 +23,17 @@ const READ_VERB = /(^|_)(GET|LIST|SEARCH|FETCH|READ|RETRIEVE|FIND|QUERY)(_|$)/;
 const WRITE_VERB =
   /(^|_)(CREATE|UPDATE|DELETE|REMOVE|SEND|POST|PUT|PATCH|ADD|SET|EDIT|WRITE|UPLOAD|INSERT|APPEND|MOVE|ARCHIVE|CLOSE|MERGE|ASSIGN|INVITE|MARK|REPLY|TRASH|DRAFT|CANCEL|APPROVE|REVOKE|SHARE|RENAME|DUPLICATE|CLEAR|RESET|ENABLE|DISABLE|EXECUTE|RUN)(_|$)/;
 
+/*
+ * Destructive verbs: the subset of writes that removes or resets something a
+ * later run can't put back. Turning writes on is a workflow-level "you may act
+ * in my apps" — it is not consent to an unattended delete, and there is nobody
+ * on the other end of a 3am cron to confirm with. So these stay blocked even
+ * with `readOnly: false`, unless the owner names the exact slug in the allow
+ * list. See `buildToolFilter`.
+ */
+const DESTRUCTIVE_VERB =
+  /(^|_)(DELETE|DESTROY|DROP|ERASE|PURGE|REMOVE|TRASH|WIPE|RESET|REVOKE|CLEAR|UNINSTALL|UNSUBSCRIBE|TERMINATE)(_|$)/;
+
 // Composio's built-in search toolkit needs no auth and is read-only by
 // construction — always allow it regardless of a workflow's toolkit list.
 const ALWAYS_ALLOWED_PREFIXES = ["COMPOSIO_SEARCH_"];
@@ -31,6 +42,16 @@ export function isReadOnlyToolSlug(slug: string): boolean {
   if (ALWAYS_ALLOWED_PREFIXES.some((p) => slug.startsWith(p))) return true;
   if (WRITE_VERB.test(slug)) return false;
   return READ_VERB.test(slug);
+}
+
+/**
+ * Whether a slug names an irreversible operation. Same name-based inference as
+ * the read/write split, and deliberately broad: a false positive costs the
+ * owner one line in the allow list, a false negative costs them their data.
+ */
+export function isDestructiveToolSlug(slug: string): boolean {
+  if (ALWAYS_ALLOWED_PREFIXES.some((p) => slug.startsWith(p))) return false;
+  return DESTRUCTIVE_VERB.test(slug);
 }
 
 /**
@@ -99,7 +120,10 @@ export function deliverToolkits(deliver: DeliverTarget[]): string[] {
  *
  * `readOnly: false` drops only the read/write gate — a workflow the owner has
  * explicitly opted out of read-only may call any tool its toolkits expose,
- * still subject to the allow and deny lists.
+ * still subject to the allow and deny lists, and still minus the destructive
+ * slugs: those need their exact name in `allowTools`. A wildcard doesn't
+ * count, on purpose — `GITHUB_*` is how someone means "the GitHub tools", not
+ * "and delete my repos".
  */
 export function buildToolFilter(
   deliver: DeliverTarget[],
@@ -120,9 +144,20 @@ export function buildToolFilter(
       !allowTools.some((p) => matchesPattern(slug, p))
     )
       return false;
-    if (!readOnly) return true;
-    return isReadOnlyToolSlug(slug) || allowedWriteSlugs.has(slug);
+    if (readOnly)
+      return isReadOnlyToolSlug(slug) || allowedWriteSlugs.has(slug);
+    // Writes are on: everything the toolkits expose is fair game except the
+    // irreversible ones, which stay behind an exact opt-in.
+    if (isDestructiveToolSlug(slug))
+      return allowTools.some((p) => matchesExactly(slug, p));
+    return true;
   };
+}
+
+/** Exact match only — a trailing `*` is a broad grant, not a named opt-in. */
+function matchesExactly(slug: string, pattern: string): boolean {
+  const p = pattern.trim().toUpperCase();
+  return p.length > 0 && !p.endsWith("*") && slug.toUpperCase() === p;
 }
 
 /** Case-insensitive exact match, or prefix match when the pattern ends in `*`. */

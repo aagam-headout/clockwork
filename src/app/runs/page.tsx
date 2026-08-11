@@ -17,7 +17,9 @@ import {
 } from "@/components/ui";
 import { History, ChevronRight, Clock, Calendar, Plus } from "lucide-react";
 import { LiveRun } from "@/components/live-run";
+import { LocalTime } from "@/components/local-time";
 import { formatUsd } from "@/lib/model-tiers";
+import { APP_TIMEZONE, daysBetween } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Runs" };
@@ -31,18 +33,24 @@ function relative(date: Date): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.round(hrs / 24);
   if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return date.toLocaleDateString("en-US", {
+    timeZone: APP_TIMEZONE,
+    month: "short",
+    day: "numeric",
+  });
 }
 
+/**
+ * Group heading for a run's day. "Today"/"Yesterday" are relative to the app's
+ * day (see `@/lib/time`) rather than the host's, so a 1am IST run stops being
+ * filed under yesterday.
+ */
 function dayLabel(date: Date): string {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const diffDays = Math.round((today.getTime() - d.getTime()) / 86_400_000);
+  const diffDays = daysBetween(new Date(), date);
   if (diffDays === 0) return "Today";
   if (diffDays === 1) return "Yesterday";
   return date.toLocaleDateString("en-US", {
+    timeZone: APP_TIMEZONE,
     weekday: "long",
     month: "short",
     day: "numeric",
@@ -211,9 +219,7 @@ export default async function RunsPage({
                         <div className="text-subtle mt-1 flex min-w-0 items-center gap-2.5 font-mono text-[11px] tabular-nums">
                           <span className="inline-flex items-center gap-1">
                             <Clock className="h-3 w-3" />
-                            {at.toLocaleTimeString("en-US", {
-                              timeStyle: "short",
-                            })}
+                            <LocalTime value={at} format="time" />
                           </span>
                           {run.durationMs != null && (
                             <span>{(run.durationMs / 1000).toFixed(1)}s</span>

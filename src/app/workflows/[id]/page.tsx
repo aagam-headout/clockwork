@@ -5,6 +5,7 @@ import { runs, workflows } from "@/db/schema";
 import { updateWorkflow, deleteWorkflow, runWorkflowNow } from "@/lib/actions";
 import { WorkflowForm } from "@/components/workflow-form";
 import { SubmitButton, ConfirmSubmitButton } from "@/components/submit-button";
+import { LocalTime } from "@/components/local-time";
 import { Trash2, Play, ChevronRight, Globe, History, Zap } from "lucide-react";
 import type { DeliverTarget } from "@/lib/read-only";
 import { requireOwner } from "@/lib/auth/require-owner";
@@ -210,10 +211,10 @@ export default async function EditWorkflowPage({
                   live={run.status === "running"}
                 />
                 <span className="text-muted min-w-0 flex-1 truncate font-mono text-xs tabular-nums">
-                  {(run.startedAt ?? run.createdAt).toLocaleString("en-US", {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })}
+                  <LocalTime
+                    value={run.startedAt ?? run.createdAt}
+                    format="datetime"
+                  />
                 </span>
                 {/* Duration in its own column so the timestamps above it stay
                     left-aligned and the numbers stay comparable. */}

@@ -307,7 +307,7 @@ export function Stat({
 }: {
   label: string;
   value: React.ReactNode;
-  hint?: string;
+  hint?: React.ReactNode;
   tone?: Tone;
   icon?: React.ComponentType<{ className?: string }>;
 }) {

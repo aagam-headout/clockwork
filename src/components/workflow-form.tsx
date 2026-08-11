@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { CronExpressionParser } from "cron-parser";
 import { useFormStatus } from "react-dom";
 import type { WorkflowFormState } from "@/lib/actions";
@@ -22,14 +22,9 @@ import {
   Send,
   Filter,
   TriangleAlert,
+  ChevronsUpDown,
 } from "lucide-react";
-
-const CRON_PRESETS: Array<{ label: string; value: string }> = [
-  { label: "Weekdays 8am", value: "0 8 * * 1-5" },
-  { label: "Daily 9am", value: "0 9 * * *" },
-  { label: "Hourly", value: "0 * * * *" },
-  { label: "Fridays 5pm", value: "0 17 * * 5" },
-];
+import { CronBuilder, describeCron } from "@/components/cron-builder";
 
 /*
  * A fixed zone list rather than `Intl.supportedValuesOf("timeZone")`: that call
@@ -362,7 +357,7 @@ export function WorkflowForm({
               rows={5}
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
-              placeholder="Check my calendar for today and my assigned GitHub issues. Summarize into a short digest. Flag any meeting conflicts."
+              placeholder="Check today's calendar and my GitHub issues. Short digest, flag conflicts."
               className="input font-mono text-[13px]"
             />
           </div>
@@ -390,19 +385,10 @@ export function WorkflowForm({
 
           {triggerType === "cron" ? (
             <>
-              {/* Presets first: picking one is the common path, and the fields
-                  below it are the correction — not the other way round. */}
-              <div className="flex flex-wrap gap-1.5">
-                {CRON_PRESETS.map((preset) => (
-                  <Pill
-                    key={preset.value}
-                    selected={cron === preset.value}
-                    onClick={() => setCron(preset.value)}
-                  >
-                    {preset.label}
-                  </Pill>
-                ))}
-              </div>
+              {/* Builder first: composing the schedule is the common path, and
+                  the cron field below it is the correction — not the other way
+                  round. Both edit the same string, so neither can go stale. */}
+              <CronBuilder value={cron} onChange={setCron} />
 
               <div className="grid gap-4 @lg:grid-cols-2">
                 <Field
@@ -413,9 +399,15 @@ export function WorkflowForm({
                         {cronPreview.error}
                       </span>
                     ) : (
-                      // Next-run text is relative to "now", so server and
-                      // client disagree by design.
-                      <span suppressHydrationWarning>{cronPreview.next}</span>
+                      // What the expression *means*, not just when it next
+                      // fires — "Next: Wed 8:00" reads the same for a weekday
+                      // schedule and a Wednesdays-only one. The next-run text
+                      // stays as the fallback for expressions too exotic to
+                      // describe; it's relative to "now", so server and client
+                      // disagree by design.
+                      <span suppressHydrationWarning>
+                        {describeCron(cron) ?? cronPreview.next}
+                      </span>
                     )
                   }
                 >
@@ -515,8 +507,8 @@ export function WorkflowForm({
           )}
 
           {offline.length > 0 && (
-            <p className="text-subtle text-xs leading-relaxed">
-              Kept but not connected:{" "}
+            <p className="text-subtle text-xs">
+              Kept, not connected:{" "}
               <span className="font-mono">
                 {offline.map((s) => TOOLKIT_LABELS[s] ?? s).join(", ")}
               </span>{" "}
@@ -526,8 +518,8 @@ export function WorkflowForm({
                 className="text-accent-text underline underline-offset-2"
               >
                 reconnect
-              </Link>{" "}
-              to use them again.
+              </Link>
+              .
               {offline.map((slug) => (
                 <input key={slug} type="hidden" name="toolkits" value={slug} />
               ))}
@@ -552,13 +544,13 @@ export function WorkflowForm({
                 checked={allowWrites}
                 onChange={setAllowWrites}
                 label="Allow write tools"
-                hint="Off (default): the agent reads, and only writes what a delivery target needs. On: any tool its toolkits expose."
+                hint="Off: reads only. On: any write tool but not deletes."
               />
             </Field>
 
             <Field
               label="Max steps"
-              hint="One step = one model call plus its tool calls. Hit the cap and the run is marked truncated, keeping whatever it had."
+              hint="One step = a model call plus its tools. At the cap the run stops and saves what it had, marked truncated."
             >
               <input
                 type="number"
@@ -573,48 +565,17 @@ export function WorkflowForm({
         </Section>
 
         <Section title="Delivery" icon={Send}>
-          <div className="flex flex-col gap-2">
-            <Checkbox checked disabled label="Dashboard" hint="Always on." />
-            <Checkbox
-              name="deliverSlack"
-              defaultChecked={defaultValues?.deliverSlack}
-              label="Slack DM"
-              hint="Needs Slack connected."
-            />
-            <TargetWithInput
-              name="deliverSlackChannel"
-              label="Slack channel"
-              hint="Needs Slack connected."
-              inputName="slackChannel"
-              placeholder="#general or C0123456789"
-              defaultChecked={defaultValues?.deliverSlackChannel}
-              defaultValue={initial.slackChannel}
-            />
-            <TargetWithInput
-              name="deliverEmail"
-              label="Email"
-              hint="Sent through your connected Gmail."
-              inputName="emailTo"
-              type="email"
-              placeholder="you@example.com"
-              defaultChecked={defaultValues?.deliverEmail}
-              defaultValue={initial.emailTo}
-            />
-            <TargetWithInput
-              name="deliverWebhook"
-              label="Webhook"
-              hint="POSTed as JSON by the runner itself — no tool involved."
-              inputName="webhookUrl"
-              type="url"
-              placeholder="https://example.com/hook"
-              defaultChecked={defaultValues?.deliverWebhook}
-              defaultValue={initial.webhookUrl}
-            />
-          </div>
-          <p className="text-subtle text-xs leading-relaxed">
-            Nothing is sent on a run where the agent finds no updates — only the
-            dashboard records it.
-          </p>
+          <DeliveryPicker
+            defaults={{
+              deliverSlack: defaultValues?.deliverSlack,
+              deliverSlackChannel: defaultValues?.deliverSlackChannel,
+              deliverEmail: defaultValues?.deliverEmail,
+              deliverWebhook: defaultValues?.deliverWebhook,
+              slackChannel: initial.slackChannel,
+              emailTo: initial.emailTo,
+              webhookUrl: initial.webhookUrl,
+            }}
+          />
         </Section>
 
         <Section title="Tool filters" icon={Filter}>
@@ -623,7 +584,7 @@ export function WorkflowForm({
           <div className="grid gap-4 @2xl:grid-cols-2">
             <Field
               label="Allow only"
-              hint="Optional whitelist. Trailing * works: GITHUB_LIST_*"
+              hint="Only these tools load. Trailing * matches a prefix; deletes need their exact name."
             >
               <input
                 name="allowTools"
@@ -632,7 +593,7 @@ export function WorkflowForm({
                 className="input font-mono text-[12px]"
               />
             </Field>
-            <Field label="Never use" hint="Wins over the allow list.">
+            <Field label="Never use" hint="Wins over Allow only.">
               <input
                 name="denyTools"
                 defaultValue={initial.denyTools}
@@ -674,8 +635,8 @@ export function WorkflowForm({
             "Read-only — the agent nev…", which is worse than absent. */}
         <p className="text-subtle hidden min-w-0 truncate text-xs sm:block">
           {allowWrites
-            ? "Write tools allowed — the agent can change things in connected apps."
-            : "Read-only — the agent never writes."}
+            ? "Writes on — can change connected apps."
+            : "Read-only — never writes."}
         </p>
         <FormSubmitButton>{submitLabel}</FormSubmitButton>
       </div>
@@ -772,69 +733,236 @@ function EventTriggerPicker({
   );
 }
 
-/** A delivery target whose destination field only appears once it's on. */
-function TargetWithInput({
-  name,
-  label,
-  hint,
-  inputName,
-  placeholder,
-  type = "text",
-  defaultChecked,
-  defaultValue,
-}: {
+/**
+ * The delivery targets, as one multi-select instead of a stack of four
+ * checkboxes. Delivery is a short list you set once and rarely revisit, and as
+ * cards it took more vertical space in the settings rail than the goal did.
+ * Collapsed, it reads as a sentence — "Dashboard, Slack DM, Email".
+ *
+ * Only the *choosing* moved into the dropdown: a chosen target that needs a
+ * destination still gets a real field underneath, because a channel or an
+ * address typed inside a popover is a thing you can't see while you check your
+ * work.
+ */
+type TargetKey = "slack" | "slackChannel" | "email" | "webhook";
+
+const DELIVERY_TARGETS: Array<{
+  key: TargetKey;
+  /** The `deliver*` checkbox name the action reads. */
   name: string;
   label: string;
-  hint?: string;
-  inputName: string;
-  placeholder?: string;
-  type?: string;
-  defaultChecked?: boolean;
-  defaultValue?: string;
+  hint: string;
+  /** Targets with a destination field carry its name and shape. */
+  input?: { name: string; type: string; placeholder: string };
+}> = [
+  {
+    key: "slack",
+    name: "deliverSlack",
+    label: "Slack DM",
+    hint: "Needs Slack connected.",
+  },
+  {
+    key: "slackChannel",
+    name: "deliverSlackChannel",
+    label: "Slack channel",
+    hint: "Needs Slack connected.",
+    input: {
+      name: "slackChannel",
+      type: "text",
+      placeholder: "#general or C0123456789",
+    },
+  },
+  {
+    key: "email",
+    name: "deliverEmail",
+    label: "Email",
+    hint: "Sent through your connected Gmail.",
+    input: { name: "emailTo", type: "email", placeholder: "you@example.com" },
+  },
+  {
+    key: "webhook",
+    name: "deliverWebhook",
+    label: "Webhook",
+    hint: "POSTed as JSON by the runner.",
+    input: {
+      name: "webhookUrl",
+      type: "url",
+      placeholder: "https://example.com/hook",
+    },
+  },
+];
+
+function DeliveryPicker({
+  defaults,
+}: {
+  defaults: {
+    deliverSlack?: boolean;
+    deliverSlackChannel?: boolean;
+    deliverEmail?: boolean;
+    deliverWebhook?: boolean;
+    slackChannel?: string;
+    emailTo?: string;
+    webhookUrl?: string;
+  };
 }) {
-  const [on, setOn] = useState(Boolean(defaultChecked));
+  const [selected, setSelected] = useState<Set<TargetKey>>(
+    () =>
+      new Set(
+        [
+          defaults.deliverSlack && "slack",
+          defaults.deliverSlackChannel && "slackChannel",
+          defaults.deliverEmail && "email",
+          defaults.deliverWebhook && "webhook",
+        ].filter(Boolean) as TargetKey[],
+      ),
+  );
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    // Click-away rather than a full-screen backdrop: this panel sits inside the
+    // form's own scroll port, so a fixed overlay would swallow the scroll.
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onDown);
+    };
+  }, [open]);
+
+  function toggle(key: TargetKey) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }
+
+  const chosen = DELIVERY_TARGETS.filter((t) => selected.has(t.key));
+  const summary = ["Dashboard", ...chosen.map((t) => t.label)].join(", ");
+  const defaultValueFor = (inputName: string) =>
+    ({
+      slackChannel: defaults.slackChannel,
+      emailTo: defaults.emailTo,
+      webhookUrl: defaults.webhookUrl,
+    })[inputName] ?? "";
 
   return (
     <div className="flex flex-col gap-2">
-      <label
-        className={`rounded-control has-[:focus-visible]:outline-foreground flex cursor-pointer items-start gap-2.5 border px-3 py-2.5 transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 ${
-          on
-            ? "border-border-strong bg-surface-2"
-            : "border-border hover:border-border-strong"
-        }`}
-      >
-        <input
-          type="checkbox"
-          name={name}
-          checked={on}
-          onChange={(e) => setOn(e.target.checked)}
-          className="sr-only"
-        />
-        <CheckBox on={on} />
-        <span className="min-w-0">
-          <span className="text-foreground block text-[13px] font-medium">
-            {label}
+      {/* The dropdown is a control, not a form field: the action reads these
+          hidden inputs, so the panel can open, close, or unmount without
+          affecting what gets submitted. */}
+      {chosen.map((t) => (
+        <input key={t.name} type="hidden" name={t.name} value="on" />
+      ))}
+
+      <div ref={wrapRef} className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          className={`rounded-control flex w-full cursor-pointer items-center gap-2 border px-3 py-2.5 text-left transition-colors ${
+            open
+              ? "border-border-strong bg-surface-2"
+              : "border-border hover:border-border-strong"
+          }`}
+        >
+          <span className="text-foreground min-w-0 flex-1 truncate text-[13px]">
+            {summary}
           </span>
-          {hint && <span className="text-subtle block text-xs">{hint}</span>}
-        </span>
-      </label>
-      {on && (
-        // Indented to the label text above it (12px padding + 14px box + 10px
-        // gap). The pad lives on a wrapper because `.input` is width:100% and
-        // an `ml-*` on the field itself pushed it past the card edge.
-        <div className="pl-9">
-          <input
-            name={inputName}
-            type={type}
-            required
-            defaultValue={defaultValue}
-            placeholder={placeholder}
-            className="input h-9"
-            aria-label={`${label} destination`}
-          />
-        </div>
-      )}
+          <span className="text-subtle shrink-0 text-xs">
+            {chosen.length + 1}
+          </span>
+          <ChevronsUpDown className="text-subtle h-4 w-4 shrink-0" />
+        </button>
+
+        {open && (
+          // Absolute rather than portalled: it's full-width inside a card that
+          // scrolls with it, so it stays anchored with no measuring.
+          <div
+            role="listbox"
+            aria-multiselectable
+            aria-label="Delivery targets"
+            className="rounded-container border-border bg-surface shadow-pop absolute top-[calc(100%+4px)] right-0 left-0 z-30 overflow-hidden border"
+          >
+            <Row
+              label="Dashboard"
+              hint="Always on."
+              on
+              disabled
+              onToggle={() => {}}
+            />
+            {DELIVERY_TARGETS.map((t) => (
+              <Row
+                key={t.key}
+                label={t.label}
+                hint={t.hint}
+                on={selected.has(t.key)}
+                onToggle={() => toggle(t.key)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {chosen
+        .filter((t) => t.input)
+        .map((t) => (
+          <Field key={t.key} label={t.label}>
+            <input
+              name={t.input!.name}
+              type={t.input!.type}
+              required
+              defaultValue={defaultValueFor(t.input!.name)}
+              placeholder={t.input!.placeholder}
+              className="input h-9"
+              aria-label={`${t.label} destination`}
+            />
+          </Field>
+        ))}
     </div>
+  );
+}
+
+/** One selectable line in the delivery dropdown. */
+function Row({
+  label,
+  hint,
+  on,
+  disabled = false,
+  onToggle,
+}: {
+  label: string;
+  hint: string;
+  on: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={on}
+      disabled={disabled}
+      onClick={onToggle}
+      className={`border-border flex w-full items-start gap-2.5 border-b px-3 py-2.5 text-left transition-colors last:border-b-0 ${
+        disabled ? "cursor-default" : "hover:bg-surface-hover cursor-pointer"
+      } ${on ? "bg-surface-2" : ""}`}
+    >
+      <CheckBox on={on} disabled={disabled} />
+      <span className="min-w-0">
+        <span className="text-foreground block text-[13px] font-medium">
+          {label}
+        </span>
+        <span className="text-subtle block text-xs">{hint}</span>
+      </span>
+    </button>
   );
 }
 
