@@ -1,4 +1,4 @@
-import { generateText, stepCountIs, type ToolSet } from "ai";
+import { generateText, type ToolSet } from "ai";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, runSteps, outputs, workflows } from "@/db/schema";
@@ -9,6 +9,7 @@ import { redactSecrets } from "@/lib/crypto/secrets";
 import {
   checkConnections,
   isAuthError,
+  isFailure,
   requiredToolkits,
   toolkitForSlug,
 } from "@/lib/connection-gate";
@@ -21,6 +22,19 @@ import {
   DELIVER_TOOL_SLUGS,
   type DeliverTarget,
 } from "@/lib/read-only";
+import { createResultStore } from "@/lib/agent/result-store";
+import {
+  createHarnessState,
+  flushToolHashes,
+  handlesEnabled,
+  loopBoundHit,
+  resolveForTrace,
+  runLoopExhausted,
+  wrapToolsWithHandles,
+  HANDLE_PROMPT,
+  type HarnessState,
+} from "@/lib/agent/wrap-tools";
+import { systemCacheOptions } from "@/lib/agent/prompt-cache";
 
 type Workflow = typeof workflows.$inferSelect;
 
@@ -42,9 +56,13 @@ export const NO_UPDATES = "NO_UPDATES";
 
 /**
  * Deliberately static per workflow — every per-run fact (current time,
- * previous digest, event payload) lives in the user prompt instead. A stable
- * system prompt + tool schema prefix is what lets the provider's prompt cache
- * hit across the steps of a run and across closely-spaced runs.
+ * previous digest, event payload) lives in the user prompt instead.
+ *
+ * That keeps the prompt identical across the steps of a run, which is what
+ * makes it cacheable: the run sends a `cache_control` breakpoint on the system
+ * message, covering the tool schemas and this prompt in one prefix. See
+ * `src/lib/agent/prompt-cache.ts`. A per-run fact in here would silently cost
+ * that discount on every step.
  */
 function systemPrompt(workflow: Workflow): string {
   const cadence = workflow.cron
@@ -93,7 +111,7 @@ Rules:
   covered.
 - If nothing has changed since the previous digest, reply with exactly
   ${NO_UPDATES} and nothing else, and do not call any delivery tool. Silence
-  is better than a digest that says "no updates" in ten words.`;
+  is better than a digest that says "no updates" in ten words.${handlesEnabled() ? `\n\n${HANDLE_PROMPT}` : ""}`;
 }
 
 type EnqueueResult =
@@ -333,6 +351,13 @@ export async function executeRun(runId: string): Promise<RunResult> {
     const tools: ToolSet = Object.fromEntries(
       Object.entries(allTools).filter(([slug]) => isAllowed(slug)),
     );
+    const store = createResultStore();
+    const harness = createHarnessState();
+    const runTools = wrapToolsWithHandles(tools, {
+      workflowId: workflow.id,
+      store,
+      state: harness,
+    });
 
     const deliverInstructions = deliver
       .map(deliverInstruction)
@@ -353,26 +378,74 @@ export async function executeRun(runId: string): Promise<RunResult> {
      */
     const authFailed = new Set<string>();
 
+    const cacheOptions = systemCacheOptions();
+
     const result = await generateText({
       model: await resolveModelForUser(ownerId, workflow.model),
-      system: deliverInstructions
-        ? `${system}\n\n${deliverInstructions}`
-        : system,
-      prompt: buildPrompt(workflow, previous, failure, run.triggerPayload, now),
-      tools,
-      stopWhen: stepCountIs(workflow.maxSteps),
+      /*
+       * The system prompt travels as a message rather than the `system`
+       * option for one reason: a message can carry provider options, and that
+       * is where the cache breakpoint goes. The text is unchanged either way.
+       */
+      messages: [
+        {
+          role: "system" as const,
+          content: deliverInstructions
+            ? `${system}\n\n${deliverInstructions}`
+            : system,
+          ...(cacheOptions ? { providerOptions: cacheOptions } : {}),
+        },
+        {
+          role: "user" as const,
+          content: buildPrompt(
+            workflow,
+            previous,
+            failure,
+            run.triggerPayload,
+            now,
+          ),
+        },
+      ],
+      allowSystemInMessages: true,
+      tools: runTools,
+      // `maxSteps` is the workflow's budget for *real* tool calls, and it is
+      // what the system prompt tells the agent it has — `query` and `inspect`
+      // read data this run already fetched, so they don't spend it. See
+      // `runLoopExhausted` for why an absolute bound is also needed.
+      stopWhen: ({ steps }) => runLoopExhausted(steps, workflow.maxSteps),
       abortSignal: AbortSignal.timeout(RUN_TIMEOUT_MS),
       onStepFinish: async (step) => {
+        /*
+         * Both lists, not just `toolResults`.
+         *
+         * Composio's tools arrive through `wrapToolsForProvider` as *dynamic*
+         * tools, and the SDK files their results under `dynamicToolResults`;
+         * `toolResults` carries only the statically-typed ones (here, `query`
+         * and `inspect`). Reading just the latter meant every Composio result
+         * looked like `undefined` — so the trace recorded `null` for the only
+         * calls worth tracing, and the `successful === false` check below could
+         * never fire, which is exactly the dead-connection-looks-green bug the
+         * comment further down says was already fixed once.
+         */
+        const stepResults = [
+          ...(step.toolResults ?? []),
+          ...(step.dynamicToolResults ?? []),
+        ];
+
         for (const call of step.toolCalls ?? []) {
-          const matchingResult = step.toolResults?.find(
+          const matchingResult = stepResults.find(
             (r) => r.toolCallId === call.toolCallId,
           );
 
           // Composio reports failures in the result body rather than throwing,
           // so a rejected credential arrives here as an ordinary value.
-          const output = matchingResult?.output as
+          //
+          // A descriptor stands in for the payload in the model's context, but
+          // not here: the auth check below and the trace both need what the
+          // tool actually returned.
+          const output = resolveForTrace(matchingResult?.output, store) as
             { successful?: boolean; error?: string | null } | undefined;
-          const failed = output?.successful === false;
+          const failed = isFailure(output);
 
           if (failed && isAuthError(output?.error)) {
             const toolkit = toolkitForSlug(call.toolName, toolkits);
@@ -383,7 +456,7 @@ export async function executeRun(runId: string): Promise<RunResult> {
             type: "tool",
             toolSlug: call.toolName,
             argsJson: call.input as object,
-            resultJson: truncateForTrace(matchingResult?.output),
+            resultJson: truncateForTrace(output),
             // Previously every tool step was recorded with `error: null`, so a
             // trace showed a failed call as an ordinary one.
             error: failed ? (output?.error ?? "tool call failed") : null,
@@ -396,7 +469,6 @@ export async function executeRun(runId: string): Promise<RunResult> {
     });
 
     const body = result.text.trim();
-    const unchanged = body === NO_UPDATES || body === "";
 
     /*
      * The run got past the preflight but a credential was rejected while it
@@ -438,15 +510,93 @@ export async function executeRun(runId: string): Promise<RunResult> {
       return { runId, status: "error", error: message };
     }
 
+    const degraded = harness.degradedReads > 0;
+
+    /*
+     * FINDING 2: an explicit NO_UPDATES is the agent doing its job — it
+     * looked and found nothing worth reporting, and it said so on purpose.
+     * An empty string is not that: the model produced no answer at all, for
+     * a reason this run cannot name. The old check (`body === NO_UPDATES ||
+     * body === ""`) treated the two the same, which recorded an empty reply
+     * as an ordinary quiet `ok` — flushing this run's hashes and leaving
+     * nothing behind to show a human what happened. There is no digest to be
+     * honest about here, so this is an `error`, not a `truncated`:
+     * `truncated` names a bound the system understands (a step cap or a read
+     * budget); an empty reply doesn't have one. Recording it under its own
+     * `empty_response` code — instead of reusing `degraded_reads` — also
+     * keeps it out of the read-budget advice added for FINDING 1 below,
+     * which would be the wrong lesson for a run that may not have had a read
+     * problem at all.
+     */
+    if (body === "") {
+      await db.insert(outputs).values({
+        runId,
+        format: "markdown",
+        body: "",
+        unchanged: false,
+        deliveredTo: [],
+        deliveryLog: [],
+      });
+
+      const message = degraded
+        ? `the model returned no text this run, and some fetched data could not be read (${harness.degradedReads} read${harness.degradedReads === 1 ? "" : "s"} unavailable) — nothing to report or deliver`
+        : "the model returned no text this run — nothing to report or deliver";
+
+      await failRun(runId, startedAt, message, { errorCode: "empty_response" });
+      return { runId, status: "error", error: message };
+    }
+
+    const unchanged = body === NO_UPDATES;
+
+    /*
+     * The agent asked for data it could not get — a spent query budget or an
+     * evicted handle. It was told to say so, but an unattended run cannot rely
+     * on that: the whole point is that nobody is reading. A clean `ok` run
+     * cannot carry this in `runs.error` (the run page renders any error there
+     * as "Run failed", which a green run is not), so it goes into the digest
+     * itself; a run already ending badly carries it in its error text.
+     */
+
+    /*
+     * A degraded run that also produced nothing (`unchanged`) is
+     * indistinguishable, downstream, from an ordinary quiet morning: no note
+     * lands in the digest (there is no digest), `runs.error` would stay null,
+     * status would be `ok`, and delivery is skipped as "nothing new to send".
+     * That is the exact failure this finding is named for — a run that could
+     * not read its data, recorded as a clean morning with no trace anywhere.
+     * `truncated` is the honest bucket for "this run did not see everything
+     * it fetched", and the run page renders it as "Run cut short", not
+     * "Run failed".
+     */
+    const degradedBlind = degraded && unchanged;
+
     // The model ran out of steps mid-task: the digest it produced is a
-    // fragment, and saying "ok" about it would be a lie.
-    const truncated =
-      result.finishReason === "length" || hitStepCap(result, workflow);
+    // fragment, and saying "ok" about it would be a lie. A degraded-and-blind
+    // run earns the same verdict for the same reason, even though it stopped
+    // on its own terms rather than hitting the step cap.
+    const truncation = truncationReason(result, workflow);
+    const truncated = truncation !== null || degradedBlind;
+
+    /*
+     * MINOR 5 (revised): a step-cap truncation and a degraded read can
+     * collide, and the note has two homes it could land in — the digest, and
+     * `runs.error`. The digest wins whenever there is one to put it in: the
+     * digest is the artefact a human actually receives (Slack, email,
+     * webhook), while `runs.error` is a dashboard column nobody is watching
+     * at 6am. Filing the disclosure there and only there, for a run that did
+     * ship a digest, hides it from the one place someone would see it. So
+     * every degraded run that produced a digest (`!unchanged`) gets the note
+     * in the body — truncated or not. Only the degraded-BLIND case (no
+     * digest produced at all, see below) has no digest to put it in, so
+     * `runs.error` stays its sole home.
+     */
+    const digest =
+      degraded && !unchanged ? `${body}\n\n${degradedNote(harness)}` : body;
 
     const deliveryLog = await deliverOutput({
       workflow,
       deliver,
-      body,
+      body: digest,
       unchanged,
       calledTools: result.toolCalls.map((c) => c.toolName),
     });
@@ -454,7 +604,7 @@ export async function executeRun(runId: string): Promise<RunResult> {
     await db.insert(outputs).values({
       runId,
       format: "markdown",
-      body,
+      body: digest,
       unchanged,
       deliveredTo: deliveryLog.filter((d) => d.ok).map((d) => d.type),
       deliveryLog,
@@ -471,6 +621,12 @@ export async function executeRun(runId: string): Promise<RunResult> {
     await db
       .update(runs)
       .set({
+        // MINOR 6 (out of scope, pre-existing, not this feature's to fix):
+        // a delivery target can fail (see `deliverOutput`'s `ok: false`
+        // entries) and the run still lands here as "ok" — the dashboard has
+        // no notion of "delivered green, sent nowhere". Left as-is; noted so
+        // the next reader doesn't mistake it for something this change
+        // should have covered.
         status: truncated ? "truncated" : "ok",
         finishReason: result.finishReason ?? null,
         finishedAt: new Date(),
@@ -478,20 +634,80 @@ export async function executeRun(runId: string): Promise<RunResult> {
         inputTokens: usage?.inputTokens ?? null,
         outputTokens: usage?.outputTokens ?? null,
         costUsd: toCostColumn(await runCostUsd(workflow.model, usage, ownerId)),
-        error: truncated
-          ? `stopped after ${workflow.maxSteps} steps — the digest may be incomplete`
-          : null,
+        // The note itself now lives in the digest for any degraded run that
+        // produced one (see `digest` above) — `runs.error` only needs to
+        // carry it for the degraded-BLIND case, where there is no digest for
+        // it to live in. A truncated-but-not-blind run's error text is just
+        // the truncation reason; duplicating the note here too would show a
+        // reader the same sentence twice.
+        error: degradedBlind
+          ? truncation
+            ? `${truncation} ${degradedNote(harness, "plain")}`
+            : degradedNote(harness, "plain")
+          : truncation,
+        // FINDING 1 (revised): `degraded_reads` now marks *every* degraded
+        // run, not only the blind ones — including a `total-steps`
+        // truncation, which by definition already spent the read budget
+        // before it could loop that far. Restricting this to `degradedBlind`
+        // left a `total-steps` truncation with `errorCode: null`, so
+        // `previousFailure`/`buildPrompt` took the step-cap branch and told
+        // the next run to fetch less — the wrong lesson for a run whose
+        // fault was reading, not fetching. `previousFailure` already ignores
+        // `ok`-status rows, so tagging a merely-degraded-but-not-truncated
+        // `ok` run with this code here is inert downstream.
+        errorCode: degraded ? "degraded_reads" : null,
       })
       .where(eq(runs.id, runId));
 
     // Only a completed run counts as "last ran" for display purposes.
     if (!truncated) {
+      /*
+       * The one place a hash may be committed: the run finished, produced a
+       * digest, delivered it, and every target that was actually attempted
+       * received it. A hash written anywhere else claims the workflow has
+       * seen bytes that never reached a reader, and the next run would then
+       * skip them as `unchanged_since`. A degraded run has the same problem
+       * — the model never read part of what it fetched — so it does not get
+       * to record the hashes either. `skipped` entries ("nothing new to
+       * send") are the design working, not a failed delivery, so they don't
+       * block the flush — only an attempted-and-failed target does.
+       */
+      const deliveryOk = !deliveryLog.some((d) => !d.ok && !d.skipped);
+      if (!degraded && deliveryOk) {
+        try {
+          await flushToolHashes(workflow.id, harness);
+        } catch {
+          // `writeToolHash` already swallows its own errors, so this should
+          // be unreachable — but the run row above is already committed as a
+          // successful, delivered `ok`, and a flush failure escaping to the
+          // outer `catch` would overwrite that true verdict with `error` and
+          // skip the lastRunAt/connectionFailures reset below. Defence in
+          // depth: a hash-table hiccup must not be able to relabel a run that
+          // genuinely finished and delivered.
+        }
+      }
+
       await db
         .update(workflows)
         // A run that reached its apps clears the connection-failure streak —
         // otherwise one bad afternoon would eventually pause a workflow that
         // has been healthy ever since.
         .set({ lastRunAt: new Date(), connectionFailures: 0 })
+        .where(eq(workflows.id, workflow.id));
+    } else if (degradedBlind) {
+      /*
+       * MINOR 4: a degraded-blind run still reached its apps — the preflight
+       * passed and every tool call it made succeeded, only the *local*
+       * reads ran out. Leaving `connectionFailures` untouched here would
+       * eventually auto-pause a workflow whose connections are fine, over a
+       * run-loop budget problem that has nothing to do with them.
+       * `lastRunAt` is left alone: that field means "the last time this
+       * workflow completed with output", and a degraded-blind run — by
+       * definition — didn't.
+       */
+      await db
+        .update(workflows)
+        .set({ connectionFailures: 0 })
         .where(eq(workflows.id, workflow.id));
     }
 
@@ -564,15 +780,55 @@ async function noteConnectionFailure(workflowId: string) {
   }
 }
 
-/** True when the loop stopped only because it ran into `maxSteps`. */
-function hitStepCap(
+/**
+ * Why the run was cut short, phrased for `runs.error`, or null if it finished
+ * on its own terms.
+ *
+ * This string is handed to the *next* run as a "last time you…" hint, so which
+ * bound it names matters: telling a run to plan fewer fetches when the real
+ * problem was a model looping on local `query` calls makes the next digest
+ * thinner for no reason, and hides the actual fault.
+ */
+export function truncationReason(
   result: { finishReason: string; steps: unknown[] },
   workflow: Workflow,
-): boolean {
-  return (
-    result.finishReason === "tool-calls" &&
-    result.steps.length >= workflow.maxSteps
+): string | null {
+  if (result.finishReason === "length") {
+    return "the model's reply hit its output length limit — the digest may be incomplete";
+  }
+  if (result.finishReason !== "tool-calls") return null;
+
+  // Shares `loopBoundHit` with `stopWhen` so the two can never disagree about
+  // when a run hit the cap — a disagreement here means a run that stopped at
+  // the cap gets recorded as a clean `ok`.
+  const bound = loopBoundHit(
+    result.steps as Array<{ toolCalls?: Array<{ toolName: string }> }>,
+    workflow.maxSteps,
   );
+
+  if (bound === "external-steps") {
+    return `stopped after ${workflow.maxSteps} steps — the digest may be incomplete`;
+  }
+  if (bound === "total-steps") {
+    return `stopped after ${result.steps.length} steps: too many local query/inspect calls, without spending the ${workflow.maxSteps}-step tool budget — the digest may be incomplete`;
+  }
+  return null;
+}
+
+/**
+ * Said in the digest, and in the error of a run that was already going badly.
+ *
+ * `runs.error` is rendered inside a `<pre>` on the run page (see
+ * `src/app/runs/[id]/page.tsx`), which shows markdown literally rather than
+ * interpreting it — so the error-column use needs the plain-text form.
+ */
+function degradedNote(
+  state: HarnessState,
+  format: "markdown" | "plain" = "markdown",
+): string {
+  const count = state.degradedReads;
+  const text = `Some fetched data could not be read this run (${count} read${count === 1 ? "" : "s"} unavailable), so this digest may be incomplete.`;
+  return format === "markdown" ? `_${text}_` : text;
 }
 
 /**
@@ -605,14 +861,22 @@ async function previousDigest(
  * repeating it: a truncated run means the plan was too wide for the step
  * budget, an errored one names the tool or timeout that sank it.
  */
-async function previousFailure(
-  workflowId: string,
-): Promise<{ status: string; error: string; at: Date } | null> {
+async function previousFailure(workflowId: string): Promise<{
+  status: string;
+  error: string;
+  errorCode: string | null;
+  at: Date;
+} | null> {
   // Only the *immediately preceding* finished run matters: an error three
   // runs back that later runs sailed past is noise, not guidance. (The run
   // currently executing is still "running", so it can't match here.)
   const [row] = await db
-    .select({ status: runs.status, error: runs.error, at: runs.finishedAt })
+    .select({
+      status: runs.status,
+      error: runs.error,
+      errorCode: runs.errorCode,
+      at: runs.finishedAt,
+    })
     .from(runs)
     .where(
       and(
@@ -624,7 +888,12 @@ async function previousFailure(
     .limit(1);
 
   if (!row || row.status === "ok" || !row.error || !row.at) return null;
-  return { status: row.status, error: row.error, at: row.at };
+  return {
+    status: row.status,
+    error: row.error,
+    errorCode: row.errorCode ?? null,
+    at: row.at,
+  };
 }
 
 /** URLs in the goal/payload are what the agent must actually fetch, not recall. */
@@ -643,7 +912,12 @@ function humanizeAge(ms: number): string {
 function buildPrompt(
   workflow: Workflow,
   previous: { body: string; at: Date } | null,
-  failure: { status: string; error: string; at: Date } | null,
+  failure: {
+    status: string;
+    error: string;
+    errorCode: string | null;
+    at: Date;
+  } | null,
   triggerPayload: unknown,
   now: Date,
 ): string {
@@ -689,9 +963,17 @@ function buildPrompt(
   if (failure) {
     const age = humanizeAge(now.getTime() - failure.at.getTime());
     parts.push(
-      failure.status === "truncated"
-        ? `---\nHeads-up: your previous attempt (${age} ago) ran out of steps before finishing — "${failure.error}". Plan tighter this time: fewer, more targeted tool calls, and write the digest before the budget runs out.`
-        : `---\nHeads-up: your previous attempt (${age} ago) failed with: "${failure.error}". If that error points at a specific tool or source, try a different tool or a narrower query for it this run rather than repeating the same call — and if it still fails, say so in the digest instead of erroring out.`,
+      // FINDING 1: a degraded-blind run stopped for the opposite reason a
+      // step-cap truncation did — it fetched fine, but ran out of local
+      // `query`/`inspect` budget before it finished reading what it had.
+      // Feeding it the step-cap branch's "fewer, more targeted tool calls"
+      // line tells the next run to fetch less, which is exactly backwards:
+      // the fetches were never the problem, the reading was.
+      failure.errorCode === "degraded_reads"
+        ? `---\nHeads-up: your previous attempt (${age} ago) fetched data it ran out of budget to finish reading — "${failure.error}". The fetching was fine; this time read what you fetch more narrowly — fewer, more targeted \`query\`/\`inspect\` calls per handle — rather than fetching less.`
+        : failure.status === "truncated"
+          ? `---\nHeads-up: your previous attempt (${age} ago) ran out of steps before finishing — "${failure.error}". Plan tighter this time: fewer, more targeted tool calls, and write the digest before the budget runs out.`
+          : `---\nHeads-up: your previous attempt (${age} ago) failed with: "${failure.error}". If that error points at a specific tool or source, try a different tool or a narrower query for it this run rather than repeating the same call — and if it still fails, say so in the digest instead of erroring out.`,
     );
   }
 

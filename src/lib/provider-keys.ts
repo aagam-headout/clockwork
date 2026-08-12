@@ -9,7 +9,7 @@ import {
   last4,
   redactSecrets,
 } from "@/lib/crypto/secrets";
-import { providerMeta, type ProviderId } from "@/lib/providers";
+import { PROVIDER_IDS, providerMeta, type ProviderId } from "@/lib/providers";
 import { LOCAL_AUTH_BYPASS } from "@/lib/auth/local";
 
 /*
@@ -37,6 +37,18 @@ export type StoredKeyMeta = {
 /** The AAD binding a row to its owner — see `encryptSecret`. */
 function aadFor(userId: string, provider: ProviderId): string {
   return `${userId}:${provider}`;
+}
+
+/**
+ * The Docker stack resets its database on `docker compose down -v`, so there
+ * is nowhere durable to paste a key. Falling back to the environment keeps
+ * local development working — behind the same two locks that gate the auth
+ * bypass, so a production build can never reach this. One place, so every
+ * caller that needs "is there a key" agrees with the one that decrypts it.
+ */
+function bypassKey(provider: ProviderId): string | null {
+  if (!LOCAL_AUTH_BYPASS) return null;
+  return process.env[providerMeta(provider).envVar] ?? null;
 }
 
 /**
@@ -73,17 +85,37 @@ export async function hasProviderKey(
       ),
     )
     .limit(1);
-  return Boolean(row);
+  if (row) return true;
+
+  /*
+   * Same environment fallback `loadProviderKey` applies, and for the same
+   * reason — but it has to be here too, or it is unreachable from the path
+   * that matters. The dispatcher asks this question before enqueuing, so
+   * without it every cron tick on the Docker stack answers `no_provider_key`
+   * and no local workflow ever runs, however the environment is configured.
+   */
+  return bypassKey(provider) !== null;
 }
 
-/** True if the user can run anything at all. Drives the onboarding checklist. */
+/**
+ * True if the user can run anything at all. Drives the onboarding checklist.
+ *
+ * Checks the bypass fallback too — otherwise a local Docker setup running
+ * entirely on an env-var key (no row ever saved) would fail this while every
+ * per-provider `hasProviderKey` check above it passes, and the checklist
+ * would tell a working setup it still needs a key.
+ */
 export async function hasAnyProviderKey(userId: string): Promise<boolean> {
   const [row] = await db
     .select({ id: userProviderKeys.id })
     .from(userProviderKeys)
     .where(eq(userProviderKeys.userId, userId))
     .limit(1);
-  return Boolean(row);
+  if (row) return true;
+
+  return LOCAL_AUTH_BYPASS
+    ? PROVIDER_IDS.some((provider) => bypassKey(provider) !== null)
+    : false;
 }
 
 /**
@@ -107,18 +139,7 @@ export async function loadProviderKey(
     )
     .limit(1);
 
-  if (!row) {
-    /*
-     * The Docker stack resets its database on `docker compose down -v`, so
-     * there is nowhere durable to paste a key. Falling back to the environment
-     * keeps local development working — behind the same two locks that gate
-     * the auth bypass, so a production build can never reach this.
-     */
-    if (LOCAL_AUTH_BYPASS) {
-      return process.env[providerMeta(provider).envVar] ?? null;
-    }
-    return null;
-  }
+  if (!row) return bypassKey(provider);
 
   try {
     return decryptSecret(

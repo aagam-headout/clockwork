@@ -253,6 +253,37 @@ export const runSteps = pgTable("run_steps", {
     .defaultNow(),
 });
 
+/*
+ * What each tool call returned last time, as a hash.
+ *
+ * Only hashes — never payloads. A matching hash lets the executor tell the
+ * model "this source is byte-identical to last run" in one line instead of
+ * re-sending the payload, and because the tool still ran, that statement is
+ * about live data rather than a cached read.
+ *
+ * One row per distinct call shape per workflow, overwritten each run, so it
+ * cannot grow beyond a workflow's own variety of calls and needs no retention
+ * sweep.
+ */
+export const runToolHashes = pgTable(
+  "run_tool_hashes",
+  {
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    toolSlug: text("tool_slug").notNull(),
+    /** sha256 of the call's arguments with object keys recursively sorted. */
+    argsHash: text("args_hash").notNull(),
+    resultHash: text("result_hash").notNull(),
+    seenAt: timestamp("seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.workflowId, table.toolSlug, table.argsHash],
+    }),
+  ],
+);
+
 export const outputs = pgTable("outputs", {
   id: uuid("id").primaryKey().defaultRandom(),
   runId: uuid("run_id")
