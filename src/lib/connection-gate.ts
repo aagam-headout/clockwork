@@ -79,6 +79,15 @@ export function isAuthError(message?: string | null): boolean {
   return Boolean(message && AUTH_ERROR.test(message));
 }
 
+/** Composio reports failures in the body; the one place that convention is tested. */
+export function isFailure(output: unknown): boolean {
+  return (
+    output !== null &&
+    typeof output === "object" &&
+    (output as { successful?: boolean }).successful === false
+  );
+}
+
 /**
  * Maps a tool slug back to the toolkit it came from.
  *

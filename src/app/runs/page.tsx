@@ -143,11 +143,13 @@ export default async function RunsPage({
               <LiveRun active={inFlight} />
               {/* Names the filter while one is on — the same "12 runs" against
                   a filtered list read as the total. */}
-              <Badge tone={failed > 0 ? "danger" : "success"} dot>
+              <Badge tone={"neutral"} dot>
                 {rows.length} {active ? activeLabel.toLowerCase() : "runs"}
                 {!active && failed > 0 ? ` · ${failed} failed` : ""}
               </Badge>
-              {spend > 0 && <Badge tone="neutral">{formatUsd(spend)}</Badge>}
+              {spend > 0 && (
+                <Badge tone="neutral">Cost: {formatUsd(spend)}</Badge>
+              )}
             </div>
           )
         }

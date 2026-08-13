@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, users, workflows } from "@/db/schema";
 import { runWorkflow } from "@/lib/executor";
@@ -94,7 +94,14 @@ export async function runDueWorkflows(now: Date = new Date()) {
     db
       .select({ id: users.id, status: users.status })
       .from(users)
-      .where(sql`${users.id} = any(${userIds})`),
+      /*
+       * `inArray`, not `sql\`= any(${userIds})\``. The raw form binds the
+       * array as one parameter, which neon-http accepts and node-postgres
+       * rejects with `22P02: Array value must start with "{"` — so every tick
+       * against a plain Postgres (the Docker stack, any self-host) 500'd
+       * before a single workflow was dispatched.
+       */
+      .where(inArray(users.id, userIds)),
     activeToolkitsByUser(userIds),
   ]);
   const statusById = new Map(accounts.map((a) => [a.id, a.status]));
