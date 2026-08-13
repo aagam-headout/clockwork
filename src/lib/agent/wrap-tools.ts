@@ -1,15 +1,11 @@
 import { createHash } from "node:crypto";
-import { tool, type ToolSet } from "ai";
-import { z } from "zod";
-import {
-  canonicalHash,
-  readToolHash,
-  writeToolHash,
-} from "@/lib/data/tool-hashes";
+import type { ToolSet } from "ai";
+import { canonicalHash, readToolHash } from "@/lib/data/tool-hashes";
 import { isFailure } from "@/lib/connection-gate";
-import { runQuery, type QuerySpec } from "./query";
-import { describeShape, sampleOf } from "./shape";
 import { isDescriptor, type ResultStore } from "./result-store";
+import { HANDLE_THRESHOLD_CHARS, MAX_QUERIES_PER_RUN } from "./handle-limits";
+import type { HarnessState } from "./harness-state";
+import { buildSystemTools, SYSTEM_TOOL_NAMES } from "./system-tools";
 
 /*
  * Keeps large tool payloads out of the model's context.
@@ -23,78 +19,38 @@ import { isDescriptor, type ResultStore } from "./result-store";
  *
  * The tool itself always executes. Nothing here is a cache of *data* — only of
  * the knowledge that the data has not changed.
+ *
+ * This module owns two things: wrapping whatever *connector* tools a workflow
+ * was given (Composio, MCP, ... — the ones in `SYSTEM_TOOL_NAMES` are not
+ * these), and the run-loop step-budget math, which has to know both kinds of
+ * tool to bound them correctly. The `query`/`inspect` tools themselves live in
+ * `./system-tools` — see that module for why they're kept separate.
  */
 
-export const HANDLE_THRESHOLD_CHARS = 2_000;
-export const MAX_QUERIES_PER_RUN = 15;
-export const LOCAL_TOOL_NAMES = ["query", "inspect"] as const;
-
-/** How much of a long text value one `query` call returns. */
-export const MAX_STRING_SLICE_CHARS = 1_500;
+// Re-exported for callers that imported these from here before the split.
+export {
+  HANDLE_THRESHOLD_CHARS,
+  MAX_QUERIES_PER_RUN,
+  MAX_STRING_SLICE_CHARS,
+} from "./handle-limits";
+export {
+  createHarnessState,
+  flushToolHashes,
+  type HarnessState,
+} from "./harness-state";
+export { HANDLE_PROMPT } from "./system-tools";
+/** @deprecated use `SYSTEM_TOOL_NAMES` from `./system-tools` */
+export const LOCAL_TOOL_NAMES = SYSTEM_TOOL_NAMES;
 
 export function handlesEnabled(): boolean {
   return process.env.HANDLES_ENABLED !== "false";
-}
-
-export type PendingHash = {
-  toolSlug: string;
-  argsHash: string;
-  resultHash: string;
-};
-
-/**
- * What the wrapper learned during a run that only the executor can act on.
- *
- * Owned by the caller rather than returned, so the wrapper's public shape
- * stays "a ToolSet in, a ToolSet out" and the executor can read this after
- * the loop has finished — including on the paths where it never finished.
- */
-export type HarnessState = {
-  /**
-   * Hashes for calls made this run, held until the run's verdict is known.
-   *
-   * Writing one inline would be a lie waiting to happen: if the run then dies
-   * — auth rejected, timeout, step cap — the hash says "the workflow has seen
-   * these bytes" while no digest ever carried them. The next run fetches the
-   * same bytes, is told `unchanged_since`, reports nothing new, and the
-   * content is lost for good. Only a run that reached a delivered digest has
-   * earned the right to claim it saw the data.
-   */
-  pendingHashes: PendingHash[];
-  /**
-   * Reads the model asked for and did not get — a spent query budget or an
-   * evicted handle. Both are returned to the model as ordinary error values,
-   * so without a counter here the run looks identical to one that read
-   * everything it wanted, and gets recorded as a clean `ok`.
-   */
-  degradedReads: number;
-};
-
-export function createHarnessState(): HarnessState {
-  return { pendingHashes: [], degradedReads: 0 };
-}
-
-/**
- * Commits the run's hashes. Call only where the run is recorded as a clean
- * `ok` — see `HarnessState.pendingHashes` for why anywhere else is a bug.
- */
-export async function flushToolHashes(
-  workflowId: string,
-  state: HarnessState,
-): Promise<void> {
-  const pending = state.pendingHashes.splice(0);
-  await Promise.all(
-    pending.map((hash) =>
-      writeToolHash(workflowId, hash.toolSlug, hash.argsHash, hash.resultHash),
-    ),
-  );
 }
 
 /** Steps that spent the workflow's budget: the ones that called a real tool. */
 export function countExternalSteps(
   steps: Array<{ toolCalls?: Array<{ toolName: string }> }>,
 ): number {
-  const local = new Set<string>(LOCAL_TOOL_NAMES);
+  const local = new Set<string>(SYSTEM_TOOL_NAMES);
   return steps.filter((step) =>
     (step.toolCalls ?? []).some((call) => !local.has(call.toolName)),
   ).length;
@@ -168,7 +124,7 @@ export function wrapToolsWithHandles(
   // round trips, not successes.
   let queriesUsed = 0;
 
-  /** Both local tools share this gate, and both count as a degraded read. */
+  /** Every system tool shares this gate, and each counts as a degraded read. */
   function budgetSpent(): { error: string } | null {
     if (queriesUsed < MAX_QUERIES_PER_RUN) {
       queriesUsed++;
@@ -231,160 +187,16 @@ export function wrapToolsWithHandles(
     } as ToolSet[string];
   }
 
-  const whereSchema = z.object({
-    field: z.string(),
-    equals: z.union([z.string(), z.number(), z.boolean()]).optional(),
-    contains: z.string().optional(),
-    after: z.string().optional(),
-    before: z.string().optional(),
-  });
-
-  wrapped.query = tool({
-    description:
-      "Read part of a stored tool result by its handle. Does not spend your step budget and makes no external call, but it is still a round trip — ask for what you need in one call.",
-    inputSchema: z.object({
-      handle: z.string().describe('A handle from a tool result, e.g. "r1".'),
-      path: z
-        .string()
-        .optional()
-        .describe('Dot path into the payload, e.g. "items".'),
-      pick: z
-        .array(z.string())
-        .optional()
-        .describe("Fields to keep on each row."),
-      where: whereSchema.optional(),
-      sort: z
-        .object({
-          field: z.string(),
-          direction: z.enum(["asc", "desc"]).optional(),
-        })
-        .optional(),
-      take: z.number().int().positive().optional(),
-      count: z
-        .boolean()
-        .optional()
-        .describe("Return only how many rows match."),
-      offset: z
-        .number()
-        .int()
-        .nonnegative()
-        .optional()
-        .describe(
-          "Where to start when the value is a long text — use it with the `offset`/`total` in the reply to read the next part.",
-        ),
+  Object.assign(
+    wrapped,
+    buildSystemTools({
+      store,
+      budgetSpent,
+      markDegraded: () => {
+        state.degradedReads++;
+      },
     }),
-    execute: async ({ handle, offset = 0, ...spec }) => {
-      const spent = budgetSpent();
-      if (spent) return spent;
-
-      const found = store.get(handle);
-      if (!found.ok) {
-        if (found.evicted) state.degradedReads++;
-        return { error: found.error };
-      }
-
-      const outcome = runQuery(found.payload, spec as QuerySpec);
-      if (!outcome.ok) {
-        return { error: outcome.error, shape_at_path: outcome.shapeAtPath };
-      }
-
-      const value = outcome.value;
-
-      /*
-       * A long text is the one thing that must never come back as a handle.
-       * There is no narrowing operation for a string — `path` cannot go into
-       * it and `take` only applies to arrays — so re-handling one puts the
-       * agent in a loop that spends its whole budget and never yields a
-       * character of the article it was told to fetch. A bounded slice with
-       * its own offset is the only answer that terminates.
-       */
-      if (typeof value === "string") {
-        // Raw length, not a JSON.stringify of the whole string just to measure
-        // it — quoting/escaping only ever adds a few chars, well inside the
-        // slack this threshold already has.
-        const oversized = value.length >= HANDLE_THRESHOLD_CHARS;
-        if (oversized || offset > 0) {
-          const slice = value.slice(offset, offset + MAX_STRING_SLICE_CHARS);
-          return {
-            value: slice,
-            truncated: offset + slice.length < value.length,
-            offset,
-            total: value.length,
-          };
-        }
-        return { value };
-      }
-
-      // Other scalars are small by construction and are handed back whole —
-      // only a container can be narrowed further, so only a container is
-      // worth re-handling.
-      if (value === null || typeof value !== "object") return { value };
-
-      // A narrowing that is still huge gets the same treatment as a tool
-      // result, so the agent can narrow again rather than blowing the budget.
-      const json = JSON.stringify(value) ?? "";
-      if (json.length >= HANDLE_THRESHOLD_CHARS) {
-        return store.put(`query(${handle})`, value, json);
-      }
-      return { value };
-    },
-  });
-
-  wrapped.inspect = tool({
-    description:
-      "Show the structure and a short sample of a stored tool result, without returning its rows. Does not spend your step budget.",
-    inputSchema: z.object({
-      handle: z.string(),
-      path: z.string().optional(),
-    }),
-    execute: async ({ handle, path }) => {
-      const spent = budgetSpent();
-      if (spent) return spent;
-
-      const found = store.get(handle);
-      if (!found.ok) {
-        if (found.evicted) state.degradedReads++;
-        return { error: found.error };
-      }
-
-      const outcome = runQuery(found.payload, { path });
-      if (!outcome.ok) {
-        return { error: outcome.error, shape_at_path: outcome.shapeAtPath };
-      }
-      return {
-        shape: describeShape(outcome.value),
-        sample: sampleOf(outcome.value),
-      };
-    },
-  });
+  );
 
   return wrapped;
 }
-
-/** Appended to the system prompt, and static so it is the same text every run. */
-export const HANDLE_PROMPT = `Most tool results come back to you in full, as ordinary values — use them
-directly. Only a LARGE result is replaced by a descriptor: an object with a
-"handle" field like "r1", plus the payload's shape, its size, a short sample,
-and usually "preview_rows" — the first few entries of its main list, in full.
-If preview_rows already answers the goal, write the digest from it.
-
-A handle exists only if you were given one in a descriptor you can see in this
-conversation. Never guess or invent a handle: if the result you want to read
-came back in full, it is already in front of you, and calling query on a made-up
-handle wastes the run. When a descriptor is present, the full payload is held
-for this run and you read it with two tools:
-
-- query({handle, path, pick, where, sort, take, count, offset}) — returns only
-  the fields and rows you ask for. \`where\` supports equals, contains, after,
-  before. A long text comes back in slices: re-call with \`offset\` while the
-  reply says "truncated": true.
-- inspect({handle, path}) — returns shape and a sample only, for when you need
-  the field names before you can pick them.
-
-Neither makes an external call, and neither spends your step budget. Each one
-is still a round trip that re-sends this conversation, so plan them: one or two
-per handle, aimed at what the goal needs, rather than exploring.
-
-If a descriptor carries "unchanged_since", the tool ran this run and returned
-data byte-identical to the previous run's. That is live evidence of no change —
-report it as unchanged and do not query it again to confirm.`;

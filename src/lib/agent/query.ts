@@ -22,12 +22,20 @@ export type QuerySpec = {
   pick?: string[];
   where?: WhereSpec;
   sort?: { field: string; direction?: "asc" | "desc" };
+  /** Rows to skip before `take`, so a large array can be paged in order. */
+  offset?: number;
   take?: number;
   count?: boolean;
 };
 
 export type QueryOutcome =
-  | { ok: true; value: unknown }
+  | {
+      ok: true;
+      value: unknown;
+      /** Set when `offset`/`take` sliced an array, so the model knows how to page on. */
+      total?: number;
+      truncated?: boolean;
+    }
   | { ok: false; error: string; shapeAtPath?: string };
 
 type Row = Record<string, unknown>;
@@ -74,8 +82,22 @@ export function runQuery(root: unknown, spec: QuerySpec): QueryOutcome {
     };
   }
 
-  if (typeof spec.take === "number" && Array.isArray(value)) {
-    value = value.slice(0, Math.max(0, spec.take));
+  // `total`/`truncated` mirror what the string path already reports, so a
+  // large array can be paged the same way a long text can: re-call with the
+  // next `offset` while `truncated` is true.
+  let total: number | undefined;
+  let truncated: boolean | undefined;
+
+  if (Array.isArray(value) && (spec.offset || typeof spec.take === "number")) {
+    const offset = Math.max(0, spec.offset ?? 0);
+    const end =
+      typeof spec.take === "number"
+        ? offset + Math.max(0, spec.take)
+        : undefined;
+    total = value.length;
+    const sliced = value.slice(offset, end);
+    truncated = offset + sliced.length < value.length;
+    value = sliced;
   }
 
   if (spec.pick?.length) {
@@ -84,7 +106,7 @@ export function runQuery(root: unknown, spec: QuerySpec): QueryOutcome {
       : project(value as Row, spec.pick);
   }
 
-  return { ok: true, value };
+  return { ok: true, value, total, truncated };
 }
 
 function walk(root: unknown, path?: string): QueryOutcome {

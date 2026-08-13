@@ -76,7 +76,42 @@ describe("runQuery", () => {
       take: 1,
       pick: ["id"],
     });
-    expect(out).toEqual({ ok: true, value: [{ id: "2" }] });
+    expect(out).toEqual({
+      ok: true,
+      value: [{ id: "2" }],
+      total: 3,
+      truncated: true,
+    });
+  });
+
+  it("pages an array with offset, same as take alone", () => {
+    const out = runQuery(payload, {
+      path: "items",
+      offset: 1,
+      take: 1,
+      pick: ["id"],
+    });
+    expect(out).toEqual({
+      ok: true,
+      value: [{ id: "2" }],
+      total: 3,
+      truncated: true,
+    });
+  });
+
+  it("says truncated: false once offset reaches the end", () => {
+    const out = runQuery(payload, {
+      path: "items",
+      offset: 2,
+      take: 1,
+      pick: ["id"],
+    });
+    expect(out).toEqual({
+      ok: true,
+      value: [{ id: "3" }],
+      total: 3,
+      truncated: false,
+    });
   });
 
   it("counts instead of returning rows", () => {

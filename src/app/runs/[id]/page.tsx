@@ -20,6 +20,7 @@ import {
 } from "@/components/ui";
 import {
   Wrench,
+  Search,
   AlignLeft,
   XCircle,
   CheckCircle2,
@@ -39,8 +40,14 @@ import { Markdown } from "@/components/markdown";
 import { DigestCard } from "@/components/digest-card";
 import { LocalTime } from "@/components/local-time";
 import { formatUsd } from "@/lib/model-tiers";
+import { SYSTEM_TOOL_NAMES } from "@/lib/agent/system-tools";
 
 export const dynamic = "force-dynamic";
+
+// `query`/`inspect` are engine-owned reads of an already-fetched payload, not
+// a connector call — the trace marks them distinctly so "why so many steps"
+// doesn't read as "why so many fetches".
+const SYSTEM_TOOLS = new Set<string>(SYSTEM_TOOL_NAMES);
 
 // GH Actions renders step durations as "1m 4s", not raw milliseconds.
 function formatStepDuration(ms: number): string {
@@ -85,6 +92,7 @@ export default async function RunDetailPage({
     ...owned.run,
     workflowName: owned.workflow.name,
     workflowId: owned.workflow.id,
+    workflowModel: owned.workflow.model,
   };
 
   const steps = await db
@@ -97,6 +105,14 @@ export default async function RunDetailPage({
 
   const tone = statusTone(run.status);
   const toolCalls = steps.filter((s) => s.type === "tool").length;
+  // Only connector calls spend the workflow's step budget — see
+  // countExternalSteps in src/lib/agent/wrap-tools.ts. Split out here so a
+  // truncated run's step count doesn't read as "too many fetches" when most
+  // of it was free `query`/`inspect` reads.
+  const systemCalls = steps.filter(
+    (s) => s.type === "tool" && SYSTEM_TOOLS.has(s.toolSlug ?? ""),
+  ).length;
+  const connectorCalls = toolCalls - systemCalls;
   const inFlight = run.status === "running" || run.status === "queued";
   const deliveryLog = (output?.deliveryLog ?? []) as Array<{
     type: string;
@@ -171,13 +187,22 @@ export default async function RunDetailPage({
           icon={Hammer}
           label="Tool calls"
           value={toolCalls}
-          hint={`${steps.length} steps total`}
+          hint={
+            systemCalls > 0
+              ? `${connectorCalls} connector · ${systemCalls} system`
+              : `${steps.length} steps total`
+          }
         />
         <Stat
           icon={ArrowDownToLine}
           label="Tokens in"
           value={
             run.inputTokens != null ? run.inputTokens.toLocaleString() : "—"
+          }
+          hint={
+            run.inputTokens != null && run.outputTokens != null
+              ? `${(run.inputTokens + run.outputTokens).toLocaleString()} total`
+              : undefined
           }
         />
         <Stat
@@ -194,6 +219,9 @@ export default async function RunDetailPage({
           value={formatUsd(
             run.costUsd != null ? Number(run.costUsd) : undefined,
           )}
+          hint={
+            run.workflowModel ? run.workflowModel.split("/").pop() : undefined
+          }
         />
       </div>
 
@@ -327,9 +355,17 @@ export default async function RunDetailPage({
           <ListBox as="ol" id="trace">
             {steps.map((step, i) => {
               const isTool = step.type === "tool";
+              const isSystemTool =
+                isTool && SYSTEM_TOOLS.has(step.toolSlug ?? "");
               const failed = Boolean(step.error);
               const text =
                 (step.resultJson as { text?: string } | null)?.text ?? "";
+              // Only `query` returns this, and only when `offset`/`take`
+              // actually paged an array or a long string — see
+              // src/lib/agent/system-tools/query.ts.
+              const truncated =
+                (step.resultJson as { truncated?: boolean } | null)
+                  ?.truncated === true;
               return (
                 <li key={step.id}>
                   <details className="group" open={failed}>
@@ -348,13 +384,21 @@ export default async function RunDetailPage({
                       </span>
                       <span className="text-subtle shrink-0">
                         {isTool ? (
-                          <Wrench className="h-3 w-3" />
+                          isSystemTool ? (
+                            <Search className="h-3 w-3" />
+                          ) : (
+                            <Wrench className="h-3 w-3" />
+                          )
                         ) : (
                           <AlignLeft className="h-3 w-3" />
                         )}
                       </span>
                       {isTool ? (
-                        <span className="text-foreground truncate font-mono text-xs font-medium">
+                        <span
+                          className={`truncate font-mono text-xs font-medium ${
+                            isSystemTool ? "text-muted" : "text-foreground"
+                          }`}
+                        >
                           {step.toolSlug}
                         </span>
                       ) : (
@@ -363,6 +407,11 @@ export default async function RunDetailPage({
                         <span className="text-muted truncate text-xs">
                           {text.trim().split("\n")[0] || "reasoning"}
                         </span>
+                      )}
+                      {truncated && (
+                        <Badge tone="warn" mono className="shrink-0">
+                          more available
+                        </Badge>
                       )}
                       <span className="flex-1" />
                       {step.durationMs != null && (

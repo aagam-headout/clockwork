@@ -259,7 +259,25 @@ describe("the query tool", () => {
       pick: ["id"],
       take: 2,
     });
-    expect(out).toEqual({ value: [{ id: "0" }, { id: "1" }] });
+    expect(out).toEqual({
+      value: [{ id: "0" }, { id: "1" }],
+      total: 200,
+      truncated: true,
+    });
+  });
+
+  it("pages an array with offset instead of re-scanning from the start", async () => {
+    const { wrapped, handle } = await wrappedWithBigResult();
+    const out = (await call(wrapped, "query", {
+      handle,
+      path: "items",
+      pick: ["id"],
+      offset: 198,
+      take: 2,
+    })) as { value: unknown[]; total: number; truncated: boolean };
+    expect(out.value).toEqual([{ id: "198" }, { id: "199" }]);
+    expect(out.total).toBe(200);
+    expect(out.truncated).toBe(false);
   });
 
   it("returns a new handle when its own result is still large", async () => {
