@@ -78,28 +78,43 @@ export function WorkflowAgentChat({
   onPropose,
   models = [],
   availableToolkits = [],
+  initialSpec = null,
 }: {
   onPropose: (values: Proposal) => void;
   /** Gateway catalog for the header picker — the same list the form uses. */
   models?: ModelInfo[];
   /** Connected apps the assistant may be allowed to read from. */
   availableToolkits?: ToolkitOption[];
+  /**
+   * The workflow being edited, if any. Seeds `current` so the first message
+   * refines this spec instead of drafting from nothing — the form on the
+   * right already shows these values, and a bare "make it hourly" would
+   * otherwise read as a request to build a brand-new workflow around just
+   * that one field.
+   */
+  initialSpec?: Partial<WorkflowFormValues> | null;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [current, setCurrent] = useState<Proposal | null>(null);
+  const [current, setCurrent] = useState<Proposal | null>(initialSpec);
   const [builderModel, setBuilderModel] = useState(() =>
     defaultBuilderModel(models),
   );
   // Apps the assistant may read from while it drafts. Empty by default: a
   // lookup costs a round trip to someone's real inbox, so it's opted into.
-  const [readToolkits, setReadToolkits] = useState<Set<string>>(new Set());
+  // Editing an existing workflow preselects the apps it already uses.
+  const [readToolkits, setReadToolkits] = useState<Set<string>>(
+    () => new Set(initialSpec?.toolkits ?? []),
+  );
   // Whether the workflow it drafts is allowed to call write tools at runtime.
   // Off by default — same default as the form's own permission checkbox, which
-  // this writes into via the proposed spec's `readOnly`.
-  const [allowWrites, setAllowWrites] = useState(false);
+  // this writes into via the proposed spec's `readOnly`. Editing an existing
+  // workflow starts from its saved permission instead.
+  const [allowWrites, setAllowWrites] = useState(
+    () => initialSpec?.readOnly === false,
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const connectors = [WEB_SEARCH, ...availableToolkits];
@@ -176,7 +191,9 @@ export function WorkflowAgentChat({
 
   function reset() {
     setMessages([]);
-    setCurrent(null);
+    // Back to the saved workflow, not a blank slate — "Reset" clears the
+    // chat, not the thing being edited.
+    setCurrent(initialSpec);
     setError(null);
     setDraft("");
   }

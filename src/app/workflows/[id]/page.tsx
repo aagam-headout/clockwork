@@ -2,7 +2,11 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, workflows } from "@/db/schema";
 import { updateWorkflow, deleteWorkflow, runWorkflowNow } from "@/lib/actions";
-import { WorkflowForm } from "@/components/workflow-form";
+import { EditWorkflowClient } from "@/components/edit-workflow-client";
+import {
+  EditAgentProvider,
+  EditAgentButton,
+} from "@/components/edit-agent-context";
 import { SubmitButton, ConfirmSubmitButton } from "@/components/submit-button";
 import { LocalTime } from "@/components/local-time";
 import { Trash2, Play, ChevronRight, Globe, History, Zap } from "lucide-react";
@@ -94,154 +98,157 @@ export default async function EditWorkflowPage({
 
   return (
     <PageShell>
-      <PageHeader
-        backHref="/workflows"
-        backLabel="Workflows"
-        title={workflow.name}
-        subtitle={
-          <span className="inline-flex flex-wrap items-center gap-2">
-            {workflow.enabled ? (
-              <Badge tone="success" dot>
-                enabled
-              </Badge>
-            ) : (
-              <Badge tone="warn" dot>
-                paused
-              </Badge>
-            )}
-            {/* An event workflow has an empty cron column; showing it as an
-                empty code chip read as a rendering bug. */}
-            {workflow.triggerType === "event" ? (
-              <Badge tone="neutral" icon={Zap}>
-                {workflow.eventTriggers.length} event
-                {workflow.eventTriggers.length === 1 ? "" : "s"}
-              </Badge>
-            ) : (
-              <>
-                <Mono>{workflow.cron}</Mono>
-                <span className="text-subtle inline-flex items-center gap-1.5 text-xs">
-                  <Globe className="h-3.5 w-3.5" />
-                  {workflow.timezone}
-                </span>
-              </>
-            )}
-          </span>
-        }
-        actions={
-          <>
-            <form
-              action={async () => {
-                "use server";
-                await runWorkflowNow(id);
-              }}
-            >
-              <SubmitButton
-                pendingLabel="Running…"
-                icon={<Play className="h-3.5 w-3.5" />}
-                variant="outline"
-                size="sm"
+      <EditAgentProvider>
+        <PageHeader
+          backHref="/workflows"
+          backLabel="Workflows"
+          title={workflow.name}
+          subtitle={
+            <span className="inline-flex flex-wrap items-center gap-2">
+              {workflow.enabled ? (
+                <Badge tone="success" dot>
+                  enabled
+                </Badge>
+              ) : (
+                <Badge tone="warn" dot>
+                  paused
+                </Badge>
+              )}
+              {/* An event workflow has an empty cron column; showing it as an
+                  empty code chip read as a rendering bug. */}
+              {workflow.triggerType === "event" ? (
+                <Badge tone="neutral" icon={Zap}>
+                  {workflow.eventTriggers.length} event
+                  {workflow.eventTriggers.length === 1 ? "" : "s"}
+                </Badge>
+              ) : (
+                <>
+                  <Mono>{workflow.cron}</Mono>
+                  <span className="text-subtle inline-flex items-center gap-1.5 text-xs">
+                    <Globe className="h-3.5 w-3.5" />
+                    {workflow.timezone}
+                  </span>
+                </>
+              )}
+            </span>
+          }
+          actions={
+            <>
+              <form
+                action={async () => {
+                  "use server";
+                  await runWorkflowNow(id);
+                }}
               >
-                Run now
-              </SubmitButton>
-            </form>
-            <form action={boundDelete}>
-              <ConfirmSubmitButton
-                pendingLabel="Deleting…"
-                confirmLabel="Delete workflow?"
-                icon={<Trash2 className="h-3.5 w-3.5" />}
-              >
-                Delete workflow
-              </ConfirmSubmitButton>
-            </form>
-          </>
-        }
-      />
-
-      <div className="rise mt-6">
-        <WorkflowForm
-          action={boundUpdate}
-          submitLabel="Save changes"
-          availableToolkits={availableToolkits}
-          models={models}
-          defaultValues={{
-            name: workflow.name,
-            goal: workflow.goal,
-            triggerType: workflow.triggerType === "event" ? "event" : "cron",
-            cron: workflow.cron,
-            timezone: workflow.timezone,
-            eventTriggers: workflow.eventTriggers,
-            model: workflow.model,
-            maxSteps: workflow.maxSteps,
-            readOnly: workflow.readOnly,
-            toolkits: workflow.toolkits,
-            allowTools: workflow.allowTools,
-            denyTools: workflow.denyTools,
-            deliverSlack: deliver.some((d) => d.type === "slack_dm"),
-            deliverSlackChannel: Boolean(slackChannel),
-            slackChannel:
-              slackChannel?.type === "slack_channel"
-                ? slackChannel.channel
-                : "",
-            deliverEmail: Boolean(email),
-            emailTo: email?.type === "email" ? email.to : "",
-            deliverWebhook: Boolean(webhook),
-            webhookUrl: webhook?.type === "webhook" ? webhook.url : "",
-          }}
+                <SubmitButton
+                  pendingLabel="Running…"
+                  icon={<Play className="h-3.5 w-3.5" />}
+                  variant="outline"
+                  size="sm"
+                >
+                  Run now
+                </SubmitButton>
+              </form>
+              <EditAgentButton />
+              <form action={boundDelete}>
+                <ConfirmSubmitButton
+                  pendingLabel="Deleting…"
+                  confirmLabel="Delete workflow?"
+                  icon={<Trash2 className="h-3.5 w-3.5" />}
+                >
+                  Delete workflow
+                </ConfirmSubmitButton>
+              </form>
+            </>
+          }
         />
-      </div>
 
-      {recentRuns.length > 0 && (
-        <section className="mt-8">
-          <SectionLabel
-            icon={History}
-            count={recentRuns.length}
-            action={
-              <ButtonLink href="/runs" variant="ghost" size="sm">
-                All runs
-              </ButtonLink>
-            }
-          >
-            Recent runs
-          </SectionLabel>
-          <ListBox>
-            {recentRuns.map((run) => (
-              <Link
-                key={run.id}
-                href={`/runs/${run.id}`}
-                className="group hover:bg-surface-hover flex items-center gap-3 px-4 py-3 transition-colors"
-              >
-                <StatusDot
-                  tone={statusTone(run.status)}
-                  live={run.status === "running"}
-                />
-                <span className="text-muted min-w-0 flex-1 truncate font-mono text-xs tabular-nums">
-                  <LocalTime
-                    value={run.startedAt ?? run.createdAt}
-                    format="datetime"
-                  />
-                </span>
-                {/* Duration in its own column so the timestamps above it stay
-                    left-aligned and the numbers stay comparable. */}
-                <span className="text-subtle w-14 shrink-0 text-right font-mono text-[11px] tabular-nums">
-                  {run.durationMs != null
-                    ? `${(run.durationMs / 1000).toFixed(1)}s`
-                    : ""}
-                </span>
-                <Badge tone="neutral">{run.trigger}</Badge>
-                <span className="flex w-[86px] shrink-0 justify-end">
-                  <Badge
+        <div className="rise mt-6">
+          <EditWorkflowClient
+            action={boundUpdate}
+            submitLabel="Save changes"
+            availableToolkits={availableToolkits}
+            models={models}
+            initialValues={{
+              name: workflow.name,
+              goal: workflow.goal,
+              triggerType: workflow.triggerType === "event" ? "event" : "cron",
+              cron: workflow.cron,
+              timezone: workflow.timezone,
+              eventTriggers: workflow.eventTriggers,
+              model: workflow.model,
+              maxSteps: workflow.maxSteps,
+              readOnly: workflow.readOnly,
+              toolkits: workflow.toolkits,
+              allowTools: workflow.allowTools,
+              denyTools: workflow.denyTools,
+              deliverSlack: deliver.some((d) => d.type === "slack_dm"),
+              deliverSlackChannel: Boolean(slackChannel),
+              slackChannel:
+                slackChannel?.type === "slack_channel"
+                  ? slackChannel.channel
+                  : "",
+              deliverEmail: Boolean(email),
+              emailTo: email?.type === "email" ? email.to : "",
+              deliverWebhook: Boolean(webhook),
+              webhookUrl: webhook?.type === "webhook" ? webhook.url : "",
+            }}
+          />
+        </div>
+
+        {recentRuns.length > 0 && (
+          <section className="mt-8">
+            <SectionLabel
+              icon={History}
+              count={recentRuns.length}
+              action={
+                <ButtonLink href="/runs" variant="ghost" size="sm">
+                  All runs
+                </ButtonLink>
+              }
+            >
+              Recent runs
+            </SectionLabel>
+            <ListBox>
+              {recentRuns.map((run) => (
+                <Link
+                  key={run.id}
+                  href={`/runs/${run.id}`}
+                  className="group hover:bg-surface-hover flex items-center gap-3 px-4 py-3 transition-colors"
+                >
+                  <StatusDot
                     tone={statusTone(run.status)}
-                    dot={run.status === "running"}
-                  >
-                    {run.status}
-                  </Badge>
-                </span>
-                <ChevronRight className="text-subtle h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-              </Link>
-            ))}
-          </ListBox>
-        </section>
-      )}
+                    live={run.status === "running"}
+                  />
+                  <span className="text-muted min-w-0 flex-1 truncate font-mono text-xs tabular-nums">
+                    <LocalTime
+                      value={run.startedAt ?? run.createdAt}
+                      format="datetime"
+                    />
+                  </span>
+                  {/* Duration in its own column so the timestamps above it stay
+                      left-aligned and the numbers stay comparable. */}
+                  <span className="text-subtle w-14 shrink-0 text-right font-mono text-[11px] tabular-nums">
+                    {run.durationMs != null
+                      ? `${(run.durationMs / 1000).toFixed(1)}s`
+                      : ""}
+                  </span>
+                  <Badge tone="neutral">{run.trigger}</Badge>
+                  <span className="flex w-[86px] shrink-0 justify-end">
+                    <Badge
+                      tone={statusTone(run.status)}
+                      dot={run.status === "running"}
+                    >
+                      {run.status}
+                    </Badge>
+                  </span>
+                  <ChevronRight className="text-subtle h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                </Link>
+              ))}
+            </ListBox>
+          </section>
+        )}
+      </EditAgentProvider>
     </PageShell>
   );
 }

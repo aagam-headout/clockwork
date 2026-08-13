@@ -1,21 +1,27 @@
-// The app's own mark, so nothing here depends on a generic lucide glyph: a clock
-// whose dial is broken into three segments — the steps of a run — closing into an
-// arrowhead, so it reads as time plus flow. Kept in sync with app/icon.svg, which
-// is the same geometry with baked-in colors for the favicon.
+// The app's own mark, so nothing here depends on a generic lucide glyph: an
+// 8-tooth gear (automation) with a clock hand inside pointing off-axis (a
+// scheduled run) — cog driving a hand reads as "clockwork" directly. Kept in
+// sync with app/icon.svg, which is the same geometry with baked-in colors for
+// the favicon.
 // `LogoGlyph` inherits currentColor; `Logo` is the badge + glyph used in chrome.
 
-// Dial: r 7.6 around (12,12), three 100° arcs separated by 20° gaps, drawn
-// clockwise. Endpoints are precomputed so the arcs stay exact at any size.
-const SEGMENTS = [
-  "M13.32 4.52A7.6 7.6 0 0 1 19.14 14.6",
-  "M17.82 16.89A7.6 7.6 0 0 1 6.18 16.89",
-  "M4.86 14.6A7.6 7.6 0 0 1 10.68 4.52",
+// Teeth: 8 radial rectangles from r 6.6 to r 8.6 around (12,12), 12° wide,
+// spaced every 45°. Endpoints are precomputed so they stay exact at any size.
+const TEETH = [
+  "M11.31 5.44 11.10 3.45 12.90 3.45 12.69 5.44Z",
+  "M16.15 6.87 17.41 5.32 18.68 6.59 17.13 7.85Z",
+  "M18.56 11.31 20.55 11.10 20.55 12.90 18.56 12.69Z",
+  "M17.13 16.15 18.68 17.41 17.41 18.68 16.15 17.13Z",
+  "M12.69 18.56 12.90 20.55 11.10 20.55 11.31 18.56Z",
+  "M7.85 17.13 6.59 18.68 5.32 17.41 6.87 16.15Z",
+  "M5.44 12.69 3.45 12.90 3.45 11.10 5.44 11.31Z",
+  "M6.87 7.85 5.32 6.59 6.59 5.32 7.85 6.87Z",
 ];
-// Arrowhead on the last segment's end, along its tangent — gives the cycle a
-// direction and lands in the top gap.
-const ARROW = "M8.2 7.3 10.68 4.52 7.5 2.7";
-// Hands: 12 o'clock down to centre, then out to ~4 o'clock.
-const HANDS = "M12 8.2V12l3 1.7";
+// Body of the gear.
+const RIM = { cx: 12, cy: 12, r: 6.4 };
+// Hand: 12 o'clock up to centre, then out to ~4 o'clock — off-axis so it
+// reads as a hand mid-sweep rather than a static cross.
+const HANDS = "M12 12V8.6M12 12l3.6 2.5";
 
 export function LogoGlyph({ className }: { className?: string }) {
   return (
@@ -25,22 +31,22 @@ export function LogoGlyph({ className }: { className?: string }) {
       className={className}
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.7"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      {SEGMENTS.map((d) => (
-        <path key={d} d={d} />
+      {TEETH.map((d) => (
+        <path key={d} d={d} fill="currentColor" stroke="none" />
       ))}
-      <path d={ARROW} />
+      <circle cx={RIM.cx} cy={RIM.cy} r={RIM.r} />
       <path d={HANDS} />
     </svg>
   );
 }
 
 const BADGE_SIZES = {
-  sm: "h-6.5 w-6.5 rounded-control",
-  md: "h-10 w-10 rounded-container",
+  sm: "h-8 w-8 rounded-control",
+  md: "h-12 w-12 rounded-container",
 } as const;
 
 // Light-grey frosted glass; `.logo-badge` (globals.css) carries the tint, blur
@@ -49,8 +55,8 @@ const BADGE_BASE =
   "logo-badge flex items-center justify-center text-foreground";
 
 const GLYPH_SIZES = {
-  sm: "h-4 w-4",
-  md: "h-5.5 w-5.5",
+  sm: "h-6 w-6",
+  md: "h-8 w-8",
 } as const;
 
 export function Logo({

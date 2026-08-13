@@ -258,6 +258,16 @@
   background-color: var(--surface-2);
 }
 
+/*
+ * better-auth-ui's buttons (including the password-visibility toggle) don't
+ * carry `cursor-pointer` themselves — Tailwind v4 preflight dropped the
+ * browser default. Scoped here rather than fixed upstream since this
+ * subtree is a third-party package.
+ */
+.auth-surface :is(button, a):not(:disabled) {
+  cursor: pointer;
+}
+
 @theme inline {
   --color-bg: var(--bg);
   --color-bg-subtle: var(--bg-subtle);
