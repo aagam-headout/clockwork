@@ -4,6 +4,14 @@ Scheduled agents that read your apps and report back.
 
 Built with [Next.js](https://nextjs.org), the AI SDK, Composio, and Neon.
 
+## Deploy your own
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Faagam-headout%2Fclockwork&project-name=clockwork&repository-name=clockwork&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22neon%22%2C%22productSlug%22%3A%22neon%22%2C%22protocol%22%3A%22storage%22%7D%5D&env=ENCRYPTION_KEY%2CNEON_AUTH_COOKIE_SECRET%2CCRON_SECRET%2CCOMPOSIO_API_KEY&envDescription=Two+random+secrets+you+generate%2C+a+cron+secret%2C+and+your+Composio+API+key.+Instructions+in+the+link.&envLink=https%3A%2F%2Fgithub.com%2Faagam-headout%2Fclockwork%2Fblob%2Fmain%2FSELF-HOSTING.md%23environment-variables)
+
+Runs entirely on your own Vercel, Neon, and Composio accounts. The button
+provisions the database and prompts for four secrets; two short manual steps
+follow. Full walkthrough in [SELF-HOSTING.md](./SELF-HOSTING.md).
+
 ## How it works
 
 A **workflow** is a plain-English goal, a trigger, a set of Composio toolkits,
@@ -96,3 +104,11 @@ drizzle-kit issues.
 | `APP_URL` / `COMPOSIO_WEBHOOK_SECRET`            | event triggers                                  |
 | `RUN_RETENTION_DAYS`                             | how long run history is kept (default 30)       |
 | `LOCAL_AUTH_BYPASS`                              | development only — see above                    |
+
+`APP_URL` and `NEON_AUTH_BASE_URL` fall back to the deployment's own domain via
+`VERCEL_PROJECT_PRODUCTION_URL`, so on Vercel they're only needed for a custom
+domain. Copy `.env.example` to `.env.local` for a cloud-backed `pnpm dev`.
+
+## License
+
+MIT — see [LICENSE](./LICENSE).

@@ -5,10 +5,19 @@ import { pruneOldRuns, reapStuckRuns } from "@/lib/retention";
 import { reconcileStaleConnections } from "@/lib/reconcile";
 import { pruneRateLimits } from "@/lib/rate-limit";
 
-// GH Actions cron hits this every 5 minutes. Vercel Hobby cron scheduling is
-// coarser/limited, so the *scheduler* lives in GH Actions (free, unlimited
-// frequency on a private repo) and just calls this endpoint — Vercel stays
-// the execution + dashboard runtime. See PLAN.md §2.
+// Two schedulers can drive this endpoint, and both ship because neither covers
+// every self-host:
+//
+//   - Vercel Cron (GET) — one vendor, no repo secrets, but Hobby is capped at
+//     one run per day; per-minute cadence needs Pro. See vercel.json.
+//   - GH Actions (POST) every 5 minutes — free at any frequency, so it's what a
+//     Hobby-plan deploy uses. See .github/workflows/cron-tick.yml.
+//
+// Vercel Cron attaches `Authorization: Bearer $CRON_SECRET` itself, the same
+// header the workflow sends, so one auth check serves both. The tick is
+// idempotent — the one-active-run index makes a double fire a no-op — so
+// running both schedulers at once is safe. POST also covers driving the tick by
+// hand: the local compose ticker (`pnpm docker:tick`) and curl.
 export const maxDuration = 300;
 
 /** Constant-time compare, so a wrong secret leaks nothing through timing. */
@@ -36,6 +45,15 @@ async function settle<T>(
 }
 
 export async function POST(req: NextRequest) {
+  return tick(req);
+}
+
+/** Vercel Cron invokes with GET; the body and auth are otherwise identical. */
+export async function GET(req: NextRequest) {
+  return tick(req);
+}
+
+async function tick(req: NextRequest) {
   if (!secretMatches(req.headers.get("authorization"))) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
