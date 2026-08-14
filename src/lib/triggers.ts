@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { triggerInstances, workflows } from "@/db/schema";
 import { composio, composioUserId, composioErrorMessage } from "@/lib/composio";
 import { activeToolkitSlugs, getUserConnection } from "@/lib/data/connections";
+import { resolveBaseUrl } from "@/lib/base-url";
 
 /**
  * Event triggers: the other half of the schedule. Cron answers "every
@@ -90,11 +91,11 @@ async function toolkitForTriggerSlug(slug: string): Promise<string | null> {
  * updates the existing subscription rather than stacking new ones.
  */
 export async function ensureWebhookSubscription(): Promise<void> {
-  const base = process.env.APP_URL;
+  const base = resolveBaseUrl(process.env.APP_URL);
   if (!base) throw new Error("APP_URL is not set — cannot register a webhook");
 
   await composio.triggers.setWebhookSubscription({
-    webhookUrl: `${base.replace(/\/$/, "")}/api/triggers/composio`,
+    webhookUrl: `${base}/api/triggers/composio`,
   });
 }
 
