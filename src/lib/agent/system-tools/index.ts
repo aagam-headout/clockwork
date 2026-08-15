@@ -1,6 +1,7 @@
 import type { ToolSet } from "ai";
 import { createQueryTool } from "./query";
 import { createInspectTool } from "./inspect";
+import { createReportTool } from "./report";
 import type { SystemToolContext } from "./context";
 
 export type { SystemToolContext } from "./context";
@@ -12,19 +13,36 @@ export type { SystemToolContext } from "./context";
  * - Connector tools come from whatever integration a workflow uses
  *   (Composio, MCP, ...). They vary per workflow, and `wrap-tools.ts` wraps
  *   them generically without knowing their names in advance.
- * - System tools are engine-owned: the same `query`/`inspect` pair, present
- *   on every run regardless of which connectors it uses, for reading a
- *   payload a connector tool produced.
+ * - System tools are engine-owned and present on every run regardless of which
+ *   connectors it uses. `query` and `inspect` read a payload a connector tool
+ *   produced; `report` does something different — it ends the run, and is the
+ *   only way a run produces an outcome at all.
  *
  * A future system tool is one more file here plus one more entry below —
  * `wrap-tools.ts` never needs to change to gain one.
  */
-export const SYSTEM_TOOL_NAMES = ["query", "inspect"] as const;
+export const SYSTEM_TOOL_NAMES = ["query", "inspect", "report"] as const;
 
-export function buildSystemTools(ctx: SystemToolContext): ToolSet {
+/**
+ * @param handles whether the handle harness is on for this run.
+ *
+ * `query` and `inspect` only mean anything when results are being replaced by
+ * descriptors, so the `HANDLES_ENABLED=false` escape hatch drops them. `report`
+ * is not part of that bargain: it is how a run produces an outcome at all, so
+ * turning the harness off must not take it away — doing so would leave every
+ * run with no digest and no signals.
+ */
+export function buildSystemTools(
+  ctx: SystemToolContext,
+  { handles }: { handles: boolean },
+): ToolSet {
+  const report = { report: createReportTool(ctx) };
+  if (!handles) return report;
+
   return {
     query: createQueryTool(ctx),
     inspect: createInspectTool(ctx),
+    ...report,
   };
 }
 
@@ -55,3 +73,17 @@ per handle, aimed at what the goal needs, rather than exploring.
 If a descriptor carries "unchanged_since", the tool ran this run and returned
 data byte-identical to the previous run's. That is live evidence of no change —
 report it as unchanged and do not query it again to confirm.`;
+
+/** Appended to the system prompt. Static, so it stays cacheable. */
+export const REPORT_PROMPT = `You finish this run by calling report(...) exactly once, as your final
+action. Nothing you write outside that call is delivered to anyone.
+
+- report({digest}) — the markdown digest a human will skim on a phone.
+- report({no_updates: true}) — nothing changed since the previous digest.
+  Send no digest. Silence is better than a digest that says "no updates".
+- report({digest, signals}) — when signals are listed in your instructions,
+  fill every one you measured. They are compared against thresholds after the
+  run, so a signal you leave out is a threshold that cannot be checked.
+- report({digest, severity}) — "info", "warn" or "critical", your own read.
+
+If report returns an error, read it, fix the argument, and call it again.`;

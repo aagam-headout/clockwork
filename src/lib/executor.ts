@@ -35,6 +35,10 @@ import {
   type HarnessState,
 } from "@/lib/agent/wrap-tools";
 import { systemCacheOptions } from "@/lib/agent/prompt-cache";
+import { REPORT_PROMPT } from "@/lib/agent/system-tools";
+import { parseSignalSchema, type Envelope } from "@/lib/outcome/envelope";
+import type { SignalDecl } from "@/lib/outcome/condition";
+import { decideChildren, decideDelivery } from "@/lib/outcome/route";
 
 type Workflow = typeof workflows.$inferSelect;
 
@@ -353,10 +357,28 @@ export async function executeRun(runId: string): Promise<RunResult> {
     );
     const store = createResultStore();
     const harness = createHarnessState();
+
+    const declaredSignals = parseSignalSchema(workflow.signalSchema);
+    /*
+     * The run's outcome, deposited by the `report` tool.
+     *
+     * A slot the executor owns rather than a return value, because the agent
+     * loop swallows tool results — the envelope has to outlive the loop for
+     * the run to have an outcome at all, including on the paths where the loop
+     * ended badly.
+     */
+    let envelope: Envelope | null = null;
+
     const runTools = wrapToolsWithHandles(tools, {
       workflowId: workflow.id,
       store,
       state: harness,
+      signals: declaredSignals,
+      setEnvelope: (next) => {
+        // Last call wins. The tool says "exactly once", but a model correcting
+        // itself after a validation error must not be punished for the retry.
+        envelope = next;
+      },
     });
 
     const deliverInstructions = deliver

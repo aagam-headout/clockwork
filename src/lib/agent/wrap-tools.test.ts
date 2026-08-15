@@ -65,6 +65,8 @@ function harnessFor(output: unknown) {
     workflowId: "w1",
     store,
     state,
+    signals: [],
+    setEnvelope: () => {},
   });
   return { wrapped, store, state };
 }
@@ -137,20 +139,27 @@ describe("wrapToolsWithHandles", () => {
     expect(out.unchanged_since).toBeUndefined();
   });
 
-  it("is an identity function when disabled", async () => {
+  it("passes connector results straight through when disabled", async () => {
     process.env.HANDLES_ENABLED = "false";
     const { wrapped } = harnessFor(big);
 
-    expect(Object.keys(wrapped)).toEqual(["GMAIL_FETCH_EMAILS"]);
+    // Not an identity function any more: `report` is how a run produces an
+    // outcome, so it survives the escape hatch. What the hatch is actually
+    // about — replacing results with descriptors — is still off.
+    expect(Object.keys(wrapped).sort()).toEqual([
+      "GMAIL_FETCH_EMAILS",
+      "report",
+    ]);
     await expect(call(wrapped, "GMAIL_FETCH_EMAILS", {})).resolves.toEqual(big);
   });
 
-  it("adds query and inspect tools", () => {
+  it("adds the reading tools and report when enabled", () => {
     const { wrapped } = harnessFor({});
     expect(Object.keys(wrapped).sort()).toEqual([
       "GMAIL_FETCH_EMAILS",
       "inspect",
       "query",
+      "report",
     ]);
   });
 });
@@ -222,6 +231,8 @@ describe("degraded reads", () => {
       workflowId: "w1",
       store,
       state,
+      signals: [],
+      setEnvelope: () => {},
     });
     store.put("A", { a: 1 }, "x".repeat(20));
     store.put("B", { b: 2 }, "x".repeat(20));

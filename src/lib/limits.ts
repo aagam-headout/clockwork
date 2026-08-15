@@ -32,6 +32,15 @@ export const LIMITS = {
   maxSteps: 30,
   maxEventTriggers: num("MAX_EVENT_TRIGGERS", 10),
   maxDeliverTargets: num("MAX_DELIVER_TARGETS", 5),
+  /*
+   * Chain shape. Unlike the rest of this file these bound model spend rather
+   * than a shared resource: a chain multiplies runs, and the per-hour and
+   * per-day run quotas are a blunt backstop rather than a design.
+   */
+  maxChainDepth: num("MAX_CHAIN_DEPTH", 3),
+  maxChildrenPerWorkflow: num("MAX_CHILDREN_PER_WORKFLOW", 3),
+  /** Signals one workflow may declare — each one is prompt surface. */
+  maxSignalsPerWorkflow: num("MAX_SIGNALS_PER_WORKFLOW", 10),
 } as const;
 
 /** How long the OAuth callback waits for Composio to finish the handshake. */
@@ -42,6 +51,20 @@ export const RECONCILE_TTL_MS = num("RECONCILE_TTL_MS", 6 * 60 * 60 * 1000);
 
 /** Users reconciled per cron tick — bounds the sweep against the tick budget. */
 export const RECONCILE_BATCH = num("RECONCILE_BATCH", 25);
+
+/*
+ * How long a chained run may sit `queued` before the reaper treats it as dead.
+ *
+ * Wider than the reaper's 15-minute window for every other queued row, because
+ * a chained run waiting for tick budget is a legitimate backlog rather than a
+ * function that died between the insert and the claim. Still bounded: an
+ * abandoned chained row must eventually clear, or the one-active-run index
+ * blocks that workflow forever.
+ */
+export const CHAIN_QUEUE_MAX_AGE_MS = num(
+  "CHAIN_QUEUE_MAX_AGE_MS",
+  60 * 60 * 1000,
+);
 
 /**
  * Fixed-window rate limits, by bucket.

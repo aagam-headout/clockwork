@@ -6,6 +6,8 @@ import { isDescriptor, type ResultStore } from "./result-store";
 import { HANDLE_THRESHOLD_CHARS, MAX_QUERIES_PER_RUN } from "./handle-limits";
 import type { HarnessState } from "./harness-state";
 import { buildSystemTools, SYSTEM_TOOL_NAMES } from "./system-tools";
+import type { SignalDecl } from "@/lib/outcome/condition";
+import type { Envelope } from "@/lib/outcome/envelope";
 
 /*
  * Keeps large tool payloads out of the model's context.
@@ -113,11 +115,39 @@ export function resolveForTrace(output: unknown, store: ResultStore): unknown {
 
 export function wrapToolsWithHandles(
   tools: ToolSet,
-  options: { workflowId: string; store: ResultStore; state: HarnessState },
+  options: {
+    workflowId: string;
+    store: ResultStore;
+    state: HarnessState;
+    signals: SignalDecl[];
+    setEnvelope: (envelope: Envelope) => void;
+  },
 ): ToolSet {
-  if (!handlesEnabled()) return tools;
+  const { workflowId, store, state, signals, setEnvelope } = options;
 
-  const { workflowId, store, state } = options;
+  /*
+   * `report` survives the escape hatch. Turning the handle harness off is a
+   * statement about how tool results are passed to the model, not about how a
+   * run ends — without this branch, HANDLES_ENABLED=false would leave every
+   * run unable to produce a digest at all.
+   */
+  if (!handlesEnabled()) {
+    return {
+      ...tools,
+      ...buildSystemTools(
+        {
+          store,
+          budgetSpent: () => null,
+          markDegraded: () => {
+            state.degradedReads++;
+          },
+          signals,
+          setEnvelope,
+        },
+        { handles: false },
+      ),
+    };
+  }
   // Counts every local call, including one that found no handle or failed its
   // query. Deliberate: a model looping on a bad handle burns the same model
   // round trips as a model reading real data, and the budget exists to bound
@@ -189,13 +219,18 @@ export function wrapToolsWithHandles(
 
   Object.assign(
     wrapped,
-    buildSystemTools({
-      store,
-      budgetSpent,
-      markDegraded: () => {
-        state.degradedReads++;
+    buildSystemTools(
+      {
+        store,
+        budgetSpent,
+        markDegraded: () => {
+          state.degradedReads++;
+        },
+        signals,
+        setEnvelope,
       },
-    }),
+      { handles: true },
+    ),
   );
 
   return wrapped;

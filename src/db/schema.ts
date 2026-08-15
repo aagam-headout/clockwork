@@ -4,6 +4,7 @@ import {
   uniqueIndex,
   index,
   primaryKey,
+  foreignKey,
   uuid,
   text,
   boolean,
@@ -121,11 +122,30 @@ export const workflows = pgTable(
     name: text("name").notNull(),
     goal: text("goal").notNull(), // the natural-language prompt
     // "cron" runs on `cron`/`timezone`; "event" runs when one of
-    // `eventTriggers` fires as a Composio webhook.
+    // `eventTriggers` fires as a Composio webhook; "workflow" runs when
+    // `parentWorkflowId` finishes and `parentCondition` holds.
     triggerType: text("trigger_type").notNull().default("cron"),
     cron: text("cron").notNull(), // "0 8 * * 1-5" — "" for event workflows
     timezone: text("timezone").notNull().default("Asia/Kolkata"),
     eventTriggers: text("event_triggers").array().notNull().default([]),
+    /*
+     * Chaining. The link lives on the child, matching every other trigger in
+     * this table: the trigger always belongs to the workflow that fires. The
+     * alternative — a list of children on the parent — would make a child's
+     * own `triggerType` a lie, and leave dangling ids with no key to catch
+     * them when a child is deleted.
+     *
+     * SET NULL rather than cascade, because deleting a parent must not delete
+     * a child's run history. The orphan is paused with `pausedReason`
+     * 'parent_deleted' instead, which reuses the existing re-enable path.
+     */
+    parentWorkflowId: uuid("parent_workflow_id"),
+    /** Expression over the PARENT's signals; null fires the child always. */
+    parentCondition: text("parent_condition"),
+    /** Expression over THIS workflow's own signals; null always delivers. */
+    alertCondition: text("alert_condition"),
+    /** [{key, type, description}] — what the `report` tool may fill. */
+    signalSchema: jsonb("signal_schema").notNull().default([]),
     toolkits: text("toolkits").array().notNull().default([]),
     allowTools: text("allow_tools").array().notNull().default([]),
     denyTools: text("deny_tools").array().notNull().default([]),
@@ -178,6 +198,17 @@ export const workflows = pgTable(
       table.triggerType,
       table.enabled,
     ),
+    /*
+     * Declared here rather than with `references()` on the column: drizzle
+     * cannot reference a table from inside its own definition.
+     */
+    foreignKey({
+      columns: [table.parentWorkflowId],
+      foreignColumns: [table.id],
+      name: "workflows_parent_fk",
+    }).onDelete("set null"),
+    // Every finished run asks "who are this workflow's children?".
+    index("workflows_parent_idx").on(table.parentWorkflowId),
   ],
 );
 
@@ -188,7 +219,7 @@ export const runs = pgTable(
     workflowId: uuid("workflow_id")
       .notNull()
       .references(() => workflows.id, { onDelete: "cascade" }),
-    trigger: text("trigger").notNull(), // "cron" | "manual" | "event"
+    trigger: text("trigger").notNull(), // "cron" | "manual" | "event" | "workflow"
     // queued | running | ok | truncated | error
     status: text("status").notNull().default("queued"),
     /** Why the model stopped — "stop", "tool-calls", "length"… */
@@ -196,6 +227,8 @@ export const runs = pgTable(
     /** Composio trigger event id, for event-triggered runs (dedupe key). */
     triggerRef: text("trigger_ref"),
     triggerPayload: jsonb("trigger_payload"),
+    /** The run that chained into this one, for provenance on the run page. */
+    parentRunId: uuid("parent_run_id"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     durationMs: integer("duration_ms"),
@@ -233,6 +266,19 @@ export const runs = pgTable(
       .on(table.triggerRef)
       .where(sql`trigger_ref is not null`),
     index("runs_workflow_created_idx").on(table.workflowId, table.createdAt),
+    foreignKey({
+      columns: [table.parentRunId],
+      foreignColumns: [table.id],
+      name: "runs_parent_run_fk",
+    }).onDelete("set null"),
+    /*
+     * The tick's drain pass takes the oldest queued chained run on every
+     * iteration. A partial index keeps that a single-row lookup instead of a
+     * scan over every run ever recorded.
+     */
+    index("runs_queued_chained_idx")
+      .on(table.createdAt)
+      .where(sql`status = 'queued' and trigger = 'workflow'`),
   ],
 );
 
@@ -296,6 +342,25 @@ export const outputs = pgTable("outputs", {
   deliveryLog: jsonb("delivery_log").notNull().default([]),
   /** The agent found nothing new since the previous digest. */
   unchanged: boolean("unchanged").notNull().default(false),
+  /** The envelope's measured values, as reported by the `report` tool. */
+  signals: jsonb("signals"),
+  /** info | warn | critical — the agent's own read of urgency. */
+  severity: text("severity"),
+  /*
+   * The digest was withheld because `alertCondition` evaluated false.
+   *
+   * Deliberately not `unchanged`: that means the agent found nothing new,
+   * while this means it found something that did not clear the bar. Collapsing
+   * the two would make a working threshold indistinguishable from a quiet
+   * week, which is the failure this column exists to prevent.
+   *
+   * Also carries the two "delivered anyway" notes — condition_indeterminate
+   * and condition_error — which sit alongside a delivered digest rather than
+   * instead of one, so the run page can say the threshold did not actually
+   * gate that delivery.
+   */
+  suppressed: boolean("suppressed").notNull().default(false),
+  suppressedReason: text("suppressed_reason"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -438,8 +503,9 @@ export const rateLimits = pgTable(
  * Per-account settings, one row per user.
  *
  * `email` was the original key, from when the app gated on a single
- * OWNER_EMAIL. `userId` supersedes it and becomes the primary key in migration
- * 0006; until then both are carried so a mid-rollout instance can read either.
+ * OWNER_EMAIL. `userId` supersedes it and becomes the primary key in a later
+ * migration; until then both are carried so a mid-rollout instance can read
+ * either.
  */
 export const userSettings = pgTable("user_settings", {
   email: text("email").primaryKey(),
