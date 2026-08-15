@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { runs, workflows } from "@/db/schema";
+import { runs, workflows, outputs } from "@/db/schema";
 import { requireUser } from "@/lib/auth/user";
 import {
   Alert,
@@ -108,12 +108,18 @@ export default async function RunsPage({
       outputTokens: runs.outputTokens,
       costUsd: runs.costUsd,
       workflowName: workflows.name,
+      deliveryStatus: outputs.deliveryStatus,
     })
     .from(runs)
     // innerJoin, not leftJoin: a run's owner is its workflow's owner, so the
     // join is how the scope is expressed at all. (A leftJoin with a WHERE on
     // the joined table degenerates to an inner join anyway — better to say so.)
     .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+    /*
+     * leftJoin: a run that failed before producing anything has no output row,
+     * and an innerJoin here would drop exactly the runs most worth seeing.
+     */
+    .leftJoin(outputs, eq(outputs.runId, runs.id))
     .where(
       active
         ? and(eq(workflows.userId, user.id), eq(runs.status, active))
@@ -282,6 +288,21 @@ export default async function RunsPage({
                       <span className="text-subtle hidden w-20 shrink-0 text-right text-[11px] sm:block">
                         {relative(at)}
                       </span>
+                      {/* A run can be green and have reached nobody — that is
+                          the failure this badge exists to make visible, and the
+                          list is where someone would notice it. */}
+                      {(run.deliveryStatus === "failed" ||
+                        run.deliveryStatus === "partial") && (
+                        <Badge
+                          tone={
+                            run.deliveryStatus === "failed" ? "danger" : "warn"
+                          }
+                        >
+                          {run.deliveryStatus === "failed"
+                            ? "sent nowhere"
+                            : "partly sent"}
+                        </Badge>
+                      )}
                       <span className="flex w-[86px] shrink-0 justify-end">
                         <Badge tone={tone} dot={run.status === "running"}>
                           {run.status}

@@ -40,6 +40,44 @@ export function chainDepth(id: string, nodes: ChainNode[]): number {
 }
 
 /**
+ * How many levels hang below `id`, counting `id` itself as 1.
+ *
+ * Needed because depth is a property of the whole chain, not of one end of it:
+ * re-parenting a workflow drags everything already behind it along.
+ */
+export function subtreeHeight(id: string, nodes: ChainNode[]): number {
+  const childrenOf = new Map<string, string[]>();
+  for (const node of nodes) {
+    if (!node.parentWorkflowId) continue;
+    const siblings = childrenOf.get(node.parentWorkflowId) ?? [];
+    siblings.push(node.id);
+    childrenOf.set(node.parentWorkflowId, siblings);
+  }
+
+  // Iterative with a seen-set: a cycle in hand-edited rows must not recurse
+  // forever, and the walk is bounded by the number of workflows either way.
+  let height = 1;
+  let frontier = [id];
+  const seen = new Set<string>([id]);
+
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const current of frontier) {
+      for (const child of childrenOf.get(current) ?? []) {
+        if (seen.has(child)) continue;
+        seen.add(child);
+        next.push(child);
+      }
+    }
+    if (next.length === 0) break;
+    height++;
+    frontier = next;
+  }
+
+  return height;
+}
+
+/**
  * Checks that pointing `candidateId` at `parentId` keeps the chain legal.
  *
  * `candidateId` is null when creating a workflow, which is why depth and
@@ -79,11 +117,23 @@ export function validateChain(
     }
   }
 
-  const depth = chainDepth(parentId, nodes) + 1;
+  /*
+   * Depth is measured across the whole resulting chain, not just up from the
+   * new parent. A workflow being re-parented brings its own descendants with
+   * it, so checking only its own new depth would let `d` adopt the root of an
+   * a -> b -> c chain and quietly produce a four-deep one.
+   */
+  const above = chainDepth(parentId, nodes);
+  const below = candidateId ? subtreeHeight(candidateId, nodes) : 1;
+  const depth = above + below;
+
   if (depth > LIMITS.maxChainDepth) {
     return {
       ok: false,
-      error: `chains may be at most ${LIMITS.maxChainDepth} deep; this would be ${depth}`,
+      error:
+        below > 1
+          ? `chains may be at most ${LIMITS.maxChainDepth} deep; this workflow already has ${below - 1} level${below === 2 ? "" : "s"} behind it, which would make ${depth}`
+          : `chains may be at most ${LIMITS.maxChainDepth} deep; this would be ${depth}`,
     };
   }
 

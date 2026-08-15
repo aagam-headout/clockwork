@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateChain, chainDepth } from "./chain";
+import { validateChain, chainDepth, subtreeHeight } from "./chain";
 import type { ChainNode } from "./chain";
 
 // a -> b -> c   (a is the root; c is deepest)
@@ -94,5 +94,42 @@ describe("validateChain", () => {
     ];
     // k3 re-saving with the same parent must not be rejected
     expect(validateChain("k3", "p", wide)).toEqual({ ok: true });
+  });
+});
+
+describe("depth across a whole chain, not just one end", () => {
+  // a -> b -> c is already at the 3-deep maximum; d is a lone root.
+  const chain: ChainNode[] = [
+    { id: "a", parentWorkflowId: null },
+    { id: "b", parentWorkflowId: "a" },
+    { id: "c", parentWorkflowId: "b" },
+    { id: "d", parentWorkflowId: null },
+  ];
+
+  it("measures the height below a workflow", () => {
+    expect(subtreeHeight("a", chain)).toBe(3);
+    expect(subtreeHeight("b", chain)).toBe(2);
+    expect(subtreeHeight("c", chain)).toBe(1);
+    expect(subtreeHeight("d", chain)).toBe(1);
+  });
+
+  it("rejects re-parenting a chain root that drags its subtree too deep", () => {
+    // d -> a -> b -> c would be four levels.
+    const out = validateChain("a", "d", chain);
+    expect(out.ok).toBe(false);
+    expect(out.ok === false && out.error).toMatch(/behind it/);
+  });
+
+  it("still allows re-parenting a leaf", () => {
+    // d -> c is only two levels; c has nothing behind it.
+    expect(validateChain("c", "d", chain)).toEqual({ ok: true });
+  });
+
+  it("terminates on a cycle in stored rows rather than recursing forever", () => {
+    const cyclic: ChainNode[] = [
+      { id: "x", parentWorkflowId: "y" },
+      { id: "y", parentWorkflowId: "x" },
+    ];
+    expect(subtreeHeight("x", cyclic)).toBeLessThan(10);
   });
 });

@@ -1445,3 +1445,107 @@ describe("delivery status on the output row", () => {
     expect(row.deliveryAttempts).toBe(1);
   });
 });
+
+describe("chained runs go through the quota path", () => {
+  it("enqueues a child the same way every other trigger does", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    queueChildren([{ id: "child-1", parentCondition: null }]);
+    stubModel({}, async (tools) => {
+      await tools.report.execute({ digest: "## P", signals: { n: 9 } }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    /*
+     * `enqueueRun` stamps `lastAttemptAt` on the workflow it queues, and a bare
+     * insert does not — so this is the observable difference between going
+     * through the quota checks and walking past them. A chain multiplies runs,
+     * which is exactly what the per-user ceilings exist to bound.
+     */
+    const stamped = calls.some(
+      (c) =>
+        c.op === "update" &&
+        c.table === getTableName(workflows) &&
+        (c.values as { lastAttemptAt?: Date })?.lastAttemptAt instanceof Date,
+    );
+    expect(stamped).toBe(true);
+  });
+});
+
+describe("delivery status on runs that never delivered", () => {
+  it("records an empty response as skipped, not delivered", async () => {
+    stubModel({ text: "" });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("error");
+    const row = outputRow() as unknown as { deliveryStatus: string };
+    expect(row.deliveryStatus).toBe("skipped");
+  });
+
+  it("records a no_report failure as skipped, not delivered", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    stubModel({ text: "## digest but no report call" });
+
+    await executeRun(RUN_ID);
+
+    const row = outputRow() as unknown as { deliveryStatus: string };
+    expect(row.deliveryStatus).toBe("skipped");
+  });
+});
+
+describe("what a chained child is told", () => {
+  it("presents the parent's digest as prose, not as an event payload", async () => {
+    queued.set(`update:${getTableName(runs)}`, [
+      [
+        {
+          id: RUN_ID,
+          workflowId: workflow.id,
+          trigger: "workflow",
+          triggerPayload: {
+            parentSlug: "morning-brief",
+            parentName: "Morning brief",
+            digest: "## Deploys\n- api v2.4 shipped",
+            signals: { failures: 2 },
+          },
+        },
+      ],
+    ]);
+    queue(`select:${getTableName(workflows)}`, [workflow]);
+    queue(`update:${getTableName(workflows)}`, [{ failures: 1 }]);
+    stubModel({});
+
+    await executeRun(RUN_ID);
+
+    const prompt = userMessageOf(generateText.mock.calls[0][0]);
+    // The digest is markdown a model wrote for a human. Sent through
+    // JSON.stringify it arrived escaped, cost tokens on the escapes, and could
+    // be cut mid-string by the length cap into something that does not parse.
+    expect(prompt).toContain("## Deploys\n- api v2.4 shipped");
+    expect(prompt).toContain("Morning brief");
+    expect(prompt).toContain("failures: 2");
+    expect(prompt).not.toContain("started by an event");
+    expect(prompt).not.toContain("\\n- api v2.4");
+  });
+
+  it("still labels a real event payload as an event", async () => {
+    queued.set(`update:${getTableName(runs)}`, [
+      [
+        {
+          id: RUN_ID,
+          workflowId: workflow.id,
+          trigger: "event",
+          triggerPayload: { message: "hello", channel: "#general" },
+        },
+      ],
+    ]);
+    queue(`select:${getTableName(workflows)}`, [workflow]);
+    queue(`update:${getTableName(workflows)}`, [{ failures: 1 }]);
+    stubModel({});
+
+    await executeRun(RUN_ID);
+
+    const prompt = userMessageOf(generateText.mock.calls[0][0]);
+    expect(prompt).toContain("started by an event");
+  });
+});

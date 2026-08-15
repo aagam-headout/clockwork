@@ -18,10 +18,12 @@ import {
   Zap,
   Gauge,
   Wallet,
+  GitBranch,
 } from "lucide-react";
 import type { DeliverTarget } from "@/lib/read-only";
 import { currentUser, requireUser } from "@/lib/auth/user";
 import {
+  chainNeighbours,
   chainParentOptions,
   ownedWorkflow,
   ownedWorkflowOr404,
@@ -116,13 +118,14 @@ export default async function EditWorkflowPage({
     cap.state !== "uncapped" &&
     (await unpricedRunsThisMonth(id, workflow.timezone)) > 0;
 
-  const [availableToolkits, models, parentOptions, signalPoints] =
+  const [availableToolkits, models, parentOptions, chain, signalPoints] =
     await Promise.all([
       getConnectedToolkitOptions(user.id),
       getModelCatalogForUser(user.id),
       // Excludes this workflow: it cannot be its own parent, and offering it
       // would only produce a validation error on save.
       chainParentOptions(user.id, id),
+      chainNeighbours(user.id, id, workflow.parentWorkflowId),
       // Only worth the query when there is something to plot.
       declaredSignals.length > 0
         ? signalTimeline(user.id, id, SIGNAL_WINDOW_DAYS)
@@ -246,6 +249,53 @@ export default async function EditWorkflowPage({
             parentOptions={parentOptions}
           />
         </div>
+
+        {(chain.parent || chain.children.length > 0) && (
+          <section className="rise mt-8">
+            <SectionLabel icon={GitBranch}>Chain</SectionLabel>
+            <Card className="divide-border divide-y">
+              {chain.parent && (
+                <div className="flex items-center gap-2 px-5 py-3 text-sm">
+                  <span className="text-muted shrink-0">Runs after</span>
+                  <Link
+                    href={`/workflows/${chain.parent.id}`}
+                    className="text-foreground truncate hover:underline"
+                  >
+                    {chain.parent.name}
+                  </Link>
+                </div>
+              )}
+              {chain.children.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 px-5 py-3 text-sm">
+                  <span className="text-muted shrink-0">Then runs</span>
+                  {chain.children.map((child) => (
+                    <span
+                      key={child.id}
+                      className="inline-flex items-center gap-1.5"
+                    >
+                      <Link
+                        href={`/workflows/${child.id}`}
+                        className="text-foreground truncate hover:underline"
+                      >
+                        {child.name}
+                      </Link>
+                      {!child.enabled && <Badge tone="warn">paused</Badge>}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {chain.children.length > 0 && (
+                // Deleting a parent orphans its children and pauses them, which
+                // is invisible from here without saying so.
+                <p className="text-subtle px-5 py-2.5 text-xs">
+                  Deleting this workflow pauses the {chain.children.length}{" "}
+                  {chain.children.length === 1 ? "workflow" : "workflows"} it
+                  triggers.
+                </p>
+              )}
+            </Card>
+          </section>
+        )}
 
         {cap.state !== "uncapped" && (
           <section className="rise mt-8">

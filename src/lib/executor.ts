@@ -1,5 +1,5 @@
 import { generateText, type ToolSet } from "ai";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, runSteps, outputs, workflows } from "@/db/schema";
 import { getToolsFor } from "@/lib/composio";
@@ -207,8 +207,12 @@ async function runQuotaExceeded(
  */
 export async function enqueueRun(
   workflowId: string,
-  trigger: "cron" | "manual" | "event",
-  options: { triggerRef?: string; triggerPayload?: unknown } = {},
+  trigger: "cron" | "manual" | "event" | "workflow",
+  options: {
+    triggerRef?: string;
+    triggerPayload?: unknown;
+    parentRunId?: string;
+  } = {},
 ): Promise<EnqueueResult> {
   const overQuota = await runQuotaExceeded(workflowId);
   if (overQuota) {
@@ -224,6 +228,7 @@ export async function enqueueRun(
         status: "queued",
         triggerRef: options.triggerRef ?? null,
         triggerPayload: (options.triggerPayload as object) ?? null,
+        parentRunId: options.parentRunId ?? null,
       })
       .returning({ id: runs.id });
 
@@ -574,6 +579,9 @@ export async function executeRun(runId: string): Promise<RunResult> {
           unchanged: false,
           deliveredTo: [],
           deliveryLog: [],
+          // Nothing was attempted. Left to its default this row would claim
+          // "delivered", which is the exact lie deliveryStatus exists to end.
+          deliveryStatus: "skipped",
         });
         const message =
           "the run never called report, so its signals and alert condition could not be evaluated";
@@ -621,6 +629,7 @@ export async function executeRun(runId: string): Promise<RunResult> {
         unchanged: true,
         deliveredTo: [],
         deliveryLog: [],
+        deliveryStatus: "skipped",
       });
 
       const message = `Authorisation failed for ${blocked.join(", ")} during the run — reconnect it.`;
@@ -658,6 +667,7 @@ export async function executeRun(runId: string): Promise<RunResult> {
         unchanged: false,
         deliveredTo: [],
         deliveryLog: [],
+        deliveryStatus: "skipped",
       });
 
       const message = degraded
@@ -923,10 +933,16 @@ export async function enqueueChildRuns(
 
     for (const child of fire) {
       try {
-        await db.insert(runs).values({
-          workflowId: child.id,
-          trigger: "workflow",
-          status: "queued",
+        /*
+         * Through `enqueueRun`, not a bare insert.
+         *
+         * A chain multiplies runs, so it is exactly what the per-user hourly
+         * and daily ceilings exist to bound — inserting directly would let a
+         * chain walk straight past the quota that a cron storm cannot. It also
+         * gets the constraint handling (already running, duplicate event) that
+         * every other caller relies on.
+         */
+        await enqueueRun(child.id, "workflow", {
           parentRunId,
           triggerPayload: {
             parentSlug: workflow.slug,
@@ -936,12 +952,11 @@ export async function enqueueChildRuns(
             severity: envelope.severity,
           },
         });
-      } catch {
-        /*
-         * The one-active-run index rejected it: that child is already running
-         * or queued. Correct behaviour — a chain must not stack two runs of
-         * the same workflow — and not worth failing the parent over.
-         */
+      } catch (err) {
+        // `enqueueRun` returns quota and constraint refusals rather than
+        // throwing, so reaching here is a database fault on one child. The
+        // parent already delivered; the rest of the chain still gets a turn.
+        console.error(`[chain] could not enqueue ${child.id}`, err);
       }
     }
   } catch (err) {
@@ -1120,6 +1135,33 @@ function humanizeAge(ms: number): string {
   return `${days} day${days === 1 ? "" : "s"}`;
 }
 
+/**
+ * Recognises the payload a parent hands a chained child.
+ *
+ * A shape check rather than a flag, because the same column also carries
+ * Composio event payloads, and those are whatever the third party sent.
+ */
+function asChainPayload(payload: unknown): {
+  parentName: string;
+  digest: string;
+  signals: Record<string, unknown>;
+} | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  if (typeof record.digest !== "string" || !record.parentSlug) return null;
+  return {
+    parentName:
+      typeof record.parentName === "string"
+        ? record.parentName
+        : String(record.parentSlug),
+    digest: record.digest,
+    signals:
+      record.signals && typeof record.signals === "object"
+        ? (record.signals as Record<string, unknown>)
+        : {},
+  };
+}
+
 function buildPrompt(
   workflow: Workflow,
   previous: { body: string; at: Date } | null,
@@ -1188,7 +1230,34 @@ function buildPrompt(
     );
   }
 
-  if (triggerPayload) {
+  /*
+   * A chained run is handed its parent's digest, and that digest is markdown a
+   * model wrote for a human — not an event payload.
+   *
+   * Dumping it through `JSON.stringify` escaped every newline and quote in it,
+   * spent tokens on the escapes, and — because the slice below caps the whole
+   * blob — could cut the JSON mid-string and hand the model something that
+   * does not parse. Presented as prose it reads the way the parent wrote it.
+   */
+  const chained = asChainPayload(triggerPayload);
+  if (chained) {
+    parts.push(
+      `---\nThis run was triggered by "${chained.parentName}" finishing. What it reported:\n\n${chained.digest.slice(
+        0,
+        MEMORY_CHARS,
+      )}`,
+    );
+    if (Object.keys(chained.signals).length > 0) {
+      parts.push(
+        `Its measured values:\n${Object.entries(chained.signals)
+          .map(([key, value]) => `- ${key}: ${value}`)
+          .join("\n")}`,
+      );
+    }
+    parts.push(
+      "Build on that rather than repeating it — your job is the next step, not a restatement.",
+    );
+  } else if (triggerPayload) {
     parts.push(
       `---\nThis run was started by an event. Event payload:\n\n\`\`\`json\n${JSON.stringify(
         triggerPayload,
@@ -1319,6 +1388,8 @@ export async function retryPendingDeliveries(
   budgetLeft: () => boolean,
 ): Promise<number> {
   let retried = 0;
+  /** Rows already attempted this sweep — see the note on the query below. */
+  const seen = new Set<string>();
 
   while (budgetLeft()) {
     const [row] = await db
@@ -1336,12 +1407,24 @@ export async function retryPendingDeliveries(
         and(
           sql`${outputs.deliveryStatus} in ('pending', 'partial', 'failed')`,
           sql`${outputs.deliveryAttempts} < ${LIMITS.maxDeliveryAttempts}`,
+          /*
+           * One attempt per row per sweep.
+           *
+           * Without this the loop re-picks the row it just retried — still
+           * failed, still under the attempt cap — and burns all three attempts
+           * within milliseconds. That is no time at all for the endpoint that
+           * just failed to come back, which is the entire point of retrying.
+           * Excluding them here rather than breaking out keeps the other rows
+           * in the queue moving.
+           */
+          seen.size > 0 ? notInArray(outputs.id, [...seen]) : undefined,
         ),
       )
       .orderBy(outputs.createdAt)
       .limit(1);
 
     if (!row) break;
+    seen.add(row.outputId);
 
     const previous = (row.log ?? []) as DeliveryLogEntry[];
     const failedTypes = new Set(

@@ -654,7 +654,7 @@ export function WorkflowForm({
               <input
                 name="monthlyCostCapUsd"
                 type="number"
-                min="0"
+                min="0.01"
                 step="0.01"
                 inputMode="decimal"
                 defaultValue={initial.monthlyCostCapUsd}

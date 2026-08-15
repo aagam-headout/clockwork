@@ -113,3 +113,50 @@ export async function chainParentOptions(
     signals: parseSignalSchema(row.signalSchema),
   }));
 }
+
+/**
+ * The workflows either side of this one in a chain.
+ *
+ * Without this a chain is invisible from the page you are on: the child's form
+ * names its parent, but nothing tells the parent what it triggers, so deleting
+ * it looks free right up until three workflows pause.
+ */
+export async function chainNeighbours(
+  userId: string,
+  workflowId: string,
+  parentWorkflowId: string | null,
+): Promise<{
+  parent: { id: string; name: string } | null;
+  children: Array<{ id: string; name: string; enabled: boolean }>;
+}> {
+  const [parent, children] = await Promise.all([
+    parentWorkflowId
+      ? db
+          .select({ id: workflows.id, name: workflows.name })
+          .from(workflows)
+          .where(
+            and(
+              eq(workflows.id, parentWorkflowId),
+              eq(workflows.userId, userId),
+            ),
+          )
+          .limit(1)
+      : Promise.resolve([]),
+    db
+      .select({
+        id: workflows.id,
+        name: workflows.name,
+        enabled: workflows.enabled,
+      })
+      .from(workflows)
+      .where(
+        and(
+          eq(workflows.userId, userId),
+          eq(workflows.parentWorkflowId, workflowId),
+        ),
+      )
+      .orderBy(asc(workflows.name)),
+  ]);
+
+  return { parent: parent[0] ?? null, children };
+}
