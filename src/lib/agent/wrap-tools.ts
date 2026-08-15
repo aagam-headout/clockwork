@@ -121,9 +121,11 @@ export function wrapToolsWithHandles(
     state: HarnessState;
     signals: SignalDecl[];
     setEnvelope: (envelope: Envelope) => void;
+    ownerId: string;
+    historyBudgetSpent: () => { error: string } | null;
   },
 ): ToolSet {
-  const { workflowId, store, state, signals, setEnvelope } = options;
+  const { workflowId, store, state, signals, setEnvelope, ownerId } = options;
 
   /*
    * `report` survives the escape hatch. Turning the handle harness off is a
@@ -143,6 +145,9 @@ export function wrapToolsWithHandles(
           },
           signals,
           setEnvelope,
+          ownerId,
+          workflowId,
+          historySpent: options.historyBudgetSpent,
         },
         { handles: false },
       ),
@@ -228,6 +233,9 @@ export function wrapToolsWithHandles(
         },
         signals,
         setEnvelope,
+        ownerId,
+        workflowId,
+        historySpent: options.historyBudgetSpent,
       },
       { handles: true },
     ),

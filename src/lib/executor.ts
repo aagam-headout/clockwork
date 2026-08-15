@@ -35,7 +35,7 @@ import {
   type HarnessState,
 } from "@/lib/agent/wrap-tools";
 import { systemCacheOptions } from "@/lib/agent/prompt-cache";
-import { REPORT_PROMPT } from "@/lib/agent/system-tools";
+import { HISTORY_PROMPT, REPORT_PROMPT } from "@/lib/agent/system-tools";
 import { parseSignalSchema, type Envelope } from "@/lib/outcome/envelope";
 import type { SignalDecl } from "@/lib/outcome/condition";
 import { decideChildren, decideDelivery } from "@/lib/outcome/route";
@@ -54,6 +54,15 @@ const MAX_STEP_RESULT_CHARS = 8_000;
 
 /** How much of the previous digest is worth re-reading for context. */
 const MEMORY_CHARS = 4_000;
+
+/**
+ * History lookups one run may make.
+ *
+ * Small on purpose: history is context for the work, not the work. Each call
+ * is also a round trip that re-sends the conversation, so an unbounded budget
+ * is a token bill rather than a better digest.
+ */
+const HISTORY_BUDGET = 5;
 
 /** The agent's exact reply when nothing happened since the last digest. */
 export const NO_UPDATES = "NO_UPDATES";
@@ -117,7 +126,9 @@ Rules:
   report({no_updates: true}) and do not call any delivery tool. Silence is
   better than a digest that says "no updates" in ten words.${handlesEnabled() ? `\n\n${HANDLE_PROMPT}` : ""}
 
-${REPORT_PROMPT}`;
+${REPORT_PROMPT}
+
+${HISTORY_PROMPT}`;
 }
 
 type EnqueueResult =
@@ -380,6 +391,16 @@ export async function executeRun(runId: string): Promise<RunResult> {
         // Last call wins. The tool says "exactly once", but a model correcting
         // itself after a validation error must not be punished for the retry.
         envelope = next;
+      },
+      ownerId,
+      historyBudgetSpent: () => {
+        if (harness.historyCalls >= HISTORY_BUDGET) {
+          return {
+            error: `history budget spent (${HISTORY_BUDGET} calls) — work with what you have`,
+          };
+        }
+        harness.historyCalls++;
+        return null;
       },
     });
 

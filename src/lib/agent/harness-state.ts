@@ -32,10 +32,19 @@ export type HarnessState = {
    * everything it wanted, and gets recorded as a clean `ok`.
    */
   degradedReads: number;
+  /**
+   * `history` calls made this run.
+   *
+   * Its own counter rather than the shared read budget: a spent read budget
+   * marks a run degraded because the model could not see data it fetched, and
+   * a history lookup it chose not to make is not that. Exhausting this is the
+   * model spending an allowance, not a failure to report.
+   */
+  historyCalls: number;
 };
 
 export function createHarnessState(): HarnessState {
-  return { pendingHashes: [], degradedReads: 0 };
+  return { pendingHashes: [], degradedReads: 0, historyCalls: 0 };
 }
 
 /**

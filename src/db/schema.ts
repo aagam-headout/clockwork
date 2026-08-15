@@ -12,7 +12,19 @@ import {
   jsonb,
   timestamp,
   numeric,
+  customType,
 } from "drizzle-orm/pg-core";
+
+/*
+ * Postgres full-text vector.
+ *
+ * Modelled here rather than left as a hand-written migration because
+ * drizzle-kit diffs against this file: a column it cannot see is a column it
+ * proposes to drop on the next `db:generate`.
+ */
+const tsvector = customType<{ data: string; driverData: string }>({
+  dataType: () => "tsvector",
+});
 
 /*
  * One row per person who has signed in. `id` is the app's own identity and the
@@ -330,41 +342,61 @@ export const runToolHashes = pgTable(
   ],
 );
 
-export const outputs = pgTable("outputs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  runId: uuid("run_id")
-    .notNull()
-    .references(() => runs.id, { onDelete: "cascade" }),
-  format: text("format").notNull().default("markdown"),
-  body: text("body").notNull(),
-  deliveredTo: text("delivered_to").array().notNull().default([]),
-  /** Per-target outcome: [{type, ok, error?}] — a failed send is recorded. */
-  deliveryLog: jsonb("delivery_log").notNull().default([]),
-  /** The agent found nothing new since the previous digest. */
-  unchanged: boolean("unchanged").notNull().default(false),
-  /** The envelope's measured values, as reported by the `report` tool. */
-  signals: jsonb("signals"),
-  /** info | warn | critical — the agent's own read of urgency. */
-  severity: text("severity"),
-  /*
-   * The digest was withheld because `alertCondition` evaluated false.
-   *
-   * Deliberately not `unchanged`: that means the agent found nothing new,
-   * while this means it found something that did not clear the bar. Collapsing
-   * the two would make a working threshold indistinguishable from a quiet
-   * week, which is the failure this column exists to prevent.
-   *
-   * Also carries the two "delivered anyway" notes — condition_indeterminate
-   * and condition_error — which sit alongside a delivered digest rather than
-   * instead of one, so the run page can say the threshold did not actually
-   * gate that delivery.
-   */
-  suppressed: boolean("suppressed").notNull().default(false),
-  suppressedReason: text("suppressed_reason"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const outputs = pgTable(
+  "outputs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    format: text("format").notNull().default("markdown"),
+    body: text("body").notNull(),
+    deliveredTo: text("delivered_to").array().notNull().default([]),
+    /** Per-target outcome: [{type, ok, error?}] — a failed send is recorded. */
+    deliveryLog: jsonb("delivery_log").notNull().default([]),
+    /** The agent found nothing new since the previous digest. */
+    unchanged: boolean("unchanged").notNull().default(false),
+    /** The envelope's measured values, as reported by the `report` tool. */
+    signals: jsonb("signals"),
+    /** info | warn | critical — the agent's own read of urgency. */
+    severity: text("severity"),
+    /*
+     * The digest was withheld because `alertCondition` evaluated false.
+     *
+     * Deliberately not `unchanged`: that means the agent found nothing new,
+     * while this means it found something that did not clear the bar. Collapsing
+     * the two would make a working threshold indistinguishable from a quiet
+     * week, which is the failure this column exists to prevent.
+     *
+     * Also carries the two "delivered anyway" notes — condition_indeterminate
+     * and condition_error — which sit alongside a delivered digest rather than
+     * instead of one, so the run page can say the threshold did not actually
+     * gate that delivery.
+     */
+    suppressed: boolean("suppressed").notNull().default(false),
+    suppressedReason: text("suppressed_reason"),
+    /*
+     * Full-text search over the digest corpus.
+     *
+     * Generated rather than maintained: the write path in `deliverOutput` does
+     * not change at all, there is no trigger that can drift from `body`, and the
+     * index covers every digest already in the table with no backfill. Postgres
+     * 12 and later, no extension — which is what keeps the plain-Postgres
+     * self-host story working exactly as it does today.
+     */
+    searchVector: tsvector("search_vector").generatedAlwaysAs(
+      sql`to_tsvector('english', body)`,
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("outputs_search_idx").using("gin", table.searchVector),
+    // Every history query joins on this, and there was no index on it.
+    index("outputs_run_idx").on(table.runId),
+  ],
+);
 
 // v2 — table created now, unused until write-mode ships
 export const pendingActions = pgTable("pending_actions", {

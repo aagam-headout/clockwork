@@ -67,6 +67,8 @@ function harnessFor(output: unknown) {
     state,
     signals: [],
     setEnvelope: () => {},
+    ownerId: "u1",
+    historyBudgetSpent: () => null,
   });
   return { wrapped, store, state };
 }
@@ -143,20 +145,23 @@ describe("wrapToolsWithHandles", () => {
     process.env.HANDLES_ENABLED = "false";
     const { wrapped } = harnessFor(big);
 
-    // Not an identity function any more: `report` is how a run produces an
-    // outcome, so it survives the escape hatch. Everything the hatch is
-    // actually about — replacing results with descriptors — is still off.
+    // Not an identity function any more. `report` ends the run and `history`
+    // reads past digests; neither has anything to do with descriptors, so both
+    // survive the escape hatch. What the hatch is actually about — replacing
+    // results with descriptors — is still off.
     expect(Object.keys(wrapped).sort()).toEqual([
       "GMAIL_FETCH_EMAILS",
+      "history",
       "report",
     ]);
     await expect(call(wrapped, "GMAIL_FETCH_EMAILS", {})).resolves.toEqual(big);
   });
 
-  it("adds the reading tools and report when enabled", () => {
+  it("adds every system tool when enabled", () => {
     const { wrapped } = harnessFor({});
     expect(Object.keys(wrapped).sort()).toEqual([
       "GMAIL_FETCH_EMAILS",
+      "history",
       "inspect",
       "query",
       "report",
@@ -233,6 +238,8 @@ describe("degraded reads", () => {
       state,
       signals: [],
       setEnvelope: () => {},
+      ownerId: "u1",
+      historyBudgetSpent: () => null,
     });
     store.put("A", { a: 1 }, "x".repeat(20));
     store.put("B", { b: 2 }, "x".repeat(20));

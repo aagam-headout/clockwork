@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { runDueWorkflows } from "@/lib/dispatcher";
-import { pruneOldRuns, reapStuckRuns } from "@/lib/retention";
+import { pruneOldRunSteps, pruneOldRuns, reapStuckRuns } from "@/lib/retention";
 import { reconcileStaleConnections } from "@/lib/reconcile";
 import { pruneRateLimits } from "@/lib/rate-limit";
 
@@ -75,7 +75,10 @@ async function tick(req: NextRequest) {
 
   const results = await runDueWorkflows();
 
+  // Two sweeps, two windows: traces go monthly, digests stay a year so the
+  // history search has something to search.
   const pruned = await settle("prune", pruneOldRuns);
+  const prunedSteps = await settle("prune-steps", pruneOldRunSteps);
   const prunedLimits = await settle("prune-limits", pruneRateLimits);
 
   return NextResponse.json({
@@ -83,6 +86,7 @@ async function tick(req: NextRequest) {
     reaped,
     reconciled,
     pruned,
+    prunedSteps,
     prunedLimits,
     results,
   });

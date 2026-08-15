@@ -1,20 +1,57 @@
 import { and, lt, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { runs } from "@/db/schema";
+import { runs, runSteps } from "@/db/schema";
 import { CHAIN_QUEUE_MAX_AGE_MS } from "@/lib/limits";
 
-/**
- * Runs are a rolling log, not an archive: each one carries a full tool trace,
- * so an unbounded history is mostly dead jsonb. Steps and outputs are removed
- * with the run by the `on delete cascade` foreign keys.
+/*
+ * Two retention windows, because a run holds two different kinds of data.
+ *
+ * `run_steps` is a debug trace: a full tool payload per step, truncated but
+ * still bulky, worth having for a few weeks and dead weight after that.
+ *
+ * `runs` and `outputs` are the memory. A digest is a narrow row, and it is what
+ * the history search and the agent's `history` tool read — "is this the third
+ * month in a row?" is unanswerable over a thirty-day window, which is all a
+ * single retention setting used to leave behind.
  */
 export const RUN_RETENTION_DAYS = Number(process.env.RUN_RETENTION_DAYS ?? 30);
+export const OUTPUT_RETENTION_DAYS = Number(
+  process.env.OUTPUT_RETENTION_DAYS ?? 365,
+);
 
-/** Deletes finished runs older than the retention window. */
-export async function pruneOldRuns(): Promise<number> {
+/**
+ * Drops the tool trace of runs past the shorter window, leaving the run row
+ * and its digest in place.
+ */
+export async function pruneOldRunSteps(): Promise<number> {
   if (!Number.isFinite(RUN_RETENTION_DAYS) || RUN_RETENTION_DAYS <= 0) return 0;
 
   const cutoff = new Date(Date.now() - RUN_RETENTION_DAYS * 86_400_000);
+
+  const deleted = await db
+    .delete(runSteps)
+    .where(
+      sql`${runSteps.runId} in (
+        select ${runs.id} from ${runs}
+        where ${runs.createdAt} < ${cutoff}
+          and ${runs.status} not in ('running', 'queued')
+      )`,
+    )
+    .returning({ id: runSteps.id });
+
+  return deleted.length;
+}
+
+/**
+ * Deletes finished runs, and the digests cascading from them, once they are
+ * past the longer window.
+ */
+export async function pruneOldRuns(): Promise<number> {
+  if (!Number.isFinite(OUTPUT_RETENTION_DAYS) || OUTPUT_RETENTION_DAYS <= 0) {
+    return 0;
+  }
+
+  const cutoff = new Date(Date.now() - OUTPUT_RETENTION_DAYS * 86_400_000);
 
   const deleted = await db
     .delete(runs)

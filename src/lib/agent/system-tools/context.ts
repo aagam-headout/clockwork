@@ -25,4 +25,10 @@ export type SystemToolContext = {
    * the run to have an outcome at all.
    */
   setEnvelope: (envelope: Envelope) => void;
+  /** Whose digests `history` may read. Never taken from a tool argument. */
+  ownerId: string;
+  /** The workflow being run — the default scope for `history`. */
+  workflowId: string;
+  /** History's own budget, separate from the shared read budget. */
+  historySpent: () => { error: string } | null;
 };

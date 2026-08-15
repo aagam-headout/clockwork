@@ -6,7 +6,11 @@ vi.mock("@/db", () => ({
   db: { update: (...args: unknown[]) => update(...args) },
 }));
 
-import { reapStuckRuns } from "./retention";
+import {
+  OUTPUT_RETENTION_DAYS,
+  RUN_RETENTION_DAYS,
+  reapStuckRuns,
+} from "./retention";
 import { CHAIN_QUEUE_MAX_AGE_MS } from "@/lib/limits";
 
 /**
@@ -79,5 +83,19 @@ describe("reapStuckRuns", () => {
 
   it("defaults the chain window to an hour", () => {
     expect(CHAIN_QUEUE_MAX_AGE_MS).toBe(60 * 60 * 1000);
+  });
+});
+
+describe("retention windows", () => {
+  it("keeps digests far longer than traces", () => {
+    expect(OUTPUT_RETENTION_DAYS).toBeGreaterThan(RUN_RETENTION_DAYS);
+  });
+
+  it("defaults to a year of digests", () => {
+    expect(OUTPUT_RETENTION_DAYS).toBe(365);
+  });
+
+  it("defaults to a month of traces", () => {
+    expect(RUN_RETENTION_DAYS).toBe(30);
   });
 });

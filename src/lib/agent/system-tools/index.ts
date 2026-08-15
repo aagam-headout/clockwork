@@ -2,6 +2,7 @@ import type { ToolSet } from "ai";
 import { createQueryTool } from "./query";
 import { createInspectTool } from "./inspect";
 import { createReportTool } from "./report";
+import { createHistoryTool } from "./history";
 import type { SystemToolContext } from "./context";
 
 export type { SystemToolContext } from "./context";
@@ -21,7 +22,12 @@ export type { SystemToolContext } from "./context";
  * A future system tool is one more file here plus one more entry below —
  * `wrap-tools.ts` never needs to change to gain one.
  */
-export const SYSTEM_TOOL_NAMES = ["query", "inspect", "report"] as const;
+export const SYSTEM_TOOL_NAMES = [
+  "query",
+  "inspect",
+  "report",
+  "history",
+] as const;
 
 /**
  * @param handles whether the handle harness is on for this run.
@@ -36,13 +42,21 @@ export function buildSystemTools(
   ctx: SystemToolContext,
   { handles }: { handles: boolean },
 ): ToolSet {
-  const report = { report: createReportTool(ctx) };
-  if (!handles) return report;
+  /*
+   * `report` ends the run and `history` reads the workflow's own past digests;
+   * neither has anything to do with descriptors, so both stay on when the
+   * handle harness is off. Only the two tools that read a stored payload go.
+   */
+  const always = {
+    report: createReportTool(ctx),
+    history: createHistoryTool(ctx),
+  };
+  if (!handles) return always;
 
   return {
     query: createQueryTool(ctx),
     inspect: createInspectTool(ctx),
-    ...report,
+    ...always,
   };
 }
 
@@ -87,3 +101,13 @@ action. Nothing you write outside that call is delivered to anyone.
 - report({digest, severity}) — "info", "warn" or "critical", your own read.
 
 If report returns an error, read it, fix the argument, and call it again.`;
+
+/** Appended to the system prompt. Static, so it stays cacheable. */
+export const HISTORY_PROMPT = `You can read your own past digests for this workflow with
+history({q, since, scope, limit}). It does not spend your step budget, and it
+is the only way to tell a one-off from a pattern — the digest you are shown in
+the prompt is just the most recent one.
+
+Use it when the goal involves a trend, a recurrence, or "again", and when you
+need to check whether you already reported something. Two calls is usually
+plenty; you have a small budget and the run is not an investigation.`;

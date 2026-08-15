@@ -10,7 +10,12 @@ function makeCtx(signals: SystemToolContext["signals"] = []) {
     budgetSpent: () => null,
     markDegraded: vi.fn(),
     signals,
-    setEnvelope: (envelope: Envelope) => captured.push(envelope),
+    setEnvelope: (envelope: Envelope) => {
+      captured.push(envelope);
+    },
+    ownerId: "user-1",
+    workflowId: "wf-1",
+    historySpent: () => null,
   } satisfies SystemToolContext;
   return { ctx, captured };
 }
@@ -85,6 +90,9 @@ describe("report tool", () => {
       markDegraded: vi.fn(),
       signals: [],
       setEnvelope: () => {},
+      ownerId: "user-1",
+      workflowId: "wf-1",
+      historySpent: () => null,
     } satisfies SystemToolContext;
     const out = await run(createReportTool(ctx), { digest: "d" });
     expect(budgetSpent).not.toHaveBeenCalled();
