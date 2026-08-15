@@ -26,6 +26,7 @@ import { assertSafeWebhookUrl } from "@/lib/net/safe-url";
 import { validateChain } from "@/lib/chain";
 import { parseCondition, type SignalDecl } from "@/lib/outcome/condition";
 import { parseSignalSchema } from "@/lib/outcome/envelope";
+import { checkCostCap } from "@/lib/cost-cap";
 
 function slugify(name: string) {
   return (
@@ -277,6 +278,7 @@ async function parseWorkflowForm(
     jsonField(formData, "signalSchema") ?? [],
   );
   const alertCondition = field(formData, "alertCondition") || null;
+  const monthlyCostCapUsd = parseCostCap(field(formData, "monthlyCostCapUsd"));
   const parentWorkflowId = field(formData, "parentWorkflowId") || null;
   const parentCondition = field(formData, "parentCondition") || null;
 
@@ -351,7 +353,28 @@ async function parseWorkflowForm(
     // silently counts against that limit.
     parentWorkflowId: triggerType === "workflow" ? parentWorkflowId : null,
     parentCondition: triggerType === "workflow" ? parentCondition : null,
+    monthlyCostCapUsd,
   };
+}
+
+/**
+ * The monthly budget field. Blank means uncapped, which is the default and the
+ * state of every workflow that existed before caps did.
+ *
+ * Zero is rejected rather than quietly treated as uncapped: someone typing 0
+ * means "spend nothing", and silently doing the opposite of that is worse than
+ * telling them the field does not work that way.
+ */
+function parseCostCap(raw: string): string | null {
+  if (!raw) return null;
+
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(
+      "Use a positive monthly budget, or leave it blank for no limit.",
+    );
+  }
+  return value.toFixed(2);
 }
 
 /** A JSON-encoded hidden field, as the multi-value parts of the form post. */
@@ -569,6 +592,13 @@ export async function updateWorkflow(
       user.id,
       id,
     );
+    // Read before writing, so a cap that the save raises can release exactly
+    // the workflow that cap paused.
+    const [before] = await db
+      .select({ pausedReason: workflows.pausedReason })
+      .from(workflows)
+      .where(and(eq(workflows.id, id), eq(workflows.userId, user.id)));
+
     // The name may have changed, so the slug is re-derived — excluding this
     // row, or renaming a workflow to its own name would bump it to "-2".
     const slug = await uniqueSlug(user.id, parsed.name, id);
@@ -589,6 +619,37 @@ export async function updateWorkflow(
         error: "This workflow no longer exists — it may have been deleted.",
         values: formValues(formData),
       };
+    }
+
+    /*
+     * Raising or clearing a budget releases the workflow the budget paused —
+     * and only that one. Scoping on `pausedReason` is the same property a
+     * reconnect relies on: a workflow the user paused by hand stays paused.
+     *
+     * The new cap is re-judged rather than assumed: lowering a cap while
+     * already over it must not re-enable a workflow that would immediately
+     * pause again on its next run.
+     */
+    if (before?.pausedReason === "cost_cap") {
+      const verdict = await checkCostCap({
+        id,
+        timezone: parsed.timezone,
+        monthlyCostCapUsd: parsed.monthlyCostCapUsd,
+      });
+      if (verdict.state !== "over") {
+        await db
+          .update(workflows)
+          .set({ enabled: true, pausedReason: null })
+          .where(
+            and(
+              eq(workflows.id, id),
+              eq(workflows.userId, user.id),
+              eq(workflows.pausedReason, "cost_cap"),
+            ),
+          );
+        notice =
+          "Changes saved. Budget raised, so this workflow is running again.";
+      }
     }
 
     triggerError = await registerTriggers(user.id);

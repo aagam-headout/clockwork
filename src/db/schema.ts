@@ -164,6 +164,19 @@ export const workflows = pgTable(
     deliver: jsonb("deliver").notNull().default([]), // [{type:"slack_dm"},{type:"dashboard"}]
     model: text("model").notNull().default("anthropic/claude-sonnet-5"),
     maxSteps: integer("max_steps").notNull().default(15),
+    /*
+     * Monthly ceiling on this workflow's model spend, in USD. Null is
+     * uncapped, which is every row that existed before this shipped.
+     *
+     * Enforced retroactively — a run's cost is only known once it has
+     * finished, so the cap blocks the next run rather than the one that
+     * crossed it. The overshoot is therefore bounded by a single run's cost,
+     * which is the honest guarantee to make here.
+     */
+    monthlyCostCapUsd: numeric("monthly_cost_cap_usd", {
+      precision: 10,
+      scale: 2,
+    }),
     readOnly: boolean("read_only").notNull().default(true),
     enabled: boolean("enabled").notNull().default(true),
     /**
@@ -354,6 +367,24 @@ export const outputs = pgTable(
     deliveredTo: text("delivered_to").array().notNull().default([]),
     /** Per-target outcome: [{type, ok, error?}] — a failed send is recorded. */
     deliveryLog: jsonb("delivery_log").notNull().default([]),
+    /*
+     * pending | delivered | partial | failed | skipped
+     *
+     * `deliveryLog` has always held the per-target outcome and nothing ever
+     * read it, so a Slack token that quietly expired produced a wall of green
+     * runs and no digests — the worst failure mode a monitoring tool has,
+     * because it looks like it is working.
+     *
+     * This lives on the output rather than on `runs.status`: the agent did its
+     * job, and delivery is a property of what it produced. See the note at
+     * `runs.errorCode` for why a fourth run status is not worth what it costs.
+     *
+     * `skipped` covers the unchanged and suppressed cases, where not sending
+     * is the correct outcome rather than a failure. The default backfills
+     * every existing row to the status it was already implicitly claiming.
+     */
+    deliveryStatus: text("delivery_status").notNull().default("delivered"),
+    deliveryAttempts: integer("delivery_attempts").notNull().default(0),
     /** The agent found nothing new since the previous digest. */
     unchanged: boolean("unchanged").notNull().default(false),
     /** The envelope's measured values, as reported by the `report` tool. */
@@ -395,6 +426,10 @@ export const outputs = pgTable(
     index("outputs_search_idx").using("gin", table.searchVector),
     // Every history query joins on this, and there was no index on it.
     index("outputs_run_idx").on(table.runId),
+    // The retry sweep looks only at rows that still owe a delivery.
+    index("outputs_delivery_retry_idx")
+      .on(table.createdAt)
+      .where(sql`delivery_status in ('pending', 'partial', 'failed')`),
   ],
 );
 

@@ -3,8 +3,12 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const executeRun = vi.fn();
 const select = vi.fn();
 
+const retryPendingDeliveries = vi.fn();
+
 vi.mock("@/lib/executor", () => ({
   executeRun: (...args: unknown[]) => executeRun(...args),
+  retryPendingDeliveries: (...args: unknown[]) =>
+    retryPendingDeliveries(...args),
   runWorkflow: vi.fn(),
 }));
 
@@ -46,6 +50,7 @@ function chain(rows: unknown[]) {
 beforeEach(() => {
   executeRun.mockReset();
   select.mockReset();
+  retryPendingDeliveries.mockReset().mockResolvedValue(0);
 });
 
 describe("drainChainedRuns", () => {
@@ -109,5 +114,43 @@ describe("drainChainedRuns", () => {
 
     expect(await drainChainedRuns(Date.now())).toEqual([]);
     expect(executeRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("delivery retry from the drain pass", () => {
+  it("sweeps deliveries after the chain is drained", async () => {
+    select.mockReturnValue(chain([]));
+
+    await drainChainedRuns(Date.now());
+
+    expect(retryPendingDeliveries).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands the sweep a budget predicate that is still open", async () => {
+    select.mockReturnValue(chain([]));
+
+    await drainChainedRuns(Date.now());
+
+    const budgetLeft = retryPendingDeliveries.mock.calls[0][0] as () => boolean;
+    expect(budgetLeft()).toBe(true);
+  });
+
+  it("hands the sweep a spent predicate once the tick is over budget", async () => {
+    select.mockReturnValue(chain([]));
+
+    await drainChainedRuns(Date.now() - 10 * 60_000);
+
+    const budgetLeft = retryPendingDeliveries.mock.calls[0][0] as () => boolean;
+    expect(budgetLeft()).toBe(false);
+  });
+
+  it("keeps the dispatch results when the sweep throws", async () => {
+    select.mockReturnValue(chain([]));
+    retryPendingDeliveries.mockImplementation(() => {
+      throw new Error("sweep exploded");
+    });
+
+    // A failing retry sweep must not lose what the tick already achieved.
+    await expect(drainChainedRuns(Date.now())).resolves.toEqual([]);
   });
 });

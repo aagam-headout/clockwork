@@ -81,8 +81,13 @@ export async function pruneOldRuns(): Promise<number> {
  * the one-active-run index blocks its workflow forever too.
  */
 export async function reapStuckRuns(maxAgeMs = 15 * 60_000): Promise<number> {
-  const cutoff = new Date(Date.now() - maxAgeMs);
-  const chainCutoff = new Date(Date.now() - CHAIN_QUEUE_MAX_AGE_MS);
+  // One clock reading for both windows. Two calls to `Date.now()` can land on
+  // different milliseconds, which makes the gap between the cutoffs drift from
+  // the configured difference — harmless in production, but it means the two
+  // windows are not actually anchored to the same instant.
+  const now = Date.now();
+  const cutoff = new Date(now - maxAgeMs);
+  const chainCutoff = new Date(now - CHAIN_QUEUE_MAX_AGE_MS);
 
   const reaped = await db
     .update(runs)

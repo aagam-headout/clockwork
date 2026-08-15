@@ -138,7 +138,7 @@ vi.mock("@/lib/data/connections", () => ({
   markConnectionStatus: async () => undefined,
 }));
 
-import { executeRun, NO_UPDATES } from "./executor";
+import { deliveryStatusFrom, executeRun, NO_UPDATES } from "./executor";
 import { runs, runSteps, workflows } from "@/db/schema";
 import { MAX_QUERIES_PER_RUN } from "@/lib/agent/wrap-tools";
 
@@ -1293,5 +1293,155 @@ describe("chained children", () => {
     expect(
       insertedRuns().find((r) => r.workflowId === "child-1"),
     ).toBeUndefined();
+  });
+});
+
+describe("cost cap", () => {
+  /** Queues the month-to-date spend row `checkCostCap` reads back. */
+  function queueSpend(total: string) {
+    queue(`select:${getTableName(runs)}`, [{ total }]);
+  }
+
+  it("blocks the run and pauses the workflow when the cap is reached", async () => {
+    queueWorkflow({ monthlyCostCapUsd: "5.00", timezone: "UTC" });
+    queueSpend("5.20");
+    stubModel({});
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("error");
+    expect(runVerdict().errorCode).toBe("cost_cap");
+    // No model call at all — the point is to stop spending.
+    expect(generateText).not.toHaveBeenCalled();
+
+    const paused = calls.find(
+      (c) =>
+        c.op === "update" &&
+        c.table === getTableName(workflows) &&
+        (c.values as { pausedReason?: string })?.pausedReason === "cost_cap",
+    );
+    expect(paused).toBeDefined();
+    expect((paused?.values as { enabled?: boolean }).enabled).toBe(false);
+  });
+
+  it("runs normally below the cap", async () => {
+    queueWorkflow({ monthlyCostCapUsd: "5.00", timezone: "UTC" });
+    queueSpend("1.00");
+    stubModel({});
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+    expect(generateText).toHaveBeenCalled();
+  });
+
+  it("blocks at exactly the cap", async () => {
+    queueWorkflow({ monthlyCostCapUsd: "5.00", timezone: "UTC" });
+    queueSpend("5.00");
+    stubModel({});
+
+    expect((await executeRun(RUN_ID)).status).toBe("error");
+    expect(runVerdict().errorCode).toBe("cost_cap");
+  });
+
+  it("issues no spend query at all for an uncapped workflow", async () => {
+    // The fixture carries no cap. A pointless query here would run before
+    // every run of every uncapped workflow, which is nearly all of them.
+    stubModel({});
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+  });
+
+  it("treats a zero cap as uncapped rather than blocking forever", async () => {
+    queueWorkflow({ monthlyCostCapUsd: "0.00", timezone: "UTC" });
+    stubModel({});
+
+    expect((await executeRun(RUN_ID)).status).toBe("ok");
+  });
+});
+
+describe("deliveryStatusFrom", () => {
+  it("is skipped when nothing was attempted", () => {
+    expect(deliveryStatusFrom([], false)).toBe("skipped");
+  });
+
+  it("is skipped when every target was deliberately skipped", () => {
+    expect(
+      deliveryStatusFrom([{ type: "slack_dm", ok: true, skipped: true }], true),
+    ).toBe("skipped");
+  });
+
+  it("is delivered when every attempted target succeeded", () => {
+    expect(
+      deliveryStatusFrom(
+        [
+          { type: "slack_dm", ok: true },
+          { type: "dashboard", ok: true },
+        ],
+        true,
+      ),
+    ).toBe("delivered");
+  });
+
+  it("is partial when one of two failed", () => {
+    expect(
+      deliveryStatusFrom(
+        [
+          { type: "slack_dm", ok: false, error: "token expired" },
+          { type: "dashboard", ok: true },
+        ],
+        true,
+      ),
+    ).toBe("partial");
+  });
+
+  it("is failed when every attempted target failed", () => {
+    expect(
+      deliveryStatusFrom(
+        [{ type: "slack_dm", ok: false, error: "token expired" }],
+        true,
+      ),
+    ).toBe("failed");
+  });
+
+  it("does not count a skipped target as a failure", () => {
+    expect(
+      deliveryStatusFrom(
+        [
+          { type: "slack_dm", ok: true, skipped: true },
+          { type: "dashboard", ok: true },
+        ],
+        true,
+      ),
+    ).toBe("delivered");
+  });
+});
+
+describe("delivery status on the output row", () => {
+  it("records a suppressed run as skipped, having attempted nothing", async () => {
+    queueWorkflow({
+      signalSchema: [{ key: "n", type: "number" }],
+      alertCondition: "n > 3",
+    });
+    stubModel({}, async (tools) => {
+      await tools.report.execute({ digest: "## D", signals: { n: 1 } }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    const row = outputRow() as unknown as { deliveryStatus: string };
+    expect(row.deliveryStatus).toBe("skipped");
+  });
+
+  it("counts the first attempt on a delivered run", async () => {
+    stubModel({}, async (tools) => {
+      await tools.report.execute({ digest: "## D" }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    const row = outputRow() as unknown as { deliveryAttempts: number };
+    expect(row.deliveryAttempts).toBe(1);
   });
 });

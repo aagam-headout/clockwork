@@ -39,6 +39,7 @@ import { HISTORY_PROMPT, REPORT_PROMPT } from "@/lib/agent/system-tools";
 import { parseSignalSchema, type Envelope } from "@/lib/outcome/envelope";
 import type { SignalDecl } from "@/lib/outcome/condition";
 import { decideChildren, decideDelivery } from "@/lib/outcome/route";
+import { checkCostCap, type CapVerdict } from "@/lib/cost-cap";
 
 type Workflow = typeof workflows.$inferSelect;
 
@@ -334,6 +335,35 @@ export async function executeRun(runId: string): Promise<RunResult> {
   const ownerId = workflow.userId;
 
   try {
+    /*
+     * Cost cap, before anything that costs money.
+     *
+     * Wrapped because the cap is a guardrail, not a correctness gate: if the
+     * spend query fails, the right move is to run the workflow and lose the
+     * cap for one tick rather than stop someone's scheduled work over a
+     * database hiccup.
+     */
+    let cap: CapVerdict = { state: "uncapped", spent: 0, cap: null };
+    try {
+      cap = await checkCostCap(workflow);
+    } catch (err) {
+      console.error(`[cost] ${workflow.slug} cap check failed`, err);
+    }
+
+    if (cap.state === "over") {
+      const message = `monthly cost cap reached — $${cap.spent.toFixed(2)} spent against a $${cap.cap?.toFixed(2)} cap`;
+
+      // Paused rather than left to fail every tick. `pausedReason` is also what
+      // lets raising the cap re-enable exactly the workflows the cap stopped.
+      await db
+        .update(workflows)
+        .set({ enabled: false, pausedReason: "cost_cap" })
+        .where(eq(workflows.id, workflow.id));
+
+      await failRun(runId, startedAt, message, { errorCode: "cost_cap" });
+      return { runId, status: "error", error: message };
+    }
+
     const deliver = (workflow.deliver as DeliverTarget[]) ?? [];
     const toolkits = [
       ...new Set([...workflow.toolkits, ...deliverToolkits(deliver)]),
@@ -717,6 +747,8 @@ export async function executeRun(runId: string): Promise<RunResult> {
       suppressedReason: decision.suppressedReason,
       deliveredTo: deliveryLog.filter((d) => d.ok).map((d) => d.type),
       deliveryLog,
+      deliveryStatus: deliveryStatusFrom(deliveryLog, decision.deliver),
+      deliveryAttempts: decision.deliver ? 1 : 0,
     });
 
     const usage = result.usage as
@@ -730,12 +762,9 @@ export async function executeRun(runId: string): Promise<RunResult> {
     await db
       .update(runs)
       .set({
-        // MINOR 6 (out of scope, pre-existing, not this feature's to fix):
-        // a delivery target can fail (see `deliverOutput`'s `ok: false`
-        // entries) and the run still lands here as "ok" — the dashboard has
-        // no notion of "delivered green, sent nowhere". Left as-is; noted so
-        // the next reader doesn't mistake it for something this change
-        // should have covered.
+        // Delivery outcome is recorded on the output, not here — see
+        // `deliveryStatusFrom` and `outputs.deliveryStatus`. The agent did its
+        // job either way, which is what this status is about.
         status: truncated ? "truncated" : "ok",
         finishReason: result.finishReason ?? null,
         finishedAt: new Date(),
@@ -1193,6 +1222,28 @@ export type DeliveryLogEntry = {
 };
 
 /**
+ * Turns the per-target log into the one word the dashboard shows.
+ *
+ * A `skipped` entry is the design working — "nothing new to send" — so it can
+ * never make a delivery look failed. Only an attempted-and-failed target does,
+ * which is the same distinction the hash flush already makes.
+ */
+export function deliveryStatusFrom(
+  log: DeliveryLogEntry[],
+  attempted: boolean,
+): "delivered" | "partial" | "failed" | "skipped" {
+  if (!attempted) return "skipped";
+
+  const real = log.filter((entry) => !entry.skipped);
+  if (real.length === 0) return "skipped";
+
+  const failures = real.filter((entry) => !entry.ok).length;
+  if (failures === 0) return "delivered";
+  if (failures === real.length) return "failed";
+  return "partial";
+}
+
+/**
  * Records what actually reached each target. Tool-backed targets (Slack,
  * email) are verified against the calls the model really made; webhooks are
  * POSTed here. A target that failed is written down as failed rather than
@@ -1248,6 +1299,120 @@ async function deliverOutput({
   }
 
   return log;
+}
+
+/**
+ * Re-sends digests whose delivery failed, one bounded sweep per tick.
+ *
+ * Webhooks only, and that is a real limit rather than an oversight. A webhook
+ * is the one target this server actually performs; Slack and email deliveries
+ * are made by the agent calling a tool, and `deliverOutput` only *verifies*
+ * that it did. Re-sending those would mean running the agent again, which is a
+ * new run and a new bill, not a retry — so a failed Slack delivery settles as
+ * failed and the run page says so.
+ *
+ * Only targets that actually failed are retried, read back from `deliveryLog`:
+ * re-sending one that already succeeded would deliver the same digest twice,
+ * which is worse than the failure being retried.
+ */
+export async function retryPendingDeliveries(
+  budgetLeft: () => boolean,
+): Promise<number> {
+  let retried = 0;
+
+  while (budgetLeft()) {
+    const [row] = await db
+      .select({
+        outputId: outputs.id,
+        body: outputs.body,
+        log: outputs.deliveryLog,
+        attempts: outputs.deliveryAttempts,
+        workflow: workflows,
+      })
+      .from(outputs)
+      .innerJoin(runs, eq(outputs.runId, runs.id))
+      .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+      .where(
+        and(
+          sql`${outputs.deliveryStatus} in ('pending', 'partial', 'failed')`,
+          sql`${outputs.deliveryAttempts} < ${LIMITS.maxDeliveryAttempts}`,
+        ),
+      )
+      .orderBy(outputs.createdAt)
+      .limit(1);
+
+    if (!row) break;
+
+    const previous = (row.log ?? []) as DeliveryLogEntry[];
+    const failedTypes = new Set(
+      previous.filter((e) => !e.ok && !e.skipped).map((e) => e.type),
+    );
+
+    const targets = ((row.workflow.deliver as DeliverTarget[]) ?? []).filter(
+      (t) => t.type === "webhook" && failedTypes.has(t.type),
+    );
+
+    const attempts = row.attempts + 1;
+
+    if (targets.length === 0) {
+      /*
+       * Nothing here can be retried — the failures were tool-based, or the
+       * target has since been removed from the workflow. Settle rather than
+       * spin: the row would otherwise be picked up on every tick until it
+       * aged out of retention.
+       */
+      await db
+        .update(outputs)
+        .set({
+          deliveryStatus: "failed",
+          deliveryAttempts: LIMITS.maxDeliveryAttempts,
+        })
+        .where(eq(outputs.id, row.outputId));
+      continue;
+    }
+
+    /*
+     * `calledTools` is empty and `unchanged` false: neither matters here,
+     * because every target in this set is a webhook, and webhooks are posted
+     * directly rather than verified against what the agent called.
+     *
+     * `postWebhook` re-checks the URL through `safe-url.ts` on every attempt,
+     * so a hostname repointed at a private address since the first send is
+     * refused here too rather than trusted because it passed once.
+     */
+    const log = await deliverOutput({
+      workflow: row.workflow,
+      deliver: targets,
+      body: row.body,
+      unchanged: false,
+      calledTools: [],
+    });
+
+    const merged = [
+      ...previous.filter((e) => !log.some((l) => l.type === e.type)),
+      ...log,
+    ];
+    const status = deliveryStatusFrom(merged, true);
+
+    await db
+      .update(outputs)
+      .set({
+        deliveryLog: merged,
+        deliveryAttempts: attempts,
+        deliveredTo: merged.filter((d) => d.ok).map((d) => d.type),
+        deliveryStatus:
+          status === "delivered"
+            ? "delivered"
+            : attempts >= LIMITS.maxDeliveryAttempts
+              ? "failed"
+              : status,
+      })
+      .where(eq(outputs.id, row.outputId));
+
+    retried++;
+  }
+
+  return retried;
 }
 
 async function postWebhook(

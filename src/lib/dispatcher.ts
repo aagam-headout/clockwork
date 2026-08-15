@@ -1,7 +1,11 @@
 import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, users, workflows } from "@/db/schema";
-import { executeRun, runWorkflow } from "@/lib/executor";
+import {
+  executeRun,
+  retryPendingDeliveries,
+  runWorkflow,
+} from "@/lib/executor";
 import { isDue } from "@/lib/schedule";
 import { checkConnectionsWith, requiredToolkits } from "@/lib/connection-gate";
 import { activeToolkitsByUser } from "@/lib/data/connections";
@@ -262,6 +266,22 @@ export async function drainChainedRuns(
         runId: next.runId,
       });
     }
+  }
+
+  /*
+   * Deliveries last: a chained run drained above may itself have produced a
+   * digest that needs delivering, and doing this afterwards gives those a
+   * chance at this same tick rather than waiting five minutes.
+   *
+   * Swallowed on failure — a retry sweep that throws must not lose the
+   * dispatch results this tick already earned.
+   */
+  try {
+    await retryPendingDeliveries(
+      () => Date.now() - tickStartedAt <= TICK_BUDGET_MS,
+    );
+  } catch (err) {
+    console.error("[drain] delivery retry sweep failed", err);
   }
 
   return results;

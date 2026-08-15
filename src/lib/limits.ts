@@ -1,11 +1,14 @@
 /**
  * Every quota in the app, in one place, each overridable by environment.
  *
- * Signup is open, so these are not tuning knobs — they are the thing standing
- * between one abusive account and the shared resources this app runs on: the
- * app-wide Composio API key, the cron tick's time budget, and the database.
- * Model spend is the user's own (bring-your-own-key), which is why there is no
- * dollar cap here.
+ * Signup is open, so most of these are not tuning knobs — they are the thing
+ * standing between one abusive account and the shared resources this app runs
+ * on: the app-wide Composio API key, the cron tick's time budget, and the
+ * database.
+ *
+ * Model spend is the user's own key, so it is capped per workflow rather than
+ * globally (see `src/lib/cost-cap.ts`). The point there is to stop one runaway
+ * workflow, not to ration the account.
  */
 function num(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -41,6 +44,10 @@ export const LIMITS = {
   maxChildrenPerWorkflow: num("MAX_CHILDREN_PER_WORKFLOW", 3),
   /** Signals one workflow may declare — each one is prompt surface. */
   maxSignalsPerWorkflow: num("MAX_SIGNALS_PER_WORKFLOW", 10),
+  /** Fraction of a workflow's monthly cap at which the UI starts warning. */
+  costCapWarnRatio: 0.8,
+  /** Delivery attempts, including the first, before a digest is given up on. */
+  maxDeliveryAttempts: num("MAX_DELIVERY_ATTEMPTS", 3),
 } as const;
 
 /** How long the OAuth callback waits for Composio to finish the handshake. */
