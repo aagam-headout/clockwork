@@ -15,7 +15,16 @@ import {
   StatusDot,
   statusTone,
 } from "@/components/ui";
-import { History, ChevronRight, Clock, Calendar, Plus } from "lucide-react";
+import {
+  History,
+  ChevronRight,
+  Clock,
+  Calendar,
+  Plus,
+  Search,
+} from "lucide-react";
+import { DigestSearch } from "@/components/digest-search";
+import { searchDigests } from "@/lib/data/digest-search";
 import { LiveRun } from "@/components/live-run";
 import { LocalTime } from "@/components/local-time";
 import { formatUsd } from "@/lib/model-tiers";
@@ -75,13 +84,14 @@ const PAGE_SIZE = 100;
 export default async function RunsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ notice?: string; status?: string }>;
+  searchParams: Promise<{ notice?: string; status?: string; q?: string }>;
 }) {
   const user = await requireUser();
 
   // Set when "Run now" landed on a workflow that was already running — the
   // list is the right place to be, but not without being told why.
-  const { notice, status: statusFilter } = await searchParams;
+  const { notice, status: statusFilter, q } = await searchParams;
+  const query = q?.trim() ?? "";
   const active = FILTERS.some((f) => f.value === statusFilter)
     ? (statusFilter as string)
     : "";
@@ -113,6 +123,15 @@ export default async function RunsPage({
     // One page deep. Anything past this is a job for the filter above it, and
     // the footer says so rather than letting the list end without explanation.
     .limit(PAGE_SIZE);
+
+  /*
+   * A query searches the digests, not the run rows — different question,
+   * different answer shape, so the results replace the list rather than
+   * filtering it.
+   */
+  const hits = query
+    ? await searchDigests({ userId: user.id, q: query, limit: 25 })
+    : [];
 
   // Group into day buckets so a long history stays scannable.
   const groups: Array<{ label: string; items: typeof rows }> = [];
@@ -163,9 +182,17 @@ export default async function RunsPage({
         </div>
       )}
 
-      <StatusFilter active={active} />
+      <div className="rise mt-6 flex flex-wrap items-center gap-3">
+        <DigestSearch initialQuery={query} />
+      </div>
 
-      {rows.length === 0 ? (
+      {query ? (
+        <DigestResults hits={hits} query={query} />
+      ) : (
+        <StatusFilter active={active} />
+      )}
+
+      {query ? null : rows.length === 0 ? (
         <div className="mt-6">
           <EmptyState
             icon={History}
@@ -277,6 +304,88 @@ export default async function RunsPage({
         </div>
       )}
     </PageShell>
+  );
+}
+
+/**
+ * Search results — the matching passage of each digest, not its first lines.
+ *
+ * `ts_headline` produced the excerpt server-side with the highlight markers
+ * emptied, so this is plain text and stays plain text.
+ */
+function DigestResults({
+  hits,
+  query,
+}: {
+  hits: Array<{
+    runId: string;
+    workflowName: string;
+    date: Date;
+    excerpt: string;
+    signals: Record<string, unknown> | null;
+    severity: string | null;
+  }>;
+  query: string;
+}) {
+  if (hits.length === 0) {
+    return (
+      <div className="mt-6">
+        <EmptyState
+          icon={Search}
+          title="No digests match"
+          description={`Nothing in your digest history mentions "${query}".`}
+          action={
+            <ButtonLink href="/runs" variant="outline" size="sm">
+              Clear search
+            </ButtonLink>
+          }
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="rise mt-6 flex flex-col gap-3">
+      <p className="text-subtle text-xs">
+        {hits.length} {hits.length === 1 ? "digest" : "digests"} mentioning{" "}
+        <span className="text-foreground font-medium">{query}</span>
+      </p>
+      <ListBox>
+        {hits.map((hit) => (
+          <Link
+            key={hit.runId}
+            href={`/runs/${hit.runId}`}
+            className="hover:bg-surface-hover group flex flex-col gap-1 px-4 py-3 transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <span className="text-foreground truncate text-[13px] font-medium">
+                {hit.workflowName}
+              </span>
+              {hit.severity && (
+                <Badge
+                  tone={
+                    hit.severity === "critical"
+                      ? "danger"
+                      : hit.severity === "warn"
+                        ? "warn"
+                        : "neutral"
+                  }
+                >
+                  {hit.severity}
+                </Badge>
+              )}
+              <span className="flex-1" />
+              <span className="text-subtle shrink-0 text-xs">
+                <LocalTime value={hit.date} format="date" />
+              </span>
+            </span>
+            <span className="text-muted line-clamp-2 text-xs leading-relaxed">
+              {hit.excerpt}
+            </span>
+          </Link>
+        ))}
+      </ListBox>
+    </div>
   );
 }
 

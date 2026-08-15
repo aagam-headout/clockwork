@@ -5,6 +5,7 @@ import {
   WorkflowForm,
   type WorkflowFormValues,
   type ToolkitOption,
+  type ParentOption,
 } from "@/components/workflow-form";
 import { WorkflowAgentChat } from "@/components/workflow-agent-chat";
 import type { ModelInfo } from "@/lib/model-tiers";
@@ -21,6 +22,7 @@ export function NewWorkflowClient({
   action,
   availableToolkits,
   models,
+  parentOptions,
 }: {
   action: (
     state: WorkflowFormState,
@@ -28,6 +30,7 @@ export function NewWorkflowClient({
   ) => Promise<WorkflowFormState>;
   availableToolkits: ToolkitOption[];
   models: ModelInfo[];
+  parentOptions: ParentOption[];
 }) {
   const [proposal, setProposal] = useState<Partial<WorkflowFormValues> | null>(
     null,
@@ -57,6 +60,7 @@ export function NewWorkflowClient({
           defaultValues={proposal ?? undefined}
           availableToolkits={availableToolkits}
           models={models}
+          parentOptions={parentOptions}
           title="Workflow config"
           fillHeight
         />

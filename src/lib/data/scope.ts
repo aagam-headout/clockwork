@@ -1,8 +1,10 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { runs, workflows } from "@/db/schema";
+import { parseSignalSchema } from "@/lib/outcome/envelope";
+import type { SignalDecl } from "@/lib/outcome/condition";
 
 /*
  * Ownership, in one place.
@@ -74,4 +76,40 @@ export async function ownedRunOr404(id: string, userId: string) {
   const row = await ownedRun(id, userId);
   if (!row) notFound();
   return row;
+}
+
+/**
+ * Workflows this user could chain a new one behind.
+ *
+ * Scoped to the owner like everything else here, and it carries each
+ * candidate's signals because the trigger condition is written against the
+ * PARENT's signals — the picker has to be able to say which names are
+ * available the moment a selection changes.
+ *
+ * `excludeId` drops the workflow being edited: a workflow cannot be its own
+ * parent, and offering it would only produce a validation error on save.
+ */
+export async function chainParentOptions(
+  userId: string,
+  excludeId?: string,
+): Promise<Array<{ id: string; name: string; signals: SignalDecl[] }>> {
+  const scope = excludeId
+    ? and(eq(workflows.userId, userId), ne(workflows.id, excludeId))
+    : eq(workflows.userId, userId);
+
+  const rows = await db
+    .select({
+      id: workflows.id,
+      name: workflows.name,
+      signalSchema: workflows.signalSchema,
+    })
+    .from(workflows)
+    .where(scope)
+    .orderBy(asc(workflows.name));
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    signals: parseSignalSchema(row.signalSchema),
+  }));
 }

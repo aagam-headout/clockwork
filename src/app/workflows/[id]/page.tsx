@@ -9,14 +9,33 @@ import {
 } from "@/components/edit-agent-context";
 import { SubmitButton, ConfirmSubmitButton } from "@/components/submit-button";
 import { LocalTime } from "@/components/local-time";
-import { Trash2, Play, ChevronRight, Globe, History, Zap } from "lucide-react";
+import {
+  Trash2,
+  Play,
+  ChevronRight,
+  Globe,
+  History,
+  Zap,
+  Gauge,
+  Wallet,
+} from "lucide-react";
 import type { DeliverTarget } from "@/lib/read-only";
 import { currentUser, requireUser } from "@/lib/auth/user";
-import { ownedWorkflow, ownedWorkflowOr404 } from "@/lib/data/scope";
+import {
+  chainParentOptions,
+  ownedWorkflow,
+  ownedWorkflowOr404,
+} from "@/lib/data/scope";
+import { parseSignalSchema } from "@/lib/outcome/envelope";
+import { signalTimeline } from "@/lib/data/digest-search";
+import { checkCostCap, unpricedRunsThisMonth } from "@/lib/cost-cap";
+import { formatUsd } from "@/lib/model-tiers";
+import { SignalsChart } from "@/components/signals-chart";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
 import { getModelCatalogForUser } from "@/lib/models";
 import {
   Badge,
+  Card,
   ButtonLink,
   ListBox,
   Mono,
@@ -27,6 +46,9 @@ import {
   statusTone,
 } from "@/components/ui";
 import Link from "next/link";
+
+/** How far back the signal sparklines look. */
+const SIGNAL_WINDOW_DAYS = 90;
 
 export const dynamic = "force-dynamic";
 // "Run now" continues in `after()` after the action responds; the run itself
@@ -83,10 +105,29 @@ export default async function EditWorkflowPage({
     .orderBy(desc(runs.createdAt))
     .limit(5);
 
-  const [availableToolkits, models] = await Promise.all([
-    getConnectedToolkitOptions(user.id),
-    getModelCatalogForUser(user.id),
-  ]);
+  const declaredSignals = parseSignalSchema(workflow.signalSchema);
+  const cap = await checkCostCap(workflow);
+  /*
+   * `costUsd` is null whenever pricing was unavailable for the model, and the
+   * spend sum treats those as zero — so the total is a floor, and the page
+   * says so rather than presenting a number it cannot stand behind.
+   */
+  const hasUnpricedRun =
+    cap.state !== "uncapped" &&
+    (await unpricedRunsThisMonth(id, workflow.timezone)) > 0;
+
+  const [availableToolkits, models, parentOptions, signalPoints] =
+    await Promise.all([
+      getConnectedToolkitOptions(user.id),
+      getModelCatalogForUser(user.id),
+      // Excludes this workflow: it cannot be its own parent, and offering it
+      // would only produce a validation error on save.
+      chainParentOptions(user.id, id),
+      // Only worth the query when there is something to plot.
+      declaredSignals.length > 0
+        ? signalTimeline(user.id, id, SIGNAL_WINDOW_DAYS)
+        : Promise.resolve([]),
+    ]);
 
   const deliver = (workflow.deliver as DeliverTarget[]) ?? [];
   const slackChannel = deliver.find((d) => d.type === "slack_channel");
@@ -172,7 +213,11 @@ export default async function EditWorkflowPage({
             initialValues={{
               name: workflow.name,
               goal: workflow.goal,
-              triggerType: workflow.triggerType === "event" ? "event" : "cron",
+              triggerType:
+                workflow.triggerType === "event" ||
+                workflow.triggerType === "workflow"
+                  ? workflow.triggerType
+                  : "cron",
               cron: workflow.cron,
               timezone: workflow.timezone,
               eventTriggers: workflow.eventTriggers,
@@ -192,9 +237,68 @@ export default async function EditWorkflowPage({
               emailTo: email?.type === "email" ? email.to : "",
               deliverWebhook: Boolean(webhook),
               webhookUrl: webhook?.type === "webhook" ? webhook.url : "",
+              parentWorkflowId: workflow.parentWorkflowId ?? "",
+              parentCondition: workflow.parentCondition ?? "",
+              alertCondition: workflow.alertCondition ?? "",
+              signalSchema: declaredSignals,
+              monthlyCostCapUsd: workflow.monthlyCostCapUsd ?? "",
             }}
+            parentOptions={parentOptions}
           />
         </div>
+
+        {cap.state !== "uncapped" && (
+          <section className="rise mt-8">
+            <SectionLabel icon={Wallet}>This month</SectionLabel>
+            <Card className="px-5 py-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-3">
+                <span className="text-muted text-sm">
+                  <span className="text-foreground font-mono tabular-nums">
+                    {formatUsd(cap.spent)}
+                  </span>{" "}
+                  of {formatUsd(cap.cap ?? 0)}
+                </span>
+                {cap.state === "warn" && (
+                  <Badge tone="warn">approaching the budget</Badge>
+                )}
+                {cap.state === "over" && (
+                  <Badge tone="danger">budget spent</Badge>
+                )}
+              </div>
+              {/* A bar, not a number alone: the useful question is how much
+                  room is left, which a ratio answers at a glance. */}
+              <div className="bg-surface-2 mt-3 h-1.5 w-full overflow-hidden rounded-full">
+                <div
+                  className={`h-full rounded-full ${
+                    cap.state === "over"
+                      ? "bg-danger"
+                      : cap.state === "warn"
+                        ? "bg-warn"
+                        : "bg-accent"
+                  }`}
+                  style={{
+                    width: `${Math.min(100, (cap.spent / (cap.cap || 1)) * 100).toFixed(1)}%`,
+                  }}
+                />
+              </div>
+              {hasUnpricedRun && (
+                <p className="text-subtle mt-2 text-xs">
+                  Some runs this month have no recorded price, so this is a
+                  lower bound.
+                </p>
+              )}
+            </Card>
+          </section>
+        )}
+
+        {signalPoints.length > 1 && (
+          <section className="rise mt-8">
+            <SectionLabel icon={Gauge}>
+              Signals over {SIGNAL_WINDOW_DAYS} days
+            </SectionLabel>
+            <SignalsChart declared={declaredSignals} points={signalPoints} />
+          </section>
+        )}
 
         {recentRuns.length > 0 && (
           <section className="mt-8">

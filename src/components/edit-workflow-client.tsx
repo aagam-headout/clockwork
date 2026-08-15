@@ -5,6 +5,7 @@ import {
   WorkflowForm,
   type WorkflowFormValues,
   type ToolkitOption,
+  type ParentOption,
 } from "@/components/workflow-form";
 import { WorkflowAgentChat } from "@/components/workflow-agent-chat";
 import { useEditAgent } from "@/components/edit-agent-context";
@@ -26,6 +27,7 @@ export function EditWorkflowClient({
   submitLabel,
   availableToolkits,
   models,
+  parentOptions,
   initialValues,
 }: {
   action: (
@@ -35,6 +37,7 @@ export function EditWorkflowClient({
   submitLabel: string;
   availableToolkits: ToolkitOption[];
   models: ModelInfo[];
+  parentOptions: ParentOption[];
   initialValues: WorkflowFormValues;
 }) {
   const [proposal, setProposal] = useState<Partial<WorkflowFormValues> | null>(
@@ -50,6 +53,7 @@ export function EditWorkflowClient({
       defaultValues={proposal ?? initialValues}
       availableToolkits={availableToolkits}
       models={models}
+      parentOptions={parentOptions}
       title={agentOpen ? "Workflow config" : undefined}
       fillHeight={agentOpen}
     />

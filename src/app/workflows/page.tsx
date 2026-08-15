@@ -181,7 +181,7 @@ export default async function WorkflowsPage({
           {rows.map((wf) => {
             const latestStatus = latestStatusByWorkflow.get(wf.id);
             const next =
-              wf.enabled && wf.triggerType !== "event"
+              wf.enabled && wf.triggerType === "cron"
                 ? nextRunAt(wf.cron, wf.timezone)
                 : null;
             return (
@@ -209,13 +209,19 @@ export default async function WorkflowsPage({
                       <Mono>
                         {wf.triggerType === "event"
                           ? `${wf.eventTriggers.length} event${wf.eventTriggers.length === 1 ? "" : "s"}`
-                          : wf.cron}
+                          : wf.triggerType === "workflow"
+                            ? "after another workflow"
+                            : wf.cron}
                       </Mono>
                       {!wf.enabled && (
                         <Badge tone="warn">
                           {wf.pausedReason === "needs_reconnect"
                             ? "paused · needs reconnect"
-                            : "paused"}
+                            : wf.pausedReason === "cost_cap"
+                              ? "paused · budget spent"
+                              : wf.pausedReason === "parent_deleted"
+                                ? "paused · trigger deleted"
+                                : "paused"}
                         </Badge>
                       )}
                     </div>
@@ -229,6 +235,32 @@ export default async function WorkflowsPage({
                      * actually fix from here, so it gets a line and a link
                      * rather than being folded into the status dot.
                      */}
+                    {wf.pausedReason === "cost_cap" && (
+                      <p className="text-warn-text mt-2 text-xs">
+                        This month&apos;s budget is spent.{" "}
+                        <Link
+                          href={`/workflows/${wf.id}`}
+                          className="underline underline-offset-2"
+                        >
+                          Raise it
+                        </Link>{" "}
+                        to resume, or wait for next month.
+                      </p>
+                    )}
+
+                    {wf.pausedReason === "parent_deleted" && (
+                      <p className="text-warn-text mt-2 text-xs">
+                        The workflow that triggered this one was deleted.{" "}
+                        <Link
+                          href={`/workflows/${wf.id}`}
+                          className="underline underline-offset-2"
+                        >
+                          Pick a new trigger
+                        </Link>{" "}
+                        to re-enable it.
+                      </p>
+                    )}
+
                     {(() => {
                       const latest = latestByWorkflow.get(wf.id);
                       const blocked =
@@ -273,9 +305,11 @@ export default async function WorkflowsPage({
                           ? "Paused"
                           : wf.triggerType === "event"
                             ? `Runs on ${wf.eventTriggers.join(", ") || "no events yet"}`
-                            : next
-                              ? `Next ${next}`
-                              : "Invalid cron expression"}
+                            : wf.triggerType === "workflow"
+                              ? "Runs after another workflow"
+                              : next
+                                ? `Next ${next}`
+                                : "Invalid cron expression"}
                       </span>
                       {wf.lastRunAt && (
                         <span className="inline-flex items-center gap-1.5">

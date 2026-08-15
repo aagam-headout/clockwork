@@ -1,9 +1,9 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { runSteps, outputs } from "@/db/schema";
+import { runSteps, outputs, runs, workflows } from "@/db/schema";
 import { currentUser, requireUser } from "@/lib/auth/user";
 import { ownedRun, ownedRunOr404 } from "@/lib/data/scope";
 import {
@@ -33,6 +33,8 @@ import {
   ListTree,
   Send,
   SquarePen,
+  Gauge,
+  GitBranch,
 } from "lucide-react";
 import { LiveRun } from "@/components/live-run";
 import { TraceToggleAll, CopyButton } from "@/components/trace-tools";
@@ -103,6 +105,21 @@ export default async function RunDetailPage({
 
   const [output] = await db.select().from(outputs).where(eq(outputs.runId, id));
 
+  /*
+   * Where a chained run came from. Scoped through `workflows.userId` like every
+   * other read here — the parent belongs to the same owner by construction, but
+   * the query says so on its own terms rather than by inheriting the check
+   * above it.
+   */
+  const [parentRun] = run.parentRunId
+    ? await db
+        .select({ id: runs.id, workflowName: workflows.name })
+        .from(runs)
+        .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+        .where(and(eq(runs.id, run.parentRunId), eq(workflows.userId, user.id)))
+        .limit(1)
+    : [];
+
   const tone = statusTone(run.status);
   const toolCalls = steps.filter((s) => s.type === "tool").length;
   // Only connector calls spend the workflow's step budget — see
@@ -120,6 +137,23 @@ export default async function RunDetailPage({
     skipped?: boolean;
     error?: string;
   }>;
+
+  const signals = Object.entries(
+    (output?.signals ?? {}) as Record<string, unknown>,
+  );
+
+  /*
+   * `suppressedReason` does double duty: on a withheld digest it says why, and
+   * on a delivered one it carries the two "delivered anyway" notes. Only the
+   * second kind belongs in a warning next to a digest that did go out.
+   */
+  const reason = output?.suppressedReason ?? null;
+  const conditionNote =
+    reason === "condition_indeterminate"
+      ? "The run did not report a signal the condition needs, so the digest was sent rather than withheld."
+      : reason?.startsWith("condition_error")
+        ? `${reason.replace(/^condition_error: /, "")} — the digest was sent rather than withheld.`
+        : null;
 
   return (
     <PageShell>
@@ -139,6 +173,15 @@ export default async function RunDetailPage({
               {run.status}
             </Badge>
             <Badge tone="neutral">{run.trigger}</Badge>
+            {parentRun && (
+              <Link
+                href={`/runs/${parentRun.id}`}
+                className="text-muted hover:text-foreground inline-flex items-center gap-1 text-[13px] transition-colors"
+              >
+                <GitBranch className="h-3.5 w-3.5" />
+                after {parentRun.workflowName}
+              </Link>
+            )}
             <span>
               {run.startedAt ? (
                 <LocalTime value={run.startedAt} format="datetime" />
@@ -281,6 +324,68 @@ export default async function RunDetailPage({
       {output && (
         <section className="mt-8">
           <SectionLabel icon={FileText}>Output</SectionLabel>
+
+          {signals.length > 0 && (
+            <Card className="mb-3 overflow-hidden">
+              <div className="border-border bg-bg-subtle text-subtle flex items-center gap-1.5 border-b px-5 py-2.5 text-xs">
+                <Gauge className="h-3.5 w-3.5" />
+                Signals
+                {output.severity && (
+                  <Badge
+                    tone={
+                      output.severity === "critical"
+                        ? "danger"
+                        : output.severity === "warn"
+                          ? "warn"
+                          : "neutral"
+                    }
+                    className="ml-1"
+                  >
+                    {output.severity}
+                  </Badge>
+                )}
+              </div>
+              <dl className="divide-border divide-y">
+                {signals.map(([key, value]) => (
+                  <div
+                    key={key}
+                    className="flex items-baseline justify-between gap-4 px-5 py-2.5"
+                  >
+                    <dt className="text-muted font-mono text-[13px]">{key}</dt>
+                    <dd className="text-foreground font-mono text-[13px] tabular-nums">
+                      {String(value)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </Card>
+          )}
+
+          {/* A withheld digest is shown, not hidden. Someone looking at the run
+              needs to see what the threshold kept from them, or the feature is
+              indistinguishable from the agent finding nothing. */}
+          {output.suppressed && (
+            <div className="mb-3">
+              <Alert
+                tone="neutral"
+                title="Withheld — did not meet the alert condition"
+              >
+                {output.suppressedReason ??
+                  "The alert condition evaluated false."}
+              </Alert>
+            </div>
+          )}
+
+          {/* The threshold did not actually gate this delivery, so say so
+              rather than letting a green run imply the condition held. */}
+          {!output.suppressed && conditionNote && (
+            <div className="mb-3">
+              <Alert tone="warn" title="Alert condition could not be checked">
+                {conditionNote}
+              </Alert>
+            </div>
+          )}
+
           <Card className="overflow-hidden">
             {output.unchanged ? (
               <div className="px-5 py-4.5">
@@ -303,6 +408,15 @@ export default async function RunDetailPage({
                 <Send className="h-3.5 w-3.5" />
                 Delivery
               </span>
+              {output.deliveryStatus === "failed" && (
+                <Badge tone="danger">sent nowhere</Badge>
+              )}
+              {output.deliveryStatus === "partial" && (
+                <Badge tone="warn">partly sent</Badge>
+              )}
+              {output.deliveryAttempts > 1 && (
+                <span>{output.deliveryAttempts} attempts</span>
+              )}
               {deliveryLog.length === 0 && <span>—</span>}
               {/* Three states, not two: delivered, deliberately skipped
                   because there was nothing new, and actually failed. */}

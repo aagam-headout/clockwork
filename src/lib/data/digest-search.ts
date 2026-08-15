@@ -134,8 +134,13 @@ export type SignalPoint = { date: Date; signals: Record<string, unknown> };
 export async function signalTimeline(
   userId: string,
   workflowId: string,
-  since: Date,
+  /** How far back to read, in days. A count rather than a Date so the clock
+   * reading happens here — a server component cannot call `Date.now()` during
+   * render without tripping React's purity rule. */
+  days: number,
 ): Promise<SignalPoint[]> {
+  const since = new Date(Date.now() - days * 86_400_000);
+
   const rows = await db
     .select({ date: outputs.createdAt, signals: outputs.signals })
     .from(outputs)

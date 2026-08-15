@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runs } from "@/db/schema";
 import { LIMITS } from "@/lib/limits";
@@ -139,4 +139,32 @@ export async function checkCostCap(workflow: {
 
   const spent = await monthToDateSpend(workflow.id, workflow.timezone);
   return judgeCap(spent, cap);
+}
+
+/**
+ * How many of this month's runs have no recorded price.
+ *
+ * `monthToDateSpend` counts a null `costUsd` as zero, which makes the total a
+ * floor rather than a figure. This is what lets the UI say so instead of
+ * presenting a number it cannot stand behind.
+ */
+export async function unpricedRunsThisMonth(
+  workflowId: string,
+  timezone: string,
+  at: Date = new Date(),
+): Promise<number> {
+  const since = startOfMonthInZone(timezone, at);
+
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(runs)
+    .where(
+      and(
+        eq(runs.workflowId, workflowId),
+        gte(runs.createdAt, since),
+        isNull(runs.costUsd),
+      ),
+    );
+
+  return row?.count ?? 0;
 }

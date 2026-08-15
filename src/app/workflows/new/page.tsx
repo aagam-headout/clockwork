@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth/user";
 import { PageShell } from "@/components/ui";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
 import { getModelCatalogForUser } from "@/lib/models";
+import { chainParentOptions } from "@/lib/data/scope";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "New workflow" };
@@ -13,9 +14,10 @@ export const metadata = { title: "New workflow" };
 export default async function NewWorkflowPage() {
   const user = await requireUser();
 
-  const [availableToolkits, models] = await Promise.all([
+  const [availableToolkits, models, parentOptions] = await Promise.all([
     getConnectedToolkitOptions(user.id),
     getModelCatalogForUser(user.id),
+    chainParentOptions(user.id),
   ]);
 
   return (
@@ -38,6 +40,7 @@ export default async function NewWorkflowPage() {
           action={createWorkflow}
           availableToolkits={availableToolkits}
           models={models}
+          parentOptions={parentOptions}
         />
       </div>
     </PageShell>

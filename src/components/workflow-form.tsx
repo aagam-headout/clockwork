@@ -23,8 +23,11 @@ import {
   Filter,
   TriangleAlert,
   ChevronsUpDown,
+  Gauge,
 } from "lucide-react";
 import { CronBuilder, describeCron } from "@/components/cron-builder";
+import { SignalsEditor } from "@/components/signals-editor";
+import type { SignalDecl } from "@/lib/outcome/condition";
 
 /*
  * A fixed zone list rather than `Intl.supportedValuesOf("timeZone")`: that call
@@ -104,10 +107,18 @@ export type TriggerTypeOption = {
   toolkit: string;
 };
 
+/** A workflow this one may be chained behind, for the parent picker. */
+export type ParentOption = {
+  id: string;
+  name: string;
+  /** The parent's signals — what a trigger condition may be written against. */
+  signals: SignalDecl[];
+};
+
 export type WorkflowFormValues = {
   name: string;
   goal: string;
-  triggerType: "cron" | "event";
+  triggerType: "cron" | "event" | "workflow";
   cron: string;
   timezone: string;
   eventTriggers: string[];
@@ -124,6 +135,11 @@ export type WorkflowFormValues = {
   emailTo: string;
   deliverWebhook: boolean;
   webhookUrl: string;
+  parentWorkflowId: string;
+  parentCondition: string;
+  alertCondition: string;
+  signalSchema: SignalDecl[];
+  monthlyCostCapUsd: string;
 };
 
 export function WorkflowForm({
@@ -132,6 +148,7 @@ export function WorkflowForm({
   submitLabel,
   availableToolkits = [],
   models = [],
+  parentOptions = [],
   fillHeight = false,
   title,
 }: {
@@ -157,6 +174,12 @@ export function WorkflowForm({
   availableToolkits?: ToolkitOption[];
   /** Model catalog from AI Gateway; the picker refreshes it on open. */
   models?: ModelInfo[];
+  /**
+   * The owner's other workflows, for the chained trigger. Passed in rather
+   * than fetched here: this is a client component, and the list has to be
+   * scoped to the owner on the server anyway.
+   */
+  parentOptions?: ParentOption[];
   /**
    * Pin the card to its container's height (lg+) and scroll the sections
    * inside it, so the card frame and its footer stay put. Off by default:
@@ -198,6 +221,9 @@ export function WorkflowForm({
     denyTools: sent
       ? (sent.denyTools ?? "")
       : defaultValues?.denyTools?.join(", "),
+    monthlyCostCapUsd: sent
+      ? (sent.monthlyCostCapUsd ?? "")
+      : (defaultValues?.monthlyCostCapUsd ?? ""),
   };
 
   const [selectedToolkits, setSelectedToolkits] = useState<Set<string>>(
@@ -210,8 +236,14 @@ export function WorkflowForm({
   // and is plenty for "am I anywhere near the limit" purposes.
   const goalTokens = goal.trim() ? Math.ceil(goal.trim().length / 4) : 0;
   const [cron, setCron] = useState(defaultValues?.cron || "0 8 * * 1-5");
-  const [triggerType, setTriggerType] = useState<"cron" | "event">(
+  const [triggerType, setTriggerType] = useState<"cron" | "event" | "workflow">(
     defaultValues?.triggerType ?? "cron",
+  );
+  const [parentWorkflowId, setParentWorkflowId] = useState(
+    defaultValues?.parentWorkflowId ?? "",
+  );
+  const [parentCondition, setParentCondition] = useState(
+    defaultValues?.parentCondition ?? "",
   );
   const [eventTriggers, setEventTriggers] = useState<Set<string>>(
     new Set(defaultValues?.eventTriggers ?? []),
@@ -389,6 +421,7 @@ export function WorkflowForm({
               [
                 { value: "cron", label: "On a schedule" },
                 { value: "event", label: "On an event" },
+                { value: "workflow", label: "After another workflow" },
               ] as const
             ).map((mode) => (
               <Pill
@@ -460,14 +493,33 @@ export function WorkflowForm({
                 </Field>
               </div>
             </>
-          ) : (
+          ) : triggerType === "event" ? (
             <EventTriggerPicker
               options={triggerTypes}
               selected={eventTriggers}
               onToggle={toggleEventTrigger}
               error={triggerError}
             />
+          ) : (
+            <ParentTriggerPicker
+              options={parentOptions}
+              parentWorkflowId={parentWorkflowId}
+              onParentChange={setParentWorkflowId}
+              condition={parentCondition}
+              onConditionChange={setParentCondition}
+            />
           )}
+        </Section>
+
+        <Section
+          title="Signals & alerts"
+          icon={Gauge}
+          description="What this run measures, and when it is worth telling you."
+        >
+          <SignalsEditor
+            defaultSignals={defaultValues?.signalSchema ?? []}
+            defaultCondition={defaultValues?.alertCondition ?? ""}
+          />
         </Section>
 
         <Section title="Tools" icon={Wrench}>
@@ -596,6 +648,22 @@ export function WorkflowForm({
             </Field>
 
             <Field
+              label="Monthly budget (USD)"
+              hint="Blank for no limit. The workflow pauses once this month's runs reach it — the run that crosses the line still finishes, so the overshoot is one run."
+            >
+              <input
+                name="monthlyCostCapUsd"
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                defaultValue={initial.monthlyCostCapUsd}
+                placeholder="No limit"
+                className="input font-mono tabular-nums"
+              />
+            </Field>
+
+            <Field
               label="Max steps"
               hint="One step = a model call plus its tools. At the cap the run stops and saves what it had, marked truncated."
             >
@@ -696,6 +764,90 @@ export function WorkflowForm({
  * stays listed even when the catalog can't be reached, so an unreachable
  * Composio never silently drops a workflow's trigger on save.
  */
+/**
+ * The chained trigger: which workflow runs before this one, and the condition
+ * over that workflow's signals which decides whether this one fires.
+ *
+ * The condition reads the PARENT's signals, not this workflow's — so the
+ * available names change with the selection, and the helper text follows it.
+ */
+function ParentTriggerPicker({
+  options,
+  parentWorkflowId,
+  onParentChange,
+  condition,
+  onConditionChange,
+}: {
+  options: ParentOption[];
+  parentWorkflowId: string;
+  onParentChange: (id: string) => void;
+  condition: string;
+  onConditionChange: (value: string) => void;
+}) {
+  const parent = options.find((o) => o.id === parentWorkflowId);
+  const names = (parent?.signals ?? []).map((s) => s.key).filter(Boolean);
+
+  if (options.length === 0) {
+    return (
+      <p className="text-subtle text-xs leading-relaxed">
+        You have no other workflows yet. Create one first, then come back and
+        chain this one behind it.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <Field
+        label="Runs after"
+        hint="This workflow starts when that one finishes, and is handed its digest and signals."
+      >
+        <select
+          name="parentWorkflowId"
+          required
+          value={parentWorkflowId}
+          onChange={(e) => onParentChange(e.target.value)}
+          className="input"
+        >
+          <option value="">Pick a workflow…</option>
+          {options.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <Field
+        label="Only run when"
+        hint={
+          !parent ? (
+            "Pick a workflow above first."
+          ) : names.length === 0 ? (
+            "That workflow reports no signals, so there is nothing to test. Leave empty to run every time it finishes."
+          ) : (
+            <>
+              Written against <span className="font-mono">{parent.name}</span>
+              &apos;s signals:{" "}
+              <span className="font-mono">{names.join(", ")}</span>. Empty runs
+              every time it finishes.
+            </>
+          )
+        }
+      >
+        <input
+          name="parentCondition"
+          value={condition}
+          onChange={(e) => onConditionChange(e.target.value)}
+          disabled={!parent || names.length === 0}
+          placeholder={names.length ? `${names[0]} > 0` : "No signals to test"}
+          className="input font-mono text-[13px] disabled:cursor-not-allowed disabled:opacity-55"
+        />
+      </Field>
+    </>
+  );
+}
+
 function EventTriggerPicker({
   options,
   selected,
