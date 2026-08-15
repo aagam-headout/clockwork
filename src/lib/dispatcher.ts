@@ -1,7 +1,7 @@
 import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, users, workflows } from "@/db/schema";
-import { runWorkflow } from "@/lib/executor";
+import { executeRun, runWorkflow } from "@/lib/executor";
 import { isDue } from "@/lib/schedule";
 import { checkConnectionsWith, requiredToolkits } from "@/lib/connection-gate";
 import { activeToolkitsByUser } from "@/lib/data/connections";
@@ -26,6 +26,8 @@ type DispatchResult = {
   slug: string;
   status: string;
   error?: string;
+  /** Set for chained runs, which are claimed by id rather than by workflow. */
+  runId?: string;
 };
 
 type Workflow = typeof workflows.$inferSelect;
@@ -58,7 +60,12 @@ export async function runDueWorkflows(now: Date = new Date()) {
     }
   }
 
-  if (due.length === 0) return results;
+  // Still drain: a tick with no cron work due may well have chained runs left
+  // over from the previous one.
+  if (due.length === 0) {
+    results.push(...(await drainChainedRuns(tickStartedAt)));
+    return results;
+  }
 
   /*
    * Group by owner and interleave.
@@ -194,6 +201,65 @@ export async function runDueWorkflows(now: Date = new Date()) {
         slug: workflow.slug,
         status: "failed_to_start",
         error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  results.push(...(await drainChainedRuns(tickStartedAt)));
+
+  return results;
+}
+
+/**
+ * Runs the chained work the due loop's runs produced.
+ *
+ * Chained runs are inserted `queued` by their parent and executed here rather
+ * than inline, so a chain can never consume another user's slice of the tick's
+ * single function duration. Whatever the budget does not reach stays queued
+ * and durable; the next tick takes it, and the reaper's wider window for
+ * chained rows keeps a backlog from being mistaken for a claim that died.
+ *
+ * One row per iteration, re-queried each time, because executing a run changes
+ * the set — it may enqueue grandchildren this same pass should pick up.
+ */
+export async function drainChainedRuns(
+  tickStartedAt: number,
+): Promise<DispatchResult[]> {
+  const results: DispatchResult[] = [];
+
+  while (Date.now() - tickStartedAt <= TICK_BUDGET_MS) {
+    const [next] = await db
+      .select({ runId: runs.id, slug: workflows.slug })
+      .from(runs)
+      .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+      .where(and(eq(runs.status, "queued"), eq(runs.trigger, "workflow")))
+      .orderBy(runs.createdAt)
+      .limit(1);
+
+    if (!next) break;
+
+    try {
+      const result = await executeRun(next.runId);
+      results.push({
+        workflowId: "",
+        slug: next.slug,
+        status: result.status,
+        runId: next.runId,
+      });
+    } catch (err) {
+      /*
+       * `executeRun` records its own failures, so reaching here means the
+       * claim itself failed. Pushing on rather than aborting: one bad row must
+       * not strand every other chained run behind it, and a row whose claim
+       * failed is no longer `queued`, so this cannot loop on it.
+       */
+      console.error(`[drain] ${next.slug} failed to start`, err);
+      results.push({
+        workflowId: "",
+        slug: next.slug,
+        status: "failed_to_start",
+        error: err instanceof Error ? err.message : String(err),
+        runId: next.runId,
       });
     }
   }

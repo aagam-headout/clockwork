@@ -113,9 +113,11 @@ Rules:
   default — re-check them against a live source rather than repeating them,
   and report only what changed since it. Do not repeat items it already
   covered.
-- If nothing has changed since the previous digest, reply with exactly
-  ${NO_UPDATES} and nothing else, and do not call any delivery tool. Silence
-  is better than a digest that says "no updates" in ten words.${handlesEnabled() ? `\n\n${HANDLE_PROMPT}` : ""}`;
+- If nothing has changed since the previous digest, say so with
+  report({no_updates: true}) and do not call any delivery tool. Silence is
+  better than a digest that says "no updates" in ten words.${handlesEnabled() ? `\n\n${HANDLE_PROMPT}` : ""}
+
+${REPORT_PROMPT}`;
 }
 
 type EnqueueResult =
@@ -490,7 +492,54 @@ export async function executeRun(runId: string): Promise<RunResult> {
       },
     });
 
-    const body = result.text.trim();
+    /*
+     * Where the run's outcome comes from.
+     *
+     * `report` is the protocol, but a live instance has workflows written
+     * before it existed and models that occasionally end a turn without
+     * calling it. Falling back to the final text keeps those runs working
+     * exactly as they did.
+     *
+     * The fallback is only safe when the workflow asks nothing of the
+     * envelope. One that declares signals or an alert condition genuinely
+     * cannot be routed without a report — delivering anyway would silently
+     * skip every threshold the user configured — so that case is an error.
+     */
+    const needsEnvelope =
+      declaredSignals.length > 0 || Boolean(workflow.alertCondition?.trim());
+
+    const reported: Envelope | null = envelope;
+    let outcome: Envelope;
+
+    if (reported) {
+      outcome = reported;
+    } else {
+      const text = result.text.trim();
+      if (needsEnvelope) {
+        await db.insert(outputs).values({
+          runId,
+          format: "markdown",
+          body: text,
+          unchanged: false,
+          deliveredTo: [],
+          deliveryLog: [],
+        });
+        const message =
+          "the run never called report, so its signals and alert condition could not be evaluated";
+        await failRun(runId, startedAt, message, { errorCode: "no_report" });
+        return { runId, status: "error", error: message };
+      }
+      outcome = {
+        digest: text === NO_UPDATES ? "" : text,
+        signals: {},
+        severity: null,
+        noUpdates: text === NO_UPDATES,
+      };
+    }
+
+    // Kept so the paths below that only ever needed the text still read the
+    // way they did, including the NO_UPDATES sentinel they compare against.
+    const body = outcome.noUpdates ? NO_UPDATES : outcome.digest;
 
     /*
      * The run got past the preflight but a credential was rejected while it
@@ -550,7 +599,7 @@ export async function executeRun(runId: string): Promise<RunResult> {
      * which would be the wrong lesson for a run that may not have had a read
      * problem at all.
      */
-    if (body === "") {
+    if (!outcome.noUpdates && outcome.digest === "") {
       await db.insert(outputs).values({
         runId,
         format: "markdown",
@@ -568,7 +617,7 @@ export async function executeRun(runId: string): Promise<RunResult> {
       return { runId, status: "error", error: message };
     }
 
-    const unchanged = body === NO_UPDATES;
+    const unchanged = outcome.noUpdates;
 
     /*
      * The agent asked for data it could not get — a spent query budget or an
@@ -615,19 +664,36 @@ export async function executeRun(runId: string): Promise<RunResult> {
     const digest =
       degraded && !unchanged ? `${body}\n\n${degradedNote(harness)}` : body;
 
-    const deliveryLog = await deliverOutput({
-      workflow,
-      deliver,
-      body: digest,
-      unchanged,
-      calledTools: result.toolCalls.map((c) => c.toolName),
-    });
+    /*
+     * The alert condition decides whether this digest is worth waking someone
+     * for. An unevaluable condition still delivers — see `decideDelivery` for
+     * why silence is the dangerous answer there.
+     */
+    const decision = decideDelivery(
+      outcome,
+      workflow.alertCondition,
+      declaredSignals,
+    );
+
+    const deliveryLog = decision.deliver
+      ? await deliverOutput({
+          workflow,
+          deliver,
+          body: digest,
+          unchanged,
+          calledTools: result.toolCalls.map((c) => c.toolName),
+        })
+      : [];
 
     await db.insert(outputs).values({
       runId,
       format: "markdown",
       body: digest,
       unchanged,
+      signals: outcome.signals,
+      severity: outcome.severity,
+      suppressed: decision.suppressed,
+      suppressedReason: decision.suppressedReason,
       deliveredTo: deliveryLog.filter((d) => d.ok).map((d) => d.type),
       deliveryLog,
     });
@@ -716,6 +782,14 @@ export async function executeRun(runId: string): Promise<RunResult> {
         // has been healthy ever since.
         .set({ lastRunAt: new Date(), connectionFailures: 0 })
         .where(eq(workflows.id, workflow.id));
+
+      /*
+       * Chained children fire only from a run that finished. A truncated run
+       * produced a fragment, and handing a fragment downstream would spend a
+       * model call per child on a premise the parent itself does not stand
+       * behind.
+       */
+      await enqueueChildRuns(runId, workflow, outcome, declaredSignals);
     } else if (degradedBlind) {
       /*
        * MINOR 4: a degraded-blind run still reached its apps — the preflight
@@ -757,6 +831,71 @@ export async function executeRun(runId: string): Promise<RunResult> {
 
     await failRun(runId, startedAt, message, errorCode ? { errorCode } : {});
     return { runId, status: "error", error: message };
+  }
+}
+
+/**
+ * Inserts a queued run for every child whose gate the parent's signals opened.
+ *
+ * Queued rather than executed inline: the tick has one function duration to
+ * split across every workflow due, and running a chain here spends another
+ * user's slice of it. The row is durable, so a crash between this insert and
+ * the drain pass costs a delay rather than the run.
+ *
+ * Failures are logged and swallowed. A parent that delivered its digest has
+ * succeeded, and a child that could not be enqueued must not retroactively
+ * turn that run red.
+ */
+export async function enqueueChildRuns(
+  parentRunId: string,
+  workflow: Workflow,
+  envelope: Envelope,
+  declaredSignals: SignalDecl[],
+): Promise<void> {
+  try {
+    const children = await db
+      .select({
+        id: workflows.id,
+        parentCondition: workflows.parentCondition,
+      })
+      .from(workflows)
+      .where(
+        and(
+          eq(workflows.parentWorkflowId, workflow.id),
+          eq(workflows.enabled, true),
+          eq(workflows.triggerType, "workflow"),
+        ),
+      );
+
+    if (children.length === 0) return;
+
+    const { fire } = decideChildren(envelope, declaredSignals, children);
+
+    for (const child of fire) {
+      try {
+        await db.insert(runs).values({
+          workflowId: child.id,
+          trigger: "workflow",
+          status: "queued",
+          parentRunId,
+          triggerPayload: {
+            parentSlug: workflow.slug,
+            parentName: workflow.name,
+            digest: envelope.digest,
+            signals: envelope.signals,
+            severity: envelope.severity,
+          },
+        });
+      } catch {
+        /*
+         * The one-active-run index rejected it: that child is already running
+         * or queued. Correct behaviour — a chain must not stack two runs of
+         * the same workflow — and not worth failing the parent over.
+         */
+      }
+    }
+  } catch (err) {
+    console.error(`[chain] ${workflow.slug} failed to enqueue children`, err);
   }
 }
 

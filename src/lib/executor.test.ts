@@ -1018,3 +1018,280 @@ describe("dynamic tool results reach the trace and the auth check", () => {
     expect(runVerdict().errorCode).toBe("needs_reconnect");
   });
 });
+
+/*
+ * Outcome routing.
+ *
+ * The seam these tests use is `stubModel`'s `duringRun` hook, which hands over
+ * the very ToolSet the run was built with — so calling `tools.report.execute`
+ * here is the same call the model would make, validation and all.
+ */
+
+/** The full outputs row, including the envelope columns. */
+function outputRow() {
+  const insert = calls.find((c) => c.op === "insert" && c.table === "outputs");
+  return insert?.values as
+    | {
+        body: string;
+        unchanged: boolean;
+        signals: Record<string, unknown> | null;
+        severity: string | null;
+        suppressed: boolean;
+        suppressedReason: string | null;
+      }
+    | undefined;
+}
+
+/** Every run row inserted during the call — a chained child is one of these. */
+function insertedRuns() {
+  return calls
+    .filter((c) => c.op === "insert" && c.table === getTableName(runs))
+    .map((c) => c.values as Record<string, unknown>);
+}
+
+/** Queues the rows `enqueueChildRuns` reads back as this workflow's children. */
+function queueChildren(children: unknown[]) {
+  const key = `select:${getTableName(workflows)}`;
+  queued.set(key, [...(queued.get(key) ?? []), children]);
+}
+
+const NUMERIC_SIGNAL = [{ key: "n", type: "number" }];
+
+describe("outcome envelope", () => {
+  it("persists the reported signals and severity", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Digest", signals: { n: 9 }, severity: "warn" },
+        {},
+      );
+    });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+    expect(outputRow()?.signals).toEqual({ n: 9 });
+    expect(outputRow()?.severity).toBe("warn");
+    expect(outputRow()?.body).toBe("## Digest");
+  });
+
+  it("prefers the reported digest over the model's final text", async () => {
+    stubModel({ text: "stray thinking out loud" }, async (tools) => {
+      await tools.report.execute({ digest: "## The real digest" }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    expect(outputRow()?.body).toBe("## The real digest");
+  });
+
+  it("treats a reported no_updates as unchanged", async () => {
+    stubModel({ text: "" }, async (tools) => {
+      await tools.report.execute({ no_updates: true }, {});
+    });
+
+    const result = await executeRun(RUN_ID);
+
+    // Not an empty response: the agent looked, found nothing, and said so.
+    expect(result.status).toBe("ok");
+    expect(outputRow()?.unchanged).toBe(true);
+  });
+
+  it("keeps the last report when the model corrects itself", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    stubModel({}, async (tools) => {
+      const bad = (await tools.report.execute(
+        { digest: "d", signals: { n: "nine" } },
+        {},
+      )) as { error?: string };
+      expect(bad.error).toMatch(/must be a number/);
+      await tools.report.execute({ digest: "d", signals: { n: 9 } }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    expect(outputRow()?.signals).toEqual({ n: 9 });
+  });
+});
+
+describe("alert conditions", () => {
+  it("suppresses a digest that does not clear the threshold", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Digest", signals: { n: 1 } },
+        {},
+      );
+    });
+
+    const result = await executeRun(RUN_ID);
+
+    // The run itself succeeded — the agent did its job and the threshold said
+    // this was not worth anyone's morning.
+    expect(result.status).toBe("ok");
+    expect(outputRow()?.suppressed).toBe(true);
+    expect(outputRow()?.suppressedReason).toBe(
+      "alert condition not met: n > 3",
+    );
+    // The digest is still stored, so a human can see what was withheld.
+    expect(outputRow()?.body).toBe("## Digest");
+  });
+
+  it("delivers a digest that clears the threshold", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Digest", signals: { n: 9 } },
+        {},
+      );
+    });
+
+    await executeRun(RUN_ID);
+
+    expect(outputRow()?.suppressed).toBe(false);
+    expect(outputRow()?.suppressedReason).toBe(null);
+  });
+
+  it("delivers and flags when the threshold could not be evaluated", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
+    stubModel({}, async (tools) => {
+      await tools.report.execute({ digest: "## Digest" }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    // Silence on an unevaluable alert is the dangerous outcome.
+    expect(outputRow()?.suppressed).toBe(false);
+    expect(outputRow()?.suppressedReason).toBe("condition_indeterminate");
+  });
+
+  it("suppression does not mark the run unchanged", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Digest", signals: { n: 1 } },
+        {},
+      );
+    });
+
+    await executeRun(RUN_ID);
+
+    // "Found nothing" and "found something below the bar" must stay distinct.
+    expect(outputRow()?.unchanged).toBe(false);
+  });
+});
+
+describe("report fallback", () => {
+  it("falls back to the final text when nothing is configured", async () => {
+    stubModel({ text: "## Plain digest" });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+    expect(outputRow()?.body).toBe("## Plain digest");
+  });
+
+  it("still honours a NO_UPDATES text fallback", async () => {
+    stubModel({ text: NO_UPDATES });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+    expect(outputRow()?.unchanged).toBe(true);
+  });
+
+  it("errors when a workflow declaring signals gets no report", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    stubModel({ text: "## Digest with no signals" });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("error");
+    expect(runVerdict().errorCode).toBe("no_report");
+  });
+
+  it("errors when a workflow with an alert condition gets no report", async () => {
+    queueWorkflow({ alertCondition: "n > 3", signalSchema: NUMERIC_SIGNAL });
+    stubModel({ text: "## Digest" });
+
+    const result = await executeRun(RUN_ID);
+
+    // Delivering here would silently skip the threshold the user configured.
+    expect(result.status).toBe("error");
+    expect(runVerdict().errorCode).toBe("no_report");
+  });
+});
+
+describe("chained children", () => {
+  it("enqueues a child with the parent's digest and signals", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    queueChildren([{ id: "child-1", parentCondition: null }]);
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Parent", signals: { n: 9 } },
+        {},
+      );
+    });
+
+    await executeRun(RUN_ID);
+
+    const child = insertedRuns().find((r) => r.workflowId === "child-1");
+    expect(child).toBeDefined();
+    expect(child?.status).toBe("queued");
+    expect(child?.trigger).toBe("workflow");
+    expect(child?.parentRunId).toBe(RUN_ID);
+    expect(child?.triggerPayload).toMatchObject({
+      digest: "## Parent",
+      signals: { n: 9 },
+      parentSlug: "digest",
+    });
+  });
+
+  it("does not enqueue a child whose condition is not met", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    queueChildren([{ id: "child-1", parentCondition: "n > 3" }]);
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Parent", signals: { n: 1 } },
+        {},
+      );
+    });
+
+    await executeRun(RUN_ID);
+
+    expect(
+      insertedRuns().find((r) => r.workflowId === "child-1"),
+    ).toBeUndefined();
+  });
+
+  it("enqueues no children when the parent reported no updates", async () => {
+    queueChildren([{ id: "child-1", parentCondition: null }]);
+    stubModel({}, async (tools) => {
+      await tools.report.execute({ no_updates: true }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    expect(
+      insertedRuns().find((r) => r.workflowId === "child-1"),
+    ).toBeUndefined();
+  });
+
+  it("enqueues no children from a truncated run", async () => {
+    queueChildren([{ id: "child-1", parentCondition: null }]);
+    stubModel(
+      { finishReason: "tool-calls", steps: externalSteps(5) },
+      async (tools) => {
+        await tools.report.execute({ digest: "## Fragment" }, {});
+      },
+    );
+
+    const result = await executeRun(RUN_ID);
+
+    // A fragment is not a premise to spend a model call on downstream.
+    expect(result.status).toBe("truncated");
+    expect(
+      insertedRuns().find((r) => r.workflowId === "child-1"),
+    ).toBeUndefined();
+  });
+});

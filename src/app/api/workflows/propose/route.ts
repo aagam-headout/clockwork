@@ -14,6 +14,9 @@ import {
 import { getToolsFor } from "@/lib/composio";
 import { takeToken } from "@/lib/rate-limit";
 import { buildToolFilter } from "@/lib/read-only";
+import { LIMITS } from "@/lib/limits";
+import { parseCondition } from "@/lib/outcome/condition";
+import { parseSignalSchema } from "@/lib/outcome/envelope";
 
 // Two model calls now (research, then the spec), and the research one waits on
 // real app APIs.
@@ -134,6 +137,27 @@ function buildSpecSchema(toolkitSlugs: string[], modelIds: string[]) {
     deliverSlack: z
       .boolean()
       .describe("whether to also DM the digest on Slack"),
+    signalSchema: z
+      .array(
+        z.object({
+          key: z
+            .string()
+            .describe("lowercase_with_underscores, e.g. open_prs_stale"),
+          type: z.enum(["number", "string", "boolean"]),
+          description: z.string().optional(),
+        }),
+      )
+      .max(LIMITS.maxSignalsPerWorkflow)
+      .optional()
+      .describe(
+        "Measurable values this workflow reports every run. Propose these only when the goal contains a threshold, a count, or a comparison — a purely narrative digest needs none.",
+      ),
+    alertCondition: z
+      .string()
+      .optional()
+      .describe(
+        "An expression over the signal names above, e.g. 'open_prs_stale > 3 || mrr_delta_pct < -5'. Only comparisons and && || ! are allowed — no arithmetic, no function calls. Propose one only when the user asked to be told conditionally.",
+      ),
   });
 }
 
@@ -279,7 +303,25 @@ almost always be light.
 Default timezone to Asia/Kolkata unless the user implies otherwise. maxSteps is
 the run's hard tool-call budget: about 10-15 covers a normal digest, higher only
 if the goal spans many toolkits, and leave one extra step for the Slack DM when
-deliverSlack is true — a run that hits the cap is recorded as truncated.`;
+deliverSlack is true — a run that hits the cap is recorded as truncated.
+
+## Signals and alert conditions
+
+Most workflows need neither. Leave both out for anything whose answer is a
+narrative — "what happened in my inbox", "summarise yesterday's commits".
+
+Propose signalSchema when the goal names something countable or comparable
+that the run will measure every time: a count, a percentage, an age in days, a
+yes/no state. Name them lowercase_with_underscores and describe each one.
+
+Propose alertCondition only when the user asked to hear about it
+conditionally — "only tell me if", "let me know when it goes above", "ping me
+if nothing has moved in three days". Write it over the signal names you just
+declared, using comparisons and && || ! and nothing else. Without a condition
+the digest is delivered every run, which is the right default.
+
+Say in your reply what the condition means in plain English, because a
+threshold the user did not intend is a workflow that stays silent for weeks.`;
 }
 
 export async function POST(req: NextRequest) {
@@ -437,12 +479,28 @@ export async function POST(req: NextRequest) {
       ? object.spec.model
       : fallbackWorkflowModel(offered);
 
+    /*
+     * A proposed condition the form would reject is worse than none: the user
+     * would accept the chat's suggestion and then meet a validation error they
+     * did not write. Signals are kept either way — a workflow that measures
+     * things without a threshold is still useful, and the user can add the
+     * threshold themselves.
+     */
+    const signalSchema = parseSignalSchema(object.spec.signalSchema ?? []);
+    const proposedCondition = object.spec.alertCondition?.trim();
+    const alertCondition =
+      proposedCondition && parseCondition(proposedCondition, signalSchema).ok
+        ? proposedCondition
+        : undefined;
+
     return NextResponse.json({
       reply: object.reply,
       spec: {
         ...object.spec,
         model,
         deliverSlack,
+        signalSchema,
+        alertCondition,
         toolkits: toolkits.length > 0 ? toolkits : ["composio_search"],
         // The form field is the flag's inverse; ship it so the prefilled form
         // shows the same permission the chat was drafting under.

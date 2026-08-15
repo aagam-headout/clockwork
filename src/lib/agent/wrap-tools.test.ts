@@ -144,8 +144,8 @@ describe("wrapToolsWithHandles", () => {
     const { wrapped } = harnessFor(big);
 
     // Not an identity function any more: `report` is how a run produces an
-    // outcome, so it survives the escape hatch. What the hatch is actually
-    // about — replacing results with descriptors — is still off.
+    // outcome, so it survives the escape hatch. Everything the hatch is
+    // actually about — replacing results with descriptors — is still off.
     expect(Object.keys(wrapped).sort()).toEqual([
       "GMAIL_FETCH_EMAILS",
       "report",

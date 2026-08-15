@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, like, ne, and, inArray, sql } from "drizzle-orm";
+import { eq, like, ne, and, inArray, isNull, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
@@ -23,6 +23,9 @@ import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
 import { LIMITS } from "@/lib/limits";
 import { minIntervalMinutes } from "@/lib/schedule";
 import { assertSafeWebhookUrl } from "@/lib/net/safe-url";
+import { validateChain } from "@/lib/chain";
+import { parseCondition, type SignalDecl } from "@/lib/outcome/condition";
+import { parseSignalSchema } from "@/lib/outcome/envelope";
 
 function slugify(name: string) {
   return (
@@ -222,11 +225,20 @@ async function checkDeliveryConnections(
   return warnings;
 }
 
-async function parseWorkflowForm(formData: FormData, userId: string) {
+async function parseWorkflowForm(
+  formData: FormData,
+  userId: string,
+  /** The workflow being edited, so it is excluded from its own cycle and
+   * fan-out checks. Null when creating. */
+  workflowId: string | null = null,
+) {
   const name = field(formData, "name");
   const goal = field(formData, "goal");
+  const rawTriggerType = field(formData, "triggerType", "cron");
   const triggerType =
-    field(formData, "triggerType", "cron") === "event" ? "event" : "cron";
+    rawTriggerType === "event" || rawTriggerType === "workflow"
+      ? rawTriggerType
+      : "cron";
   const cron = field(formData, "cron");
   const timezone = field(formData, "timezone", "Asia/Kolkata");
   const model = field(formData, "model", "anthropic/claude-sonnet-5");
@@ -254,6 +266,20 @@ async function parseWorkflowForm(formData: FormData, userId: string) {
 
   const deliver = await parseDeliver(formData);
 
+  /*
+   * The outcome configuration: what the run may measure, and the two gates
+   * those measurements feed. Validated here rather than at run time on
+   * purpose — a typo in a threshold should be a red field in a form, not a
+   * surprise at 6am three weeks later on a workflow everyone assumed was
+   * watching something.
+   */
+  const signalSchema = parseSignalSchema(
+    jsonField(formData, "signalSchema") ?? [],
+  );
+  const alertCondition = field(formData, "alertCondition") || null;
+  const parentWorkflowId = field(formData, "parentWorkflowId") || null;
+  const parentCondition = field(formData, "parentCondition") || null;
+
   if (!name || !goal || toolkits.length === 0) {
     throw new Error("Name, goal, and at least one toolkit are required.");
   }
@@ -263,6 +289,16 @@ async function parseWorkflowForm(formData: FormData, userId: string) {
   if (triggerType === "event" && eventTriggers.length === 0) {
     throw new Error("An event workflow needs at least one trigger.");
   }
+  if (triggerType === "workflow" && !parentWorkflowId) {
+    throw new Error("A chained workflow needs a workflow to run after.");
+  }
+
+  await assertOutcomeConfig(userId, workflowId, {
+    signalSchema,
+    alertCondition,
+    parentWorkflowId: triggerType === "workflow" ? parentWorkflowId : null,
+    parentCondition,
+  });
   if (eventTriggers.length > LIMITS.maxEventTriggers) {
     throw new Error(
       `A workflow can subscribe to at most ${LIMITS.maxEventTriggers} triggers.`,
@@ -270,6 +306,8 @@ async function parseWorkflowForm(formData: FormData, userId: string) {
   }
 
   if (triggerType === "cron") {
+    // Only a cron workflow has a schedule to police. An event or chained one
+    // is woken by something else entirely.
     // The scheduler ticks every 5 minutes, so a faster cron is a schedule the
     // app cannot honour — and the cheapest way for one account to monopolise
     // the tick.
@@ -294,9 +332,9 @@ async function parseWorkflowForm(formData: FormData, userId: string) {
     name,
     goal,
     triggerType,
-    // An event workflow has no schedule; keep the column non-null and empty
-    // so the dispatcher never considers it due.
-    cron: triggerType === "event" ? "" : cron,
+    // An event or chained workflow has no schedule; keep the column non-null
+    // and empty so the dispatcher never considers it due.
+    cron: triggerType === "cron" ? cron : "",
     timezone,
     model,
     maxSteps,
@@ -306,7 +344,103 @@ async function parseWorkflowForm(formData: FormData, userId: string) {
     allowTools,
     denyTools,
     deliver,
+    signalSchema,
+    alertCondition,
+    // Only a chained workflow keeps a parent. Switching a workflow back to
+    // cron must clear the link, or it stays in its old parent's fan-out and
+    // silently counts against that limit.
+    parentWorkflowId: triggerType === "workflow" ? parentWorkflowId : null,
+    parentCondition: triggerType === "workflow" ? parentCondition : null,
   };
+}
+
+/** A JSON-encoded hidden field, as the multi-value parts of the form post. */
+function jsonField(formData: FormData, key: string): unknown {
+  const raw = field(formData, key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(`Could not read the ${key} field.`);
+  }
+}
+
+/**
+ * Everything about a workflow's outcome configuration that must hold before
+ * the row is written. Throws, matching how the rest of this file reports a
+ * validation failure back to the form.
+ */
+async function assertOutcomeConfig(
+  userId: string,
+  workflowId: string | null,
+  input: {
+    signalSchema: SignalDecl[];
+    alertCondition: string | null;
+    parentWorkflowId: string | null;
+    parentCondition: string | null;
+  },
+): Promise<void> {
+  const declared = input.signalSchema;
+
+  if (declared.length > LIMITS.maxSignalsPerWorkflow) {
+    throw new Error(
+      `A workflow can declare at most ${LIMITS.maxSignalsPerWorkflow} signals.`,
+    );
+  }
+
+  const seen = new Set<string>();
+  for (const decl of declared) {
+    if (!/^[a-z][a-z0-9_]*$/.test(decl.key)) {
+      throw new Error(
+        `Signal name "${decl.key}" must be lowercase letters, digits and underscores, starting with a letter.`,
+      );
+    }
+    if (seen.has(decl.key)) {
+      throw new Error(`Duplicate signal name "${decl.key}".`);
+    }
+    seen.add(decl.key);
+  }
+
+  if (input.alertCondition?.trim()) {
+    const parsed = parseCondition(input.alertCondition, declared);
+    if (!parsed.ok) throw new Error(`Alert condition: ${parsed.error}`);
+  }
+
+  if (!input.parentWorkflowId) {
+    if (input.parentCondition?.trim()) {
+      throw new Error(
+        "A trigger condition needs a parent workflow to read signals from.",
+      );
+    }
+    return;
+  }
+
+  /*
+   * Scoped to the owner. A parent id belonging to someone else is simply
+   * absent from this list, so it reads as "not found" rather than as a
+   * permission error — which would confirm the row exists.
+   */
+  const owned = await db
+    .select({
+      id: workflows.id,
+      parentWorkflowId: workflows.parentWorkflowId,
+      signalSchema: workflows.signalSchema,
+    })
+    .from(workflows)
+    .where(eq(workflows.userId, userId));
+
+  const chain = validateChain(workflowId, input.parentWorkflowId, owned);
+  if (!chain.ok) throw new Error(chain.error);
+
+  if (input.parentCondition?.trim()) {
+    // The condition reads the PARENT's signals, not this workflow's.
+    const parent = owned.find((w) => w.id === input.parentWorkflowId);
+    const parsed = parseCondition(
+      input.parentCondition,
+      parseSignalSchema(parent?.signalSchema),
+    );
+    if (!parsed.ok) throw new Error(`Trigger condition: ${parsed.error}`);
+  }
 }
 
 function splitList(value: string): string[] {
@@ -430,7 +564,11 @@ export async function updateWorkflow(
 
   try {
     const user = await requireUser();
-    const { warnings, ...parsed } = await parseWorkflowForm(formData, user.id);
+    const { warnings, ...parsed } = await parseWorkflowForm(
+      formData,
+      user.id,
+      id,
+    );
     // The name may have changed, so the slug is re-derived — excluding this
     // row, or renaming a workflow to its own name would bump it to "-2".
     const slug = await uniqueSlug(user.id, parsed.name, id);
@@ -514,6 +652,29 @@ export async function toggleWorkflow(id: string, enabled: boolean) {
   );
 }
 
+/**
+ * Pauses any chained workflow left pointing at nothing.
+ *
+ * The parent foreign key is ON DELETE SET NULL, which keeps a child's run
+ * history rather than cascading it away — but leaves the child with a trigger
+ * that can never fire. Paused is the honest state, and `pausedReason` lets the
+ * workflows page say why instead of showing a workflow that looks scheduled
+ * and never runs.
+ */
+async function pauseOrphanedChildren(userId: string): Promise<void> {
+  await db
+    .update(workflows)
+    .set({ enabled: false, pausedReason: "parent_deleted" })
+    .where(
+      and(
+        eq(workflows.userId, userId),
+        eq(workflows.triggerType, "workflow"),
+        isNull(workflows.parentWorkflowId),
+        eq(workflows.enabled, true),
+      ),
+    );
+}
+
 export async function deleteWorkflow(id: string) {
   let failure: string | null = null;
   try {
@@ -530,6 +691,7 @@ export async function deleteWorkflow(id: string) {
       // Deleting the last workflow using a trigger slug must deregister it —
       // otherwise Composio keeps delivering events that now match nothing.
       await registerTriggers(user.id);
+      await pauseOrphanedChildren(user.id);
     }
   } catch (err) {
     failure = actionError(err).error;

@@ -1,6 +1,7 @@
 import { and, lt, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runs } from "@/db/schema";
+import { CHAIN_QUEUE_MAX_AGE_MS } from "@/lib/limits";
 
 /**
  * Runs are a rolling log, not an archive: each one carries a full tool trace,
@@ -34,9 +35,17 @@ export async function pruneOldRuns(): Promise<number> {
  * Releases runs stuck in `running` — a function killed mid-run (deploy,
  * timeout, OOM) leaves a row that never finishes, and the one-active-run
  * index would then block that workflow forever.
+ *
+ * A `queued` chained run is the exception. It is not a claim that failed; it
+ * is a durable backlog entry waiting for tick budget, and under sustained load
+ * it can legitimately wait longer than the fifteen minutes that means "dead"
+ * for every other queued row. It gets `CHAIN_QUEUE_MAX_AGE_MS` instead — wider,
+ * but still bounded, because an abandoned chained row must eventually clear or
+ * the one-active-run index blocks its workflow forever too.
  */
 export async function reapStuckRuns(maxAgeMs = 15 * 60_000): Promise<number> {
   const cutoff = new Date(Date.now() - maxAgeMs);
+  const chainCutoff = new Date(Date.now() - CHAIN_QUEUE_MAX_AGE_MS);
 
   const reaped = await db
     .update(runs)
@@ -46,10 +55,19 @@ export async function reapStuckRuns(maxAgeMs = 15 * 60_000): Promise<number> {
       finishedAt: new Date(),
     })
     .where(
-      and(
-        sql`${runs.status} in ('running', 'queued')`,
-        lt(runs.createdAt, cutoff),
-      ),
+      sql`(
+        (${runs.status} = 'running' and ${runs.createdAt} < ${cutoff})
+        or (
+          ${runs.status} = 'queued'
+          and ${runs.trigger} <> 'workflow'
+          and ${runs.createdAt} < ${cutoff}
+        )
+        or (
+          ${runs.status} = 'queued'
+          and ${runs.trigger} = 'workflow'
+          and ${runs.createdAt} < ${chainCutoff}
+        )
+      )`,
     )
     .returning({ id: runs.id });
 
