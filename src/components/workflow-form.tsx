@@ -415,6 +415,17 @@ export function WorkflowForm({
 
         <Section title="Trigger" icon={CalendarClock}>
           <input type="hidden" name="triggerType" value={triggerType} />
+          {/*
+           * The timezone picker lives in the cron branch, because a schedule is
+           * the obvious thing a zone applies to. It is not the only thing: the
+           * monthly budget resets on the workflow's own midnight, whatever
+           * triggers it. Without this hidden field the select simply is not in
+           * the form for an event or chained workflow, so every save silently
+           * reset the zone to the default and moved that boundary.
+           */}
+          {triggerType !== "cron" && (
+            <input type="hidden" name="timezone" value={timezone} />
+          )}
 
           <div className="flex flex-wrap gap-1.5">
             {(

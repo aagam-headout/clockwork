@@ -20,6 +20,22 @@ export const OUTPUT_RETENTION_DAYS = Number(
 );
 
 /**
+ * Whether a run is old enough that `pruneOldRunSteps` will have taken its
+ * trace, even though the run and its digest are kept.
+ *
+ * Lives here rather than in the page that asks, because a server component
+ * cannot read the clock during render without tripping React's purity rule —
+ * and because this window and the sweep that enforces it should never be able
+ * to disagree.
+ */
+export function traceWindowPassed(createdAt: Date): boolean {
+  if (!Number.isFinite(RUN_RETENTION_DAYS) || RUN_RETENTION_DAYS <= 0) {
+    return false;
+  }
+  return createdAt.getTime() < Date.now() - RUN_RETENTION_DAYS * 86_400_000;
+}
+
+/**
  * Drops the tool trace of runs past the shorter window, leaving the run row
  * and its digest in place.
  */

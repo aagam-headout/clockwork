@@ -942,7 +942,7 @@ export async function enqueueChildRuns(
          * gets the constraint handling (already running, duplicate event) that
          * every other caller relies on.
          */
-        await enqueueRun(child.id, "workflow", {
+        const queued = await enqueueRun(child.id, "workflow", {
           parentRunId,
           triggerPayload: {
             parentSlug: workflow.slug,
@@ -952,6 +952,15 @@ export async function enqueueChildRuns(
             severity: envelope.severity,
           },
         });
+
+        // A refusal is a real outcome — over quota, or the child is already
+        // running — and silently dropping it leaves a chain that "just didn't
+        // fire" with nothing anywhere to say why.
+        if (queued.skipped) {
+          console.warn(
+            `[chain] ${workflow.slug} -> ${child.id} not queued: ${queued.reason}`,
+          );
+        }
       } catch (err) {
         // `enqueueRun` returns quota and constraint refusals rather than
         // throwing, so reaching here is a database fault on one child. The

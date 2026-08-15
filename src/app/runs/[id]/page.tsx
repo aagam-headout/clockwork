@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { runSteps, outputs, runs, workflows } from "@/db/schema";
 import { currentUser, requireUser } from "@/lib/auth/user";
 import { ownedRun, ownedRunOr404 } from "@/lib/data/scope";
+import { traceWindowPassed } from "@/lib/retention";
 import {
   Alert,
   Badge,
@@ -137,6 +138,12 @@ export default async function RunDetailPage({
     skipped?: boolean;
     error?: string;
   }>;
+
+  /*
+   * A run older than the trace window kept its digest but lost its steps, and
+   * that is a different thing from a run that never took any.
+   */
+  const tracePruned = steps.length === 0 && traceWindowPassed(run.createdAt);
 
   const signals = Object.entries(
     (output?.signals ?? {}) as Record<string, unknown>,
@@ -454,7 +461,15 @@ export default async function RunDetailPage({
 
         {steps.length === 0 ? (
           <p className="rounded-container border-border bg-bg-subtle text-muted border px-4 py-8 text-center text-sm">
-            No steps recorded for this run.
+            {/*
+             * Traces are pruned well before the digest they belong to — a run
+             * kept for its output can outlive its steps by months. Saying so
+             * matters: an empty trace on an old successful run otherwise reads
+             * as "this run did nothing".
+             */}
+            {tracePruned
+              ? "The step-by-step trace for this run has been pruned. Its digest is kept."
+              : "No steps recorded for this run."}
           </p>
         ) : (
           /*

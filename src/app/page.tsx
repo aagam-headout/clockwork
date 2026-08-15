@@ -67,6 +67,18 @@ export default async function TodayPage() {
           eq(workflows.userId, user.id),
           eq(runs.status, "ok"),
           gte(outputs.createdAt, startOfToday),
+          /*
+           * The feed is what your workflows actually told you today, so the two
+           * "nothing was sent" states stay out of it.
+           *
+           * `unchanged` rows store the NO_UPDATES sentinel as their body, and
+           * without this the overview rendered a digest card reading literally
+           * "NO_UPDATES". `suppressed` rows hold a real digest that a threshold
+           * withheld — showing it here as an ordinary delivery contradicts the
+           * run page, which calls it withheld.
+           */
+          eq(outputs.unchanged, false),
+          eq(outputs.suppressed, false),
         ),
       )
       .orderBy(desc(outputs.createdAt)),
