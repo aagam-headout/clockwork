@@ -112,12 +112,27 @@ vi.mock("@/lib/run-cost", () => ({
 }));
 
 const isAuthError = vi.fn(() => false);
-vi.mock("@/lib/connection-gate", () => ({
-  checkConnections: async () => ({ ok: true }),
-  requiredToolkits: async () => [],
-  isAuthError: (...args: unknown[]) => isAuthError(...(args as [])),
-  toolkitForSlug: () => "gmail",
-}));
+vi.mock("@/lib/connection-gate", async () => {
+  /*
+   * `isFailure` comes from the real module, not a stub.
+   *
+   * It decides whether a tool result counts as a failure — the thing these
+   * tests are about — so a hand-written stand-in would be testing the stub.
+   * It is also imported by `wrap-tools.ts`, so omitting it from this factory
+   * makes it `undefined` at every call site and every run dies in the outer
+   * catch as a bare `error`, which is how this suite silently broke.
+   */
+  const actual = await vi.importActual<typeof import("@/lib/connection-gate")>(
+    "@/lib/connection-gate",
+  );
+  return {
+    checkConnections: async () => ({ ok: true }),
+    requiredToolkits: async () => [],
+    isAuthError: (...args: unknown[]) => isAuthError(...(args as [])),
+    toolkitForSlug: () => "gmail",
+    isFailure: actual.isFailure,
+  };
+});
 
 vi.mock("@/lib/data/connections", () => ({
   markConnectionStatus: async () => undefined,

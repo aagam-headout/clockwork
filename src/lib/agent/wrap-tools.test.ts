@@ -3,6 +3,16 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const readToolHash = vi.fn();
 const writeToolHash = vi.fn();
 
+/*
+ * `@/db` is stubbed even though nothing here queries.
+ *
+ * `vi.importActual` below pulls in the real `tool-hashes`, which imports the
+ * database module, which dereferences DATABASE_URL at import time. Without
+ * this the whole suite fails to load on any machine that has not exported one
+ * — it was passing only by accident of the developer's shell.
+ */
+vi.mock("@/db", () => ({ db: {} }));
+
 vi.mock("@/lib/data/tool-hashes", async () => {
   const actual = await vi.importActual<typeof import("@/lib/data/tool-hashes")>(
     "@/lib/data/tool-hashes",
