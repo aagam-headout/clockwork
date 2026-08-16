@@ -81,6 +81,22 @@ describe("reapStuckRuns", () => {
     );
   });
 
+  it("ages a running row from when it started, not when it was queued", async () => {
+    /*
+     * A chained run may sit queued for up to CHAIN_QUEUE_MAX_AGE_MS before the
+     * drain claims it. Judged on `created_at` it is already "stuck" on the
+     * tick it starts — and reaping a live run releases the one-active-run
+     * index, which lets a second run of the same workflow start beside it.
+     */
+    const captured: { sql?: string; params: unknown[] } = { params: [] };
+    update.mockReturnValue(updateChain(captured));
+
+    await reapStuckRuns();
+
+    expect(captured.sql).toContain("coalesce");
+    expect(captured.sql).toContain("started_at");
+  });
+
   it("defaults the chain window to an hour", () => {
     expect(CHAIN_QUEUE_MAX_AGE_MS).toBe(60 * 60 * 1000);
   });

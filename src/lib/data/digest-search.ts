@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { outputs, runs, workflows } from "@/db/schema";
 
@@ -15,6 +15,9 @@ import { outputs, runs, workflows } from "@/db/schema";
 
 export const MAX_SEARCH_LIMIT = 50;
 const DEFAULT_LIMIT = 10;
+
+/** Points one sparkline may read. More than this is not a chart, it is a scan. */
+export const MAX_TIMELINE_POINTS = 500;
 
 export type DigestHit = {
   runId: string;
@@ -79,8 +82,13 @@ export async function searchDigests(args: SearchArgs): Promise<DigestHit[]> {
       sql`${outputs.searchVector} @@ websearch_to_tsquery('english', ${query})`,
     );
   }
-  // A suppressed or unchanged run has nothing a reader would recognise as a
-  // digest; including them would fill the results with blanks.
+  /*
+   * An unchanged run's body holds the literal `NO_UPDATES` sentinel, not
+   * empty text — filtering on body alone let that string surface as a search
+   * hit. The empty-body check stays for failure-path rows, which have neither
+   * a digest nor the flag.
+   */
+  conditions.push(eq(outputs.unchanged, false));
   conditions.push(sql`${outputs.body} <> ''`);
 
   /*
@@ -141,6 +149,12 @@ export async function signalTimeline(
 ): Promise<SignalPoint[]> {
   const since = new Date(Date.now() - days * 86_400_000);
 
+  /*
+   * Newest first with a cap, then reversed for the caller. The window alone
+   * isn't a bound — an event-triggered workflow can produce hundreds of runs
+   * a day, more than a chart can draw pixels for. Taking the newest keeps the
+   * recent end of the series instead of whatever the window starts with.
+   */
   const rows = await db
     .select({ date: outputs.createdAt, signals: outputs.signals })
     .from(outputs)
@@ -154,7 +168,8 @@ export async function signalTimeline(
         sql`${outputs.signals} is not null`,
       ),
     )
-    .orderBy(asc(outputs.createdAt));
+    .orderBy(desc(outputs.createdAt))
+    .limit(MAX_TIMELINE_POINTS);
 
-  return rows as SignalPoint[];
+  return (rows as SignalPoint[]).reverse();
 }

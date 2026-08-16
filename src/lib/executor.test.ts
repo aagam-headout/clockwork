@@ -138,8 +138,14 @@ vi.mock("@/lib/data/connections", () => ({
   markConnectionStatus: async () => undefined,
 }));
 
-import { deliveryStatusFrom, executeRun, NO_UPDATES } from "./executor";
-import { runs, runSteps, workflows } from "@/db/schema";
+import {
+  deliveryStatusFrom,
+  executeRun,
+  NO_UPDATES,
+  retryPendingDeliveries,
+} from "./executor";
+import { outputs, runs, runSteps, workflows } from "@/db/schema";
+import { LIMITS } from "@/lib/limits";
 import { MAX_QUERIES_PER_RUN } from "@/lib/agent/wrap-tools";
 
 /** Overrides the queued workflow row a test's `executeRun` will read back. */
@@ -1179,6 +1185,42 @@ describe("alert conditions", () => {
     // "Found nothing" and "found something below the bar" must stay distinct.
     expect(outputRow()?.unchanged).toBe(false);
   });
+
+  it("flushes no hashes for a digest a threshold withheld", async () => {
+    /*
+     * An empty delivery log is not "everything succeeded" here — nobody read
+     * these bytes. Recording the hashes would tell the next run the payload
+     * was already reported, so a value that later crosses the line arrives
+     * marked unchanged.
+     */
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Digest", signals: { n: 1 } },
+        {},
+      );
+    });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+    expect(outputRow()?.suppressed).toBe(true);
+    expect(writeToolHash).not.toHaveBeenCalled();
+  });
+
+  it("still flushes for a digest the threshold let through", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Digest", signals: { n: 9 } },
+        {},
+      );
+    });
+
+    await executeRun(RUN_ID);
+
+    expect(writeToolHash).toHaveBeenCalled();
+  });
 });
 
 describe("report fallback", () => {
@@ -1547,5 +1589,65 @@ describe("what a chained child is told", () => {
 
     const prompt = userMessageOf(generateText.mock.calls[0][0]);
     expect(prompt).toContain("started by an event");
+  });
+});
+
+describe("a retry sweep that has nothing left to retry", () => {
+  /** A row the sweep will pick up, with `previous` as its delivery log. */
+  function queueRetryRow(previous: unknown[], deliver: unknown[]) {
+    queue(`select:${getTableName(outputs)}`, [
+      {
+        outputId: "output-1",
+        body: "## Digest",
+        log: previous,
+        attempts: 1,
+        workflow: { ...workflow, deliver },
+      },
+    ]);
+    // Second pass finds nothing, which ends the sweep.
+    queue(`select:${getTableName(outputs)}`, []);
+  }
+
+  /** The values written by the last `update(outputs)` call. */
+  function settled() {
+    const updates = calls.filter(
+      (c) => c.op === "update" && c.table === getTableName(outputs),
+    );
+    return updates.at(-1)?.values as {
+      deliveryStatus?: string;
+      deliveryAttempts?: number;
+    };
+  }
+
+  it("settles a part-delivered digest as partial, not failed", async () => {
+    /*
+     * The webhook reached its endpoint; the Slack send did not and cannot be
+     * retried — `deliverOutput` only verifies tool-based targets, it does not
+     * perform them. Writing `failed` over this reports a digest that a reader
+     * did receive as one that never arrived.
+     */
+    queueRetryRow(
+      [
+        { type: "webhook", ok: true },
+        { type: "slack_dm", ok: false, error: "agent never called SLACK_DM" },
+      ],
+      [{ type: "slack_dm" }],
+    );
+
+    await retryPendingDeliveries(() => true);
+
+    expect(settled().deliveryStatus).toBe("partial");
+    expect(settled().deliveryAttempts).toBe(LIMITS.maxDeliveryAttempts);
+  });
+
+  it("still settles a wholly failed digest as failed", async () => {
+    queueRetryRow(
+      [{ type: "slack_dm", ok: false, error: "agent never called SLACK_DM" }],
+      [{ type: "slack_dm" }],
+    );
+
+    await retryPendingDeliveries(() => true);
+
+    expect(settled().deliveryStatus).toBe("failed");
   });
 });

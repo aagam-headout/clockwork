@@ -95,6 +95,13 @@ export async function pruneOldRuns(): Promise<number> {
  * for every other queued row. It gets `CHAIN_QUEUE_MAX_AGE_MS` instead — wider,
  * but still bounded, because an abandoned chained row must eventually clear or
  * the one-active-run index blocks its workflow forever too.
+ *
+ * A `running` row is aged from `started_at`, not `created_at`. Those match
+ * for a run claimed the instant it's inserted, but a chained run may sit
+ * queued up to `CHAIN_QUEUE_MAX_AGE_MS` before the drain claims it — judged
+ * on `created_at` it could look "stuck" on the tick it starts. Reaping a
+ * still-running row is not cosmetic: flipping it to `error` releases
+ * `runs_one_active_per_workflow`, letting a second run start alongside it.
  */
 export async function reapStuckRuns(maxAgeMs = 15 * 60_000): Promise<number> {
   // One clock reading for both windows. Two calls to `Date.now()` can land on
@@ -114,7 +121,10 @@ export async function reapStuckRuns(maxAgeMs = 15 * 60_000): Promise<number> {
     })
     .where(
       sql`(
-        (${runs.status} = 'running' and ${runs.createdAt} < ${cutoff})
+        (
+          ${runs.status} = 'running'
+          and coalesce(${runs.startedAt}, ${runs.createdAt}) < ${cutoff}
+        )
         or (
           ${runs.status} = 'queued'
           and ${runs.trigger} <> 'workflow'

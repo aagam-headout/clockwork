@@ -429,6 +429,8 @@ async function assertOutcomeConfig(
     if (!parsed.ok) throw new Error(`Alert condition: ${parsed.error}`);
   }
 
+  await assertChildConditionsSurvive(userId, workflowId, declared);
+
   if (!input.parentWorkflowId) {
     if (input.parentCondition?.trim()) {
       throw new Error(
@@ -463,6 +465,54 @@ async function assertOutcomeConfig(
       parseSignalSchema(parent?.signalSchema),
     );
     if (!parsed.ok) throw new Error(`Trigger condition: ${parsed.error}`);
+  }
+}
+
+/**
+ * Refuses a signal change that would break a child's trigger condition.
+ *
+ * A child's condition is validated against the parent's signals when the
+ * child is saved, but never re-checked when the parent changes. Renaming or
+ * dropping a signal would leave a condition that no longer parses, and
+ * `decideChildren` fails open — every gated child fires on every parent run,
+ * silently.
+ *
+ * Refused rather than repaired: only the child's author knows what the
+ * condition should say once its signal is gone.
+ */
+async function assertChildConditionsSurvive(
+  userId: string,
+  workflowId: string | null,
+  declared: SignalDecl[],
+): Promise<void> {
+  // Nothing can point at a workflow that does not exist yet.
+  if (!workflowId) return;
+
+  const children = await db
+    .select({
+      name: workflows.name,
+      parentCondition: workflows.parentCondition,
+    })
+    .from(workflows)
+    .where(
+      and(
+        eq(workflows.userId, userId),
+        eq(workflows.parentWorkflowId, workflowId),
+      ),
+    );
+
+  const broken = children.filter(
+    (child) =>
+      child.parentCondition?.trim() &&
+      !parseCondition(child.parentCondition, declared).ok,
+  );
+
+  if (broken.length > 0) {
+    throw new Error(
+      `These workflows read this one's signals in their trigger condition and would stop working: ${broken
+        .map((child) => child.name)
+        .join(", ")}. Update or clear their trigger condition first.`,
+    );
   }
 }
 

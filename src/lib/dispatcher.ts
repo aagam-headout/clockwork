@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, notInArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, users, workflows } from "@/db/schema";
 import {
@@ -214,6 +214,36 @@ export async function runDueWorkflows(now: Date = new Date()) {
   return results;
 }
 
+/** Chained rows read per pass. Bounded so a backlog cannot arrive all at once. */
+const CHAIN_BATCH = 25;
+
+/**
+ * Round-robin over owners, oldest-first within each owner.
+ *
+ * Rows arrive in `created_at` order — fair between runs, unfair between
+ * accounts: one user's twenty-run chain would eat the whole budget before
+ * anyone else's child ran. Interleaving spreads a budget shortfall evenly,
+ * same as the cron loop above.
+ */
+export function interleaveByOwner<T extends { userId: string | null }>(
+  rows: T[],
+): T[] {
+  const byOwner = new Map<string, T[]>();
+  for (const row of rows) {
+    const key = row.userId ?? "";
+    byOwner.set(key, [...(byOwner.get(key) ?? []), row]);
+  }
+
+  const queues = [...byOwner.values()];
+  const out: T[] = [];
+  for (let i = 0; out.length < rows.length; i++) {
+    const queue = queues[i % queues.length];
+    const next = queue.shift();
+    if (next) out.push(next);
+  }
+  return out;
+}
+
 /**
  * Runs the chained work the due loop's runs produced.
  *
@@ -223,48 +253,85 @@ export async function runDueWorkflows(now: Date = new Date()) {
  * and durable; the next tick takes it, and the reaper's wider window for
  * chained rows keeps a backlog from being mistaken for a claim that died.
  *
- * One row per iteration, re-queried each time, because executing a run changes
- * the set — it may enqueue grandchildren this same pass should pick up.
+ * A batch per pass, re-queried until empty, because executing a run changes
+ * the set — it may enqueue grandchildren this same pass should pick up. Rows
+ * already attempted are excluded by id: a run whose *claim* threw is still
+ * `queued`, and without that exclusion the loop would spin on it.
  */
 export async function drainChainedRuns(
   tickStartedAt: number,
 ): Promise<DispatchResult[]> {
   const results: DispatchResult[] = [];
+  /** Attempted this sweep, whatever came of it. */
+  const seen = new Set<string>();
+  /** Owner verdicts, resolved once per account per sweep. */
+  const verdicts = new Map<string, Unrunnable | null>();
 
   while (Date.now() - tickStartedAt <= TICK_BUDGET_MS) {
-    const [next] = await db
-      .select({ runId: runs.id, slug: workflows.slug })
+    const batch = await db
+      .select({
+        runId: runs.id,
+        slug: workflows.slug,
+        userId: workflows.userId,
+      })
       .from(runs)
       .innerJoin(workflows, eq(runs.workflowId, workflows.id))
-      .where(and(eq(runs.status, "queued"), eq(runs.trigger, "workflow")))
+      .where(
+        and(
+          eq(runs.status, "queued"),
+          eq(runs.trigger, "workflow"),
+          seen.size > 0 ? notInArray(runs.id, [...seen]) : undefined,
+        ),
+      )
       .orderBy(runs.createdAt)
-      .limit(1);
+      .limit(CHAIN_BATCH);
 
-    if (!next) break;
+    if (batch.length === 0) break;
 
-    try {
-      const result = await executeRun(next.runId);
-      results.push({
-        workflowId: "",
-        slug: next.slug,
-        status: result.status,
-        runId: next.runId,
-      });
-    } catch (err) {
+    for (const next of interleaveByOwner(batch)) {
+      if (Date.now() - tickStartedAt > TICK_BUDGET_MS) break;
+      seen.add(next.runId);
+
       /*
-       * `executeRun` records its own failures, so reaching here means the
-       * claim itself failed. Pushing on rather than aborting: one bad row must
-       * not strand every other chained run behind it, and a row whose claim
-       * failed is no longer `queued`, so this cannot loop on it.
+       * The same gate the cron loop applies before spending a model call.
+       * Chained runs reach the executor a different way, and without this a
+       * suspended account or missing key gets a failed run per chained row.
        */
-      console.error(`[drain] ${next.slug} failed to start`, err);
-      results.push({
-        workflowId: "",
-        slug: next.slug,
-        status: "failed_to_start",
-        error: err instanceof Error ? err.message : String(err),
-        runId: next.runId,
-      });
+      const blocked = await ownerVerdict(next.userId, verdicts);
+      if (blocked) {
+        await settleUnrunnable(next.runId, blocked);
+        results.push({
+          workflowId: "",
+          slug: next.slug,
+          status: blocked.code,
+          runId: next.runId,
+        });
+        continue;
+      }
+
+      try {
+        const result = await executeRun(next.runId);
+        results.push({
+          workflowId: "",
+          slug: next.slug,
+          status: result.status,
+          runId: next.runId,
+        });
+      } catch (err) {
+        /*
+         * `executeRun` records its own failures, so reaching here means the
+         * claim itself failed. Pushing on rather than aborting: one bad row
+         * must not strand every other chained run behind it.
+         */
+        console.error(`[drain] ${next.slug} failed to start`, err);
+        results.push({
+          workflowId: "",
+          slug: next.slug,
+          status: "failed_to_start",
+          error: err instanceof Error ? err.message : String(err),
+          runId: next.runId,
+        });
+      }
     }
   }
 
@@ -285,6 +352,73 @@ export async function drainChainedRuns(
   }
 
   return results;
+}
+
+type Unrunnable = { code: string; message: string };
+
+/**
+ * Whether this account may spend a model call at all, or null when it may.
+ *
+ * Cached per sweep: a fanned-out chain is many rows for one owner, and the
+ * answer can't change between them.
+ */
+async function ownerVerdict(
+  userId: string | null,
+  cache: Map<string, Unrunnable | null>,
+): Promise<Unrunnable | null> {
+  if (!userId) {
+    return { code: "no_owner", message: "this workflow has no owner" };
+  }
+
+  const cached = cache.get(userId);
+  if (cached !== undefined) return cached;
+
+  const [account] = await db
+    .select({ status: users.status })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  let verdict: Unrunnable | null = null;
+  if (account?.status !== "active") {
+    verdict = {
+      code: "owner_inactive",
+      message: "the account that owns this workflow is not active",
+    };
+  } else {
+    const provider = await getProviderForUser(userId);
+    if (!(await hasProviderKey(userId, provider))) {
+      verdict = {
+        code: "no_provider_key",
+        message: `no ${provider} API key is configured — add one and this will run again`,
+      };
+    }
+  }
+
+  cache.set(userId, verdict);
+  return verdict;
+}
+
+/**
+ * Retires a chained row its owner may not run.
+ *
+ * Written down rather than left queued: the row holds this workflow's slot in
+ * the one-active-run index, and skipping it silently means the drain re-reads
+ * it every tick until the reaper takes it an hour later.
+ */
+async function settleUnrunnable(runId: string, verdict: Unrunnable) {
+  const now = new Date();
+  await db
+    .update(runs)
+    .set({
+      status: "error",
+      startedAt: now,
+      finishedAt: now,
+      durationMs: 0,
+      error: `Chained run not started: ${verdict.message}.`,
+      errorCode: verdict.code,
+    })
+    .where(and(eq(runs.id, runId), eq(runs.status, "queued")));
 }
 
 /**

@@ -6,7 +6,13 @@ vi.mock("@/db", () => ({
   db: { select: (...args: unknown[]) => select(...args) },
 }));
 
-import { parseSince, searchDigests, MAX_SEARCH_LIMIT } from "./digest-search";
+import {
+  parseSince,
+  searchDigests,
+  signalTimeline,
+  MAX_SEARCH_LIMIT,
+  MAX_TIMELINE_POINTS,
+} from "./digest-search";
 
 const NOW = new Date("2026-08-15T00:00:00Z");
 
@@ -80,12 +86,37 @@ function boundValues(node: unknown, seen = new WeakSet()): string[] {
   return entries.flatMap(([, value]) => boundValues(value, seen));
 }
 
-function selectChain(captured: { where?: string; limit?: number }) {
+/** Column names the predicate touches, for filters whose value says nothing. */
+function filteredColumns(node: unknown, seen = new WeakSet()): string[] {
+  if (!node || typeof node !== "object") return [];
+  if (seen.has(node)) return [];
+  seen.add(node);
+
+  const record = node as Record<string, unknown>;
+  const self =
+    "columnType" in record && typeof record.name === "string"
+      ? [record.name]
+      : [];
+
+  return [
+    ...self,
+    ...Object.entries(record)
+      .filter(([key]) => key !== "table")
+      .flatMap(([, value]) => filteredColumns(value, seen)),
+  ];
+}
+
+function selectChain(captured: {
+  where?: string;
+  columns?: string[];
+  limit?: number;
+}) {
   const link = {
     from: () => link,
     innerJoin: () => link,
     where: (predicate: unknown) => {
       captured.where = boundValues(predicate).join(" ");
+      captured.columns = filteredColumns(predicate);
       return link;
     },
     orderBy: () => link,
@@ -152,5 +183,42 @@ describe("searchDigests", () => {
     await searchDigests({ userId: "user-1" });
 
     expect(captured.limit).toBe(10);
+  });
+
+  it("excludes unchanged runs", async () => {
+    /*
+     * An unchanged run's body is the literal "NO_UPDATES" sentinel, not an
+     * empty string, so the body filter alone let the sentinel itself come back
+     * as a search hit — in /runs and in the agent's `history` tool.
+     */
+    const captured: { where?: string; columns?: string[]; limit?: number } = {};
+    select.mockReturnValue(selectChain(captured));
+
+    await searchDigests({ userId: "user-1", q: "churn" });
+
+    expect(captured.columns).toContain("unchanged");
+  });
+});
+
+describe("signalTimeline", () => {
+  it("bounds how many points one chart can read", async () => {
+    // The day window is not a bound: an event workflow can produce hundreds of
+    // runs a day, and a chart cannot draw more points than it has pixels.
+    const captured: { where?: string; limit?: number } = {};
+    select.mockReturnValue(selectChain(captured));
+
+    await signalTimeline("user-1", "wf-9", 30);
+
+    expect(captured.limit).toBe(MAX_TIMELINE_POINTS);
+  });
+
+  it("stays scoped to the owner and the workflow", async () => {
+    const captured: { where?: string; limit?: number } = {};
+    select.mockReturnValue(selectChain(captured));
+
+    await signalTimeline("user-1", "wf-9", 30);
+
+    expect(captured.where).toContain("user-1");
+    expect(captured.where).toContain("wf-9");
   });
 });

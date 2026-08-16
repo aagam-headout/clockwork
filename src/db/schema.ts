@@ -304,25 +304,51 @@ export const runs = pgTable(
     index("runs_queued_chained_idx")
       .on(table.createdAt)
       .where(sql`status = 'queued' and trigger = 'workflow'`),
+    /*
+     * Child side of `runs_parent_run_fk`. Postgres doesn't index FKs, and
+     * `ON DELETE SET NULL` makes retention scan `runs` per deleted row without it.
+     */
+    index("runs_parent_run_idx")
+      .on(table.parentRunId)
+      .where(sql`parent_run_id is not null`),
+    /*
+     * Retention sweeps select finished runs by age across all workflows —
+     * `runs_workflow_created_idx` can't serve that (leading column is workflow).
+     * Excludes the two statuses neither sweep may touch.
+     */
+    index("runs_prune_idx")
+      .on(table.createdAt)
+      .where(sql`status not in ('running', 'queued')`),
   ],
 );
 
-export const runSteps = pgTable("run_steps", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  runId: uuid("run_id")
-    .notNull()
-    .references(() => runs.id, { onDelete: "cascade" }),
-  idx: integer("idx").notNull(),
-  type: text("type").notNull(), // "tool" | "text"
-  toolSlug: text("tool_slug"),
-  argsJson: jsonb("args_json"),
-  resultJson: jsonb("result_json"),
-  durationMs: integer("duration_ms"),
-  error: text("error"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const runSteps = pgTable(
+  "run_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    idx: integer("idx").notNull(),
+    type: text("type").notNull(), // "tool" | "text"
+    toolSlug: text("tool_slug"),
+    argsJson: jsonb("args_json"),
+    resultJson: jsonb("result_json"),
+    durationMs: integer("duration_ms"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    /*
+     * A run's trace and the rows the monthly prune deletes both query by
+     * `run_id` on the bulkiest table in the schema. Never indexed before;
+     * prune scanned it every tick without one.
+     */
+    index("run_steps_run_idx").on(table.runId),
+  ],
+);
 
 /*
  * What each tool call returned last time, as a hash.

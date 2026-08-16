@@ -819,8 +819,15 @@ export async function executeRun(runId: string): Promise<RunResult> {
        * to record the hashes either. `skipped` entries ("nothing new to
        * send") are the design working, not a failed delivery, so they don't
        * block the flush — only an attempted-and-failed target does.
+       *
+       * A suppressed digest is a third case: an empty `deliveryLog` must not
+       * read as success there — a threshold withheld it, so no reader saw
+       * those bytes. Recording the hashes would mark a later, over-threshold
+       * value as unchanged. `unchanged` runs differ — they had nothing to
+       * deliver, which is why they still flush.
        */
-      const deliveryOk = !deliveryLog.some((d) => !d.ok && !d.skipped);
+      const deliveryOk =
+        !decision.suppressed && !deliveryLog.some((d) => !d.ok && !d.skipped);
       if (!degraded && deliveryOk) {
         try {
           await flushToolHashes(workflow.id, harness);
@@ -1452,11 +1459,16 @@ export async function retryPendingDeliveries(
        * target has since been removed from the workflow. Settle rather than
        * spin: the row would otherwise be picked up on every tick until it
        * aged out of retention.
+       *
+       * Settled at whatever the log actually says, not at `failed`. A row
+       * whose webhook succeeded earlier and whose Slack send is unretryable
+       * is `partial` — writing `failed` over it would misreport a digest that
+       * did reach a reader.
        */
       await db
         .update(outputs)
         .set({
-          deliveryStatus: "failed",
+          deliveryStatus: deliveryStatusFrom(previous, true),
           deliveryAttempts: LIMITS.maxDeliveryAttempts,
         })
         .where(eq(outputs.id, row.outputId));
