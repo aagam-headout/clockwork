@@ -16,8 +16,8 @@ import { CHAIN_QUEUE_MAX_AGE_MS } from "@/lib/limits";
 /**
  * Captures the predicate the reaper builds.
  *
- * The behaviour under test is SQL, so what is asserted here is the shape of
- * the statement: which columns and cutoffs it distinguishes. The rows it
+ * The behaviour under test is SQL, so this asserts the shape of the
+ * statement — which columns and cutoffs it distinguishes. The rows it
  * actually touches are checked against a real database in the plan's manual
  * verification step.
  */
@@ -57,8 +57,8 @@ describe("reapStuckRuns", () => {
 
     await reapStuckRuns();
 
-    // Without this branch, a chained run waiting for tick budget is errored
-    // out at 15 minutes while it is still perfectly valid work.
+    // Without this branch, a chained run waiting for tick budget gets errored
+    // out at 15 minutes while still perfectly valid.
     expect(captured.sql).toContain("'workflow'");
     expect(captured.sql).toContain("trigger");
     expect(captured.sql).toContain("status");
@@ -83,10 +83,10 @@ describe("reapStuckRuns", () => {
 
   it("ages a running row from when it started, not when it was queued", async () => {
     /*
-     * A chained run may sit queued for up to CHAIN_QUEUE_MAX_AGE_MS before the
-     * drain claims it. Judged on `created_at` it is already "stuck" on the
-     * tick it starts — and reaping a live run releases the one-active-run
-     * index, which lets a second run of the same workflow start beside it.
+     * A chained run may sit queued up to CHAIN_QUEUE_MAX_AGE_MS before the
+     * drain claims it. Judged on `created_at` it looks "stuck" the tick it
+     * starts — and reaping a live run releases the one-active-run index,
+     * letting a second run of the same workflow start beside it.
      */
     const captured: { sql?: string; params: unknown[] } = { params: [] };
     update.mockReturnValue(updateChain(captured));

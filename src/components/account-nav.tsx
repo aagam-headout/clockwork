@@ -10,11 +10,10 @@ const TABS = [
 ];
 
 /**
- * The account section's own tab nav — sibling to, not part of, Neon Auth's
- * `AccountView` (its nav only ever lists that component's own views, and
- * "Model provider" isn't one of them). Rendering it here, once, keeps all
- * three tabs on one bar instead of Auth-UI's nav plus a second, unrelated
- * one for the tab it can't hold.
+ * Account section's own tab nav — sibling to Neon Auth's `AccountView`, not
+ * part of it (its nav only lists its own views, and "Model provider" isn't
+ * one). Rendered here once so all three tabs share one bar instead of
+ * Auth-UI's nav plus a second one for the tab it can't hold.
  */
 export function AccountNav() {
   const pathname = usePathname();

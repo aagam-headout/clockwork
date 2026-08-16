@@ -12,8 +12,8 @@ import {
 } from "@/components/ui";
 
 /**
- * Form-aware button. `iconOnly` collapses to a square icon control while
- * keeping the label as the accessible name — used for the dense row actions.
+ * Form-aware button. `iconOnly` collapses to a square icon control, keeping
+ * the label as accessible name — for dense row actions.
  */
 export function SubmitButton({
   children,
@@ -63,15 +63,14 @@ export function SubmitButton({
 }
 
 /**
- * Submit that arms before it fires. Deleting a workflow takes its whole run
- * history with it and there was nothing between a mis-aimed click on a 32px
+ * Submit that arms before it fires. Deleting a workflow takes its run
+ * history with it, and there was nothing between a mis-aimed click on a 32px
  * trash glyph and that happening.
  *
- * Two clicks on the same control rather than a modal: the row the user is
- * aiming at stays on screen, there's no focus trap to escape, and the armed
- * state says what it will do ("Delete workflow?") instead of asking them to
- * read a dialog about it. It disarms itself after `DISARM_MS` so a page left
- * open doesn't keep a live delete under the cursor.
+ * Two clicks on the same control, not a modal: the row stays on screen, no
+ * focus trap to escape, and the armed state says what it will do ("Delete
+ * workflow?") instead of a dialog to read. Disarms after `DISARM_MS` so a
+ * page left open doesn't keep a live delete under the cursor.
  */
 const DISARM_MS = 4000;
 
@@ -109,15 +108,15 @@ export function ConfirmSubmitButton({
   }, [armed]);
 
   /*
-   * The two states are separate elements by `key`, and the resting one cancels
-   * its own click — both are load-bearing, and the first version had neither.
+   * The two states are separate elements by `key`, and the resting one
+   * cancels its own click — both load-bearing; the first version had neither.
    *
-   * Without the keys, React sees a <button> in the same slot before and after
-   * and *updates that DOM node in place*, flipping `type="button"` to
-   * `type="submit"` while the click that armed it is still being dispatched.
-   * The browser resolves a click's activation behaviour after the handlers
-   * run, reads the type it finds *then* — submit — and posted the form. One
-   * click deleted the thing the confirmation exists to protect.
+   * Without the keys, React sees a <button> in the same slot before and
+   * after and updates that DOM node in place, flipping `type="button"` to
+   * `type="submit"` while the arming click is still being dispatched. The
+   * browser resolves a click's activation behaviour after handlers run,
+   * reads the type as submit, and posts the form — one click deleted the
+   * thing the confirmation exists to protect.
    */
   if (armed) {
     return (
@@ -125,10 +124,10 @@ export function ConfirmSubmitButton({
         <button
           type="submit"
           disabled={pending}
-          // Focused so Enter confirms and Escape cancels. Deliberately *not*
-          // disarmed on blur: in a browser window that doesn't hold OS focus the
-          // element blurs the instant it mounts, which cancelled the confirm
-          // before it could be read. The timeout is the only auto-cancel.
+          // Focused so Enter confirms, Escape cancels. Not disarmed on blur:
+          // in a window without OS focus this blurs the instant it mounts,
+          // cancelling the confirm before it's read. Timeout is the only
+          // auto-cancel.
           autoFocus
           onKeyDown={(e) => e.key === "Escape" && setArmed(false)}
           className={buttonClass(
@@ -177,7 +176,7 @@ export function ConfirmSubmitButton({
         variant,
         size,
         // "ghost" carries no color of its own; every other variant already
-        // sets one (danger's red, outline's neutral foreground, etc).
+        // sets one.
         variant === "ghost" ? "text-danger-text" : "",
       )}
     >

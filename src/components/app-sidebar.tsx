@@ -25,13 +25,11 @@ import { buttonClass } from "@/components/ui";
 import { SIDEBAR_KEY } from "@/lib/pre-paint";
 
 /*
- * Left rail chrome. A horizontal tab bar cost 112px of every viewport's height
- * — expensive on a screen whose main jobs (a chat column, a long form, a run
- * trace) are all vertical. The rail spends horizontal space instead, and can
- * collapse to a 60px icon strip when the content wants that back.
- *
- * Below `md` it collapses to a 56px top bar plus a slide-in drawer; the
- * expand/collapse state is desktop-only.
+ * Left rail chrome. A horizontal tab bar cost 112px of viewport height,
+ * expensive when the main content (chat column, long form, run trace) is
+ * vertical. The rail spends horizontal space instead, collapsing to a 60px
+ * icon strip when needed. Below `md` it becomes a 56px top bar plus a
+ * slide-in drawer; expand/collapse state is desktop-only.
  */
 
 const LINKS = [
@@ -47,9 +45,9 @@ function isActive(pathname: string | null, href: string) {
 }
 
 /* ---------- collapsed state ----------
- * Kept on <html data-sidebar> so CSS alone sizes the rail (see globals.css) and
- * nothing flashes at the wrong width. localStorage is the external store, read
- * the same way the theme toggle reads its own. */
+ * Kept on <html data-sidebar> so CSS alone sizes the rail (see globals.css),
+ * avoiding a flash at the wrong width. localStorage is the external store,
+ * read the same way the theme toggle reads its own. */
 
 const listeners = new Set<() => void>();
 
@@ -71,9 +69,9 @@ function getSnapshot(): boolean {
 }
 
 /*
- * Between 768px and 1000px the rail is collapsed no matter what's stored (see
- * globals.css) — this mirrors that breakpoint so the JS-side bits that care
- * (which icon the toggle shows, where the account menu hangs) agree with it.
+ * Between 768px and 1000px the rail is always collapsed (see globals.css) —
+ * mirrored here so JS bits that care (toggle icon, account menu placement)
+ * agree with it.
  */
 const NARROW_QUERY = "(min-width: 768px) and (max-width: 999.98px)";
 
@@ -146,8 +144,7 @@ export function AppSidebar({ user }: { user: NavUser | null }) {
       <aside
         className={`sidebar border-border bg-bg-subtle max-md:shadow-pop z-40 flex w-[240px] shrink-0 flex-col max-md:fixed max-md:inset-y-14 max-md:left-0 max-md:border-r max-md:transition-transform ${drawer ? "max-md:translate-x-0" : "max-md:-translate-x-full"} md:sticky md:top-0 md:h-screen md:translate-x-0 md:border-r`}
       >
-        {/* Top row: brand while expanded, and the rail toggle — which takes the
-            brand's place once collapsed so it stays in the same spot. */}
+        {/* Brand while expanded; toggle takes its place once collapsed. */}
         <div className="sidebar-row hidden h-14 shrink-0 items-center gap-2 px-3 md:flex">
           <span className="sidebar-label min-w-0 flex-1">
             <Brand />
@@ -236,9 +233,9 @@ function IconButton({
   );
 }
 
-// Replaces Neon Auth's <UserButton />: that ships its own shadcn styling, which
-// doesn't read from this app's tokens. Same destinations — the account view and
-// Neon Auth's /auth/sign-out screen — in this app's design language.
+// Replaces Neon Auth's <UserButton /> (its shadcn styling ignores this app's
+// tokens) with the same destinations — account view, /auth/sign-out — in
+// this app's design language.
 function AccountBlock({
   user,
   collapsed,
@@ -277,8 +274,7 @@ function AccountBlock({
         <div
           role="menu"
           className={`rise rounded-container border-border bg-surface shadow-pop absolute bottom-full z-50 mb-1 overflow-hidden border p-1 ${
-            // Collapsed, there's no room to sit inside the rail — hang it off
-            // the right edge instead.
+            // Collapsed: no room inside the rail, hang off the right edge.
             collapsed ? "left-1 w-56" : "inset-x-2"
           }`}
         >
@@ -327,9 +323,9 @@ function AccountBlock({
 }
 
 /**
- * Theme control, as a menu row rather than a lone icon in the chrome: it's a
- * preference, and preferences live with the account. Clicking flips light ⇄
- * dark and leaves the menu open so the change is visible in place.
+ * Theme control as a menu row, not a lone chrome icon — it's a preference,
+ * and preferences live with the account. Click flips light/dark and leaves
+ * the menu open so the change is visible in place.
  */
 function AppearanceRow() {
   const theme = useTheme();

@@ -6,9 +6,9 @@ import { ownedWorkflow } from "@/lib/data/scope";
 export const maxDuration = 300;
 
 /*
- * "Run now" button in the dashboard. The response returns as soon as the run
- * row exists; the run itself continues in `after()`, so the caller gets a run
- * id to follow immediately instead of holding a request open for minutes.
+ * "Run now" button in the dashboard. Responds as soon as the run row exists;
+ * the run itself continues in `after()`, so the caller gets a run id to
+ * follow immediately instead of holding the request open for minutes.
  */
 export async function POST(
   _req: NextRequest,
@@ -20,10 +20,9 @@ export async function POST(
   const { id } = await params;
 
   /*
-   * 404 for a workflow that belongs to someone else, exactly as for one that
-   * doesn't exist. This route previously answered 403 in that case, which
-   * confirmed the id was real — enough to enumerate other accounts' workflows
-   * from guessed uuids.
+   * 404 for a workflow belonging to someone else, same as one that doesn't
+   * exist. Previously this answered 403, confirming the id was real — enough
+   * to enumerate other accounts' workflows from guessed uuids.
    */
   const workflow = await ownedWorkflow(id, auth.user.id);
   if (!workflow) {

@@ -6,7 +6,7 @@ import { runToolHashes } from "@/db/schema";
 
 /**
  * sha256 of a value serialised with object keys recursively sorted, so two
- * calls that differ only in argument order hash the same. Array order is left
+ * calls differing only in argument order hash the same. Array order is left
  * alone — in a tool call it carries meaning.
  */
 export function canonicalHash(value: unknown): string {
@@ -27,9 +27,9 @@ function canonicalise(value: unknown): string {
 /*
  * Both of these swallow their errors, against the project's fail-loud rule.
  *
- * The justification is narrow and worth stating: this table is a pure token
- * optimisation. Failing a user's 6am digest because a hash lookup timed out
- * would trade a real outcome for a saving. Every failure is logged.
+ * Narrow justification: this table is a pure token optimisation. Failing a
+ * user's 6am digest over a timed-out hash lookup would trade a real outcome
+ * for a saving. Every failure is logged.
  */
 export async function readToolHash(
   workflowId: string,

@@ -1,14 +1,13 @@
 /**
  * Every quota in the app, in one place, each overridable by environment.
  *
- * Signup is open, so most of these are not tuning knobs — they are the thing
- * standing between one abusive account and the shared resources this app runs
- * on: the app-wide Composio API key, the cron tick's time budget, and the
- * database.
+ * Signup is open, so most of these aren't tuning knobs — they're what stands
+ * between one abusive account and the shared resources this app runs on: the
+ * app-wide Composio API key, the cron tick's time budget, and the database.
  *
- * Model spend is the user's own key, so it is capped per workflow rather than
- * globally (see `src/lib/cost-cap.ts`). The point there is to stop one runaway
- * workflow, not to ration the account.
+ * Model spend is the user's own key, so it's capped per workflow rather than
+ * globally (see `src/lib/cost-cap.ts`), to stop one runaway workflow, not to
+ * ration the account.
  */
 function num(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -35,11 +34,9 @@ export const LIMITS = {
   maxSteps: 30,
   maxEventTriggers: num("MAX_EVENT_TRIGGERS", 10),
   maxDeliverTargets: num("MAX_DELIVER_TARGETS", 5),
-  /*
-   * Chain shape. Unlike the rest of this file these bound model spend rather
-   * than a shared resource: a chain multiplies runs, and the per-hour and
-   * per-day run quotas are a blunt backstop rather than a design.
-   */
+  // Chain shape. Unlike the rest of this file these bound model spend, not
+  // a shared resource: a chain multiplies runs, and the run-quota backstop
+  // is blunt rather than a real design.
   maxChainDepth: num("MAX_CHAIN_DEPTH", 3),
   maxChildrenPerWorkflow: num("MAX_CHILDREN_PER_WORKFLOW", 3),
   /** Signals one workflow may declare — each one is prompt surface. */
@@ -62,11 +59,10 @@ export const RECONCILE_BATCH = num("RECONCILE_BATCH", 25);
 /*
  * How long a chained run may sit `queued` before the reaper treats it as dead.
  *
- * Wider than the reaper's 15-minute window for every other queued row, because
- * a chained run waiting for tick budget is a legitimate backlog rather than a
- * function that died between the insert and the claim. Still bounded: an
- * abandoned chained row must eventually clear, or the one-active-run index
- * blocks that workflow forever.
+ * Wider than the reaper's 15-minute window for other queued rows, because a
+ * chained run waiting on tick budget is a legitimate backlog, not a function
+ * that died between insert and claim. Still bounded: an abandoned row must
+ * eventually clear, or the one-active-run index blocks that workflow forever.
  */
 export const CHAIN_QUEUE_MAX_AGE_MS = num(
   "CHAIN_QUEUE_MAX_AGE_MS",
@@ -77,8 +73,7 @@ export const CHAIN_QUEUE_MAX_AGE_MS = num(
  * Fixed-window rate limits, by bucket.
  *
  * `propose` is the expensive one: two model calls plus a round of live tool
- * calls per request. The others guard the shared Composio key rather than
- * money.
+ * calls per request. The others guard the shared Composio key, not money.
  */
 export const RATE_LIMITS = {
   propose: { limit: num("MAX_PROPOSE_PER_HOUR", 20), windowMs: 60 * 60 * 1000 },

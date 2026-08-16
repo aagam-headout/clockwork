@@ -7,20 +7,19 @@ import { ChevronRight, Expand, X } from "lucide-react";
 import { LocalTime } from "@/components/local-time";
 
 /**
- * A digest is a full workflow output, often much longer than the card or
- * section it lands in should show inline. Both surfaces below open the whole
- * thing in a near-fullscreen dialog rather than growing in place, so reading a
- * long one doesn't cost the reader their scroll position on the page behind it.
+ * A digest is a full workflow output, often too long for the card or section
+ * it lands in. Both surfaces open it in a near-fullscreen dialog instead of
+ * growing in place, so reading a long one doesn't cost the reader their
+ * scroll position on the page behind it.
  *
  * Two shapes, one dialog:
- * - `DigestCard` — clamped preview plus an expand affordance. Used on a run's
+ * - `DigestCard` — clamped preview plus expand affordance. Used on a run's
  *   own page, where the digest is the thing you came for.
  * - `DigestRow` — one line per digest, click to open. Used on the overview
- *   feed, where the point is scanning what ran today, not reading each one.
+ *   feed, for scanning what ran today rather than reading each one.
  *
- * `rendered` is the markdown already turned into JSX by the server —
- * `<Markdown>` is a server component, so it's rendered once by the parent and
- * handed down rather than re-rendered here.
+ * `rendered` is markdown already turned into JSX by the server (`<Markdown>`
+ * is a server component), rendered once by the parent and handed down.
  */
 type DigestProps = {
   title: string;
@@ -42,8 +41,8 @@ export function DigestCard({
 
   return (
     <>
-      {/* `max-h-56` clamps to roughly a paragraph and a half; the fade tells the
-          eye there's more without a hard-edged cutoff. */}
+      {/* `max-h-56` clamps to ~a paragraph and a half; the fade signals more
+          without a hard cutoff. */}
       <div className="relative">
         <div className="max-h-56 overflow-hidden px-4 py-4">{rendered}</div>
         <div className="from-surface pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t to-transparent" />
@@ -73,11 +72,11 @@ export function DigestCard({
 
 /**
  * One digest as a single row: what ran, where it went, when. The whole row is
- * the trigger — the body lives in the dialog, so a day with a dozen digests
- * stays one scannable list instead of a dozen clamped cards.
+ * the trigger — body lives in the dialog, so a dozen digests stay one
+ * scannable list instead of a dozen clamped cards.
  *
- * The row is a `<button>` and therefore holds no nested links; "View run" is in
- * the dialog header, which is also where someone actually decides they want it.
+ * The row is a `<button>`, so it holds no nested links; "View run" lives in
+ * the dialog header instead, where the decision to open it actually happens.
  */
 export function DigestRow({
   title,
@@ -107,16 +106,15 @@ export function DigestRow({
           {title}
         </span>
 
-        {/* The one-line teaser is what makes the row worth scanning: without it
-            every row is just a workflow name it already knows. It's the first
-            thing to give up its width, and it disappears entirely on a phone. */}
+        {/* The one-line teaser makes the row worth scanning — without it every
+            row is just a workflow name. First to give up width; gone on phone. */}
         {preview && (
           <span className="text-muted hidden min-w-0 flex-1 truncate text-[12.5px] sm:block">
             {preview}
           </span>
         )}
-        {/* Pushes the time and chevron right when the teaser isn't rendered —
-            below `sm`, and whenever the digest gave us nothing to preview. */}
+        {/* Pushes time and chevron right when the teaser isn't rendered —
+            below `sm`, or when there's nothing to preview. */}
         <span className={preview ? "flex-1 sm:hidden" : "flex-1"} />
 
         {badge && <span className="hidden shrink-0 md:block">{badge}</span>}
@@ -158,14 +156,13 @@ function DigestDialog({
 
   useEffect(() => {
     if (!open) return;
-    // Focus the panel itself on open. Without it the focus ring stays on the
-    // row behind the dialog, so Page Down scrolls the page under the overlay
-    // instead of the digest someone just opened to read.
+    // Focus the panel on open, or the ring stays on the row behind it and
+    // Page Down scrolls the page under the overlay instead of the dialog.
     panelRef.current?.focus();
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
-    // Body scroll fights the dialog's own scroll otherwise — a long digest
-    // behind a short one would scroll the page instead of the panel.
+    // Otherwise body scroll fights the dialog's — a long digest behind a
+    // short one would scroll the page instead of the panel.
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {

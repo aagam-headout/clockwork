@@ -5,13 +5,12 @@ import { Eye, PenLine } from "lucide-react";
 import { Markdown } from "@/components/markdown";
 
 /**
- * Grows a textarea to fit what's in it, up to `max` pixels, then lets it
- * scroll. Shared by the goal editor and the builder's composer: both are boxes
- * you write prose into, and a fixed `rows` is either too tall for one line or
- * too short for ten.
+ * Grows a textarea to fit its content, up to `max` pixels, then scrolls.
+ * Shared by the goal editor and the builder's composer, since a fixed `rows`
+ * is either too tall for one line or too short for ten.
  *
- * Layout effect, not effect: the height is applied before paint, so a form
- * seeded with a long saved value never flashes at its collapsed height.
+ * Layout effect, not effect: height applies before paint, so a form seeded
+ * with a long saved value never flashes at its collapsed height.
  */
 export function useAutosize(
   value: string,
@@ -22,7 +21,7 @@ export function useAutosize(
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    // Reset first: `scrollHeight` never shrinks below the current height, so
+    // Reset first: `scrollHeight` never shrinks below current height, so
     // deleting text would otherwise leave the box at its high-water mark.
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, max)}px`;
@@ -35,15 +34,14 @@ export function useAutosize(
 /**
  * The goal field: a markdown source box with a preview.
  *
- * A workflow's goal is a prompt, and prompts get written with headings, lists
- * and fenced examples — but a textarea shows all of that as source, and the
- * digest it produces is rendered. Preview closes that gap with the exact
- * `<Markdown>` the run page and Slack path use, so what you check here is what
- * the model's instructions will look like everywhere else.
+ * A workflow's goal is a prompt written with headings, lists and fenced
+ * examples, but a textarea shows all that as source while the digest it
+ * produces is rendered. Preview closes that gap with the exact `<Markdown>`
+ * the run page and Slack path use, so what you check here matches everywhere else.
  *
- * The textarea is never unmounted — preview hides it rather than replacing it.
- * A form field that leaves the DOM leaves the `FormData` with it, and the goal
- * would submit empty for anyone who pressed Preview before Save.
+ * The textarea is never unmounted — preview hides, not replaces it. A field
+ * that leaves the DOM leaves `FormData` with it, so the goal would submit
+ * empty for anyone who pressed Preview before Save.
  */
 export function MarkdownEditor({
   name,
@@ -83,9 +81,9 @@ export function MarkdownEditor({
         )}
       </div>
 
-      {/* `relative` so the clipped textarea stays anchored here in preview —
-          an `sr-only` field is absolutely positioned, and one that lands
-          outside its own box scrolls the page when it takes focus. */}
+      {/* `relative` anchors the clipped textarea in preview — `sr-only`
+          positions it absolutely, and outside this box it'd scroll the page
+          on focus. */}
       <div className="relative px-3 py-2.5" style={{ minHeight }}>
         <textarea
           ref={ref}
@@ -94,17 +92,17 @@ export function MarkdownEditor({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          // Back to Write if the browser rejects it. A `required` field the
-          // user can't see is a submit that appears to do nothing.
+          // Back to Write if rejected — an invisible `required` field is a
+          // submit that appears to do nothing.
           onInvalid={() => setPreview(false)}
           aria-hidden={preview}
           style={preview ? undefined : { minHeight: minHeight - 20 }}
           /*
-           * `sr-only` in preview, not `hidden`: a `display:none` field is not
-           * focusable, and Chrome refuses to run constraint validation on one —
-           * an empty goal would block Save with only a console message. Clipped
-           * keeps it validatable, and `onInvalid` above brings it back on
-           * screen before the browser points its bubble at it.
+           * `sr-only`, not `hidden`, in preview: `display:none` isn't
+           * focusable, and Chrome skips constraint validation on it — an
+           * empty goal would block Save with only a console message. Clipped
+           * stays validatable, and `onInvalid` above brings it back on screen
+           * before the browser's bubble points at it.
            */
           className={`text-foreground placeholder:text-subtle w-full resize-none bg-transparent font-mono text-[13px] leading-relaxed outline-none ${
             preview ? "sr-only" : "block"

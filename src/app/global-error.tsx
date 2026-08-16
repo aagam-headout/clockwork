@@ -10,13 +10,13 @@ import { THEME_SCRIPT } from "@/lib/pre-paint";
 import "./globals.css";
 
 /**
- * The root layout itself failed, so `app/error.tsx` never mounts and neither
- * does the sidebar — this file has to supply its own `<html>`/`<body>` and
- * re-import the stylesheet. The theme pre-paint script comes along too, so the
- * failure screen doesn't flash white on a dark install.
+ * The root layout itself failed, so `app/error.tsx` never mounts, nor does
+ * the sidebar — this file supplies its own `<html>`/`<body>` and re-imports
+ * the stylesheet. The theme pre-paint script comes along too, so the failure
+ * screen doesn't flash white on a dark install.
  *
- * There is no "go to workflows" link here: navigation is what just failed, and
- * a full reload is the honest way out.
+ * No "go to workflows" link here: navigation is what just failed, and a full
+ * reload is the honest way out.
  */
 export default function GlobalError({
   error,

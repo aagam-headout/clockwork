@@ -21,9 +21,9 @@ export default async function NewWorkflowPage() {
   ]);
 
   return (
-    // The builder is an app screen, not a document: on large viewports the page
-    // itself doesn't scroll — the chat and the form each scroll in their own
-    // pane, so the composer and the save bar are always reachable.
+    // An app screen, not a document: on large viewports the page itself
+    // doesn't scroll — chat and form scroll in their own panes, keeping the
+    // composer and save bar reachable.
     <PageShell fill>
       <Link
         href="/workflows"

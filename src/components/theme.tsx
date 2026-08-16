@@ -8,13 +8,12 @@ type Theme = "light" | "dark";
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
 /*
- * The pinned theme lives in localStorage (an external store), so it's read via
- * useSyncExternalStore rather than an effect: cross-tab changes sync for free
- * through the `storage` event, and an unpinned tab follows the OS through the
- * matchMedia subscription below.
+ * The pinned theme lives in localStorage (an external store), read via
+ * useSyncExternalStore, not an effect: cross-tab changes sync for free
+ * through `storage`, and an unpinned tab follows the OS via matchMedia below.
  *
- * The snapshot is the *resolved* theme, never "system" — the toggle has to know
- * which palette is actually on screen. Reporting "system" made the first click a
+ * The snapshot is the *resolved* theme, never "system" — the toggle needs to
+ * know which palette is on screen. Reporting "system" made the first click a
  * no-op whenever the OS already matched the next theme in the cycle.
  */
 const listeners = new Set<() => void>();
@@ -44,7 +43,7 @@ function getSnapshot(): Theme {
 function setTheme(theme: Theme) {
   try {
     localStorage.setItem(THEME_KEY, theme);
-    // auth-ui's next-themes provider reads this on mount; without it the auth
+    // auth-ui's next-themes provider reads this on mount; without it, auth
     // and account screens follow the OS while the rest of the app is pinned.
     localStorage.setItem(NEXT_THEMES_KEY, theme);
   } catch {
@@ -52,18 +51,18 @@ function setTheme(theme: Theme) {
   }
   const root = document.documentElement;
   root.setAttribute("data-theme", theme);
-  // next-themes only re-reads storage on mount and on cross-tab events, so its
-  // two markers are flipped here directly.
+  // next-themes only re-reads storage on mount and cross-tab events, so
+  // its markers are flipped here directly.
   root.classList.toggle("dark", theme === "dark");
   root.style.colorScheme = theme;
   for (const listener of listeners) listener();
 }
 
 /**
- * Current palette, for the chrome that renders the control — the sidebar's
- * Appearance row is the only one. Server snapshot
- * is "light"; the pre-paint script has already applied the pinned palette, and
- * suppressHydrationWarning on <html> covers the mismatch.
+ * Current palette, for the chrome rendering the control — the sidebar's
+ * Appearance row is the only one. Server snapshot is "light"; the pre-paint
+ * script has already applied the pinned palette, and suppressHydrationWarning
+ * on <html> covers the mismatch.
  */
 export function useTheme(): Theme {
   return useSyncExternalStore(subscribe, getSnapshot, () => "light" as Theme);

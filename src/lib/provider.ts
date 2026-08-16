@@ -18,11 +18,11 @@ import {
 /*
  * Model routing, per user.
  *
- * Two things are per user here and both matter: *which* provider serves their
- * models, and *whose key* pays for it. Every entry point takes a `users.id`
- * because half the callers have no session at all — a cron tick and a trigger
- * webhook read the owner off the workflow row, which is the only statement of
- * ownership those code paths have.
+ * Two things are per user here and both matter: *which* provider serves
+ * their models, and *whose key* pays for it. Every entry point takes a
+ * `users.id` because half the callers have no session — a cron tick and a
+ * trigger webhook read the owner off the workflow row, the only statement
+ * of ownership those code paths have.
  */
 
 const PROVIDER_TTL_MS = 10_000;
@@ -78,9 +78,9 @@ export async function setProviderForUser(
 /**
  * Thrown when the account has no key for the provider it's set to use.
  *
- * This app is bring-your-own-key: there is no app-wide key to fall back on, so
- * this is a normal state for a new account rather than a misconfiguration —
- * which is why the message says what to do rather than what went wrong.
+ * This app is bring-your-own-key: there's no app-wide fallback, so this is
+ * a normal state for a new account rather than a misconfiguration — which
+ * is why the message says what to do, not what went wrong.
  */
 export class MissingProviderKeyError extends Error {
   constructor(readonly provider: ProviderId) {
@@ -95,8 +95,8 @@ export class MissingProviderKeyError extends Error {
 /**
  * Thrown when a workflow's stored model can't be served by its owner's
  * provider — switching to Anthropic doesn't rewrite a workflow pinned to
- * `openai/gpt-5`. Substituting a different model silently would change what
- * the run costs and how it reasons, so this surfaces instead.
+ * `openai/gpt-5`. Silently substituting a model would change what the run
+ * costs and how it reasons, so this surfaces instead.
  */
 export class ModelUnavailableError extends Error {
   constructor(
@@ -115,15 +115,15 @@ export class ModelUnavailableError extends Error {
  * Per-user provider clients, cached briefly.
  *
  * Be clear-eyed about what this caches: the client holds the API key
- * internally, so plaintext key material is resident in process memory either
- * way — it has to be, to sign the HTTPS request that uses it. Caching the
- * client rather than decrypting per call changes nothing about that; it saves
+ * internally, so plaintext key material is resident in process memory
+ * either way — it has to be, to sign the HTTPS request. Caching the client
+ * rather than decrypting per call changes nothing about that; it just saves
  * a database round trip.
  *
  * What actually matters is the invariants around it:
  *   - keyed by `${userId}:${provider}`, never enumerated, never exported;
- *   - a hard TTL, so a key the user revokes or replaces stops working within a
- *     minute rather than whenever the instance recycles;
+ *   - a hard TTL, so a revoked/replaced key stops working within a minute
+ *     rather than whenever the instance recycles;
  *   - a size cap, so a busy instance can't accumulate every tenant's key;
  *   - never serialized — not to a log, a response, or an RSC payload.
  */
@@ -187,8 +187,8 @@ async function clientFor(
 
 /**
  * Turns a stored model id into something `generateText` can run, through
- * whichever provider the given account has switched on and on that account's
- * own key. The gateway takes the full slug; direct providers take the bare
+ * whichever provider the account has switched on and that account's own
+ * key. The gateway takes the full slug; direct providers take the bare
  * model name.
  */
 export async function resolveModelForUser(

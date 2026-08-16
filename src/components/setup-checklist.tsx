@@ -17,10 +17,9 @@ type Step = {
 /**
  * The three things a new account needs, as an accordion.
  *
- * Only one panel is open at a time — a checklist that explains all three at
- * once is three paragraphs asking to be skipped. It opens on the first
- * unfinished step, but every row is clickable, so someone who wants to re-read
- * a finished step (or read ahead) can, without leaving the page.
+ * Only one panel is open at a time — three paragraphs explaining all three at
+ * once just asks to be skipped. Opens on the first unfinished step, but every
+ * row is clickable, so someone can re-read or read ahead without leaving.
  */
 export function SetupChecklist({ state }: { state: OnboardingState }) {
   const steps: Step[] = [
@@ -74,8 +73,8 @@ export function SetupChecklist({ state }: { state: OnboardingState }) {
           const open = i === openIndex;
           const current = i === currentIndex;
           const Icon = step.icon;
-          // The live step also carries an accent rail down its left edge, so
-          // the row reads as current even when its panel is collapsed.
+          // The live step carries an accent rail on its left edge, so it
+          // reads as current even collapsed.
           return (
             <li
               key={step.title}
@@ -91,8 +90,8 @@ export function SetupChecklist({ state }: { state: OnboardingState }) {
                 aria-expanded={open}
                 className="hover:bg-surface-2 flex w-full cursor-pointer items-center gap-3 px-5 py-3 text-left transition-[background] duration-150"
               >
-                {/* Same 24px box in all three states, so the titles share one
-                    left edge instead of stepping in and out with the marker. */}
+                {/* Same 24px box in all three states, so titles share one
+                    left edge instead of stepping with the marker. */}
                 <span
                   className={`rounded-control flex h-6 w-6 shrink-0 items-center justify-center border text-[11px] font-medium tabular-nums ${
                     step.done
@@ -128,8 +127,8 @@ export function SetupChecklist({ state }: { state: OnboardingState }) {
                 />
               </button>
 
-              {/* Grid-rows trick: the panel animates from its own height with
-                  no measurement and no fixed max-height guess. */}
+              {/* Grid-rows trick: panel animates from its own height, no
+                  measurement, no fixed max-height guess. */}
               <div
                 className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out ${
                   open

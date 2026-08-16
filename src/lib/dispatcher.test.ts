@@ -17,9 +17,9 @@ let updates: Record<string, unknown>[] = [];
 /**
  * Minimal stand-in for the drizzle chains the drain pass builds.
  *
- * Table-aware rather than call-ordered: the pass now makes two different
- * queries (the chained rows, and the owner behind them), and a mock keyed on
- * call order would break every time either one moves.
+ * Table-aware, not call-ordered: the pass makes two different queries (the
+ * chained rows, and the owner behind them), and a mock keyed on call order
+ * would break whenever either one moves.
  */
 function link() {
   let table = "";
@@ -88,8 +88,8 @@ import { drainChainedRuns, interleaveByOwner } from "./dispatcher";
 /**
  * Whether a built predicate carries `value` anywhere in it.
  *
- * Walked rather than stringified: a drizzle condition holds references back to
- * the table it was built from, so `JSON.stringify` on one is circular.
+ * Walked, not stringified: a drizzle condition holds references back to the
+ * table it was built from, so `JSON.stringify` on one is circular.
  */
 function mentions(node: unknown, value: string): boolean {
   const seen = new Set<unknown>();

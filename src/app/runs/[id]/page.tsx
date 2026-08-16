@@ -48,8 +48,8 @@ import { SYSTEM_TOOL_NAMES } from "@/lib/agent/system-tools";
 export const dynamic = "force-dynamic";
 
 // `query`/`inspect` are engine-owned reads of an already-fetched payload, not
-// a connector call — the trace marks them distinctly so "why so many steps"
-// doesn't read as "why so many fetches".
+// connector calls — marked distinctly so "why so many steps" doesn't read as
+// "why so many fetches".
 const SYSTEM_TOOLS = new Set<string>(SYSTEM_TOOL_NAMES);
 
 // GH Actions renders step durations as "1m 4s", not raw milliseconds.
@@ -67,11 +67,9 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  /*
-   * Scoped, like the page. `generateMetadata` runs on its own, so an unscoped
-   * lookup here put another user's workflow name and run status into the tab
-   * title even when the page itself 404'd.
-   */
+  // Scoped, like the page: `generateMetadata` runs on its own, so an
+  // unscoped lookup here leaked another user's workflow name and run status
+  // into the tab title even when the page itself 404'd.
   const user = await currentUser();
   const row = user ? await ownedRun(id, user.id) : null;
   if (!row) return { title: "Run" };
@@ -87,9 +85,9 @@ export default async function RunDetailPage({
 
   const { id } = await params;
 
-  // 404 for someone else's run, identical to one that never existed. This is
-  // the worst of the id-taking pages to leave unscoped — the steps and output
-  // below it carry the full digest body and every tool result.
+  // 404 for someone else's run, identical to one that never existed — the
+  // worst page to leave unscoped, since steps and output carry the full
+  // digest body and every tool result.
   const owned = await ownedRunOr404(id, user.id);
   const run = {
     ...owned.run,
@@ -106,12 +104,10 @@ export default async function RunDetailPage({
 
   const [output] = await db.select().from(outputs).where(eq(outputs.runId, id));
 
-  /*
-   * Where a chained run came from. Scoped through `workflows.userId` like every
-   * other read here — the parent belongs to the same owner by construction, but
-   * the query says so on its own terms rather than by inheriting the check
-   * above it.
-   */
+  // Where a chained run came from. Scoped through `workflows.userId` like
+  // every other read here — the parent belongs to the same owner by
+  // construction, but the query says so itself rather than inheriting the
+  // check above.
   const [parentRun] = run.parentRunId
     ? await db
         .select({ id: runs.id, workflowName: workflows.name })
@@ -123,10 +119,9 @@ export default async function RunDetailPage({
 
   const tone = statusTone(run.status);
   const toolCalls = steps.filter((s) => s.type === "tool").length;
-  // Only connector calls spend the workflow's step budget — see
-  // countExternalSteps in src/lib/agent/wrap-tools.ts. Split out here so a
-  // truncated run's step count doesn't read as "too many fetches" when most
-  // of it was free `query`/`inspect` reads.
+  // Only connector calls spend the step budget (see countExternalSteps in
+  // src/lib/agent/wrap-tools.ts). Split out so a truncated run's count
+  // doesn't read as "too many fetches" when most were free query/inspect reads.
   const systemCalls = steps.filter(
     (s) => s.type === "tool" && SYSTEM_TOOLS.has(s.toolSlug ?? ""),
   ).length;
@@ -139,21 +134,17 @@ export default async function RunDetailPage({
     error?: string;
   }>;
 
-  /*
-   * A run older than the trace window kept its digest but lost its steps, and
-   * that is a different thing from a run that never took any.
-   */
+  // A run past the trace window kept its digest but lost its steps — different
+  // from a run that never took any.
   const tracePruned = steps.length === 0 && traceWindowPassed(run.createdAt);
 
   const signals = Object.entries(
     (output?.signals ?? {}) as Record<string, unknown>,
   );
 
-  /*
-   * `suppressedReason` does double duty: on a withheld digest it says why, and
-   * on a delivered one it carries the two "delivered anyway" notes. Only the
-   * second kind belongs in a warning next to a digest that did go out.
-   */
+  // `suppressedReason` does double duty: on a withheld digest it says why; on
+  // a delivered one it carries the "delivered anyway" notes. Only the latter
+  // belongs in a warning next to a digest that went out.
   const reason = output?.suppressedReason ?? null;
   const conditionNote =
     reason === "condition_indeterminate"
@@ -169,9 +160,8 @@ export default async function RunDetailPage({
         backLabel="Runs"
         title={run.workflowName ?? "(deleted workflow)"}
         subtitle={
-          // Announced, because LiveRun re-renders this header every 3s while
-          // the run is in flight and the status changing under a screen reader
-          // was otherwise silent.
+          // Announced: LiveRun re-renders this header every 3s in flight, and
+          // the status change was otherwise silent to a screen reader.
           <span
             aria-live="polite"
             className="inline-flex flex-wrap items-center gap-2"
@@ -276,9 +266,8 @@ export default async function RunDetailPage({
       </div>
 
       {run.error &&
-        // A connection problem is the one failure the reader can fix from
-        // here, so it gets its own tone and a link rather than being rendered
-        // as an opaque error string.
+        // A connection problem is the one failure the reader can fix here, so
+        // it gets its own tone and link instead of an opaque error string.
         (run.errorCode === "needs_reconnect" ? (
           <div className="mt-6">
             <Alert tone="warn" title="Connection needs reconnecting">
@@ -368,8 +357,7 @@ export default async function RunDetailPage({
             </Card>
           )}
 
-          {/* A withheld digest is shown, not hidden. Someone looking at the run
-              needs to see what the threshold kept from them, or the feature is
+          {/* A withheld digest is shown, not hidden — otherwise the feature is
               indistinguishable from the agent finding nothing. */}
           {output.suppressed && (
             <div className="mb-3">
@@ -397,9 +385,8 @@ export default async function RunDetailPage({
                 </span>
               </div>
             ) : (
-              // The body is markdown the agent wrote for Slack/email; the
-              // dashboard renders the same thing rather than showing source.
-              // No `viewRunHref` — this digest's run is the page it's already on.
+              // Body is markdown the agent wrote for Slack/email; rendered as-is
+              // rather than shown as source. No `viewRunHref` — already on it.
               <DigestCard
                 title={run.workflowName ?? "(deleted workflow)"}
                 createdAt={output.createdAt}
@@ -457,23 +444,17 @@ export default async function RunDetailPage({
 
         {steps.length === 0 ? (
           <p className="rounded-container border-border bg-bg-subtle text-muted border px-4 py-8 text-center text-sm">
-            {/*
-             * Traces are pruned well before the digest they belong to — a run
-             * kept for its output can outlive its steps by months. Saying so
-             * matters: an empty trace on an old successful run otherwise reads
-             * as "this run did nothing".
-             */}
+            {/* Traces prune well before the digest — a kept run can outlive its
+                steps by months. Worth saying, or an empty trace on an old
+                successful run reads as "this run did nothing". */}
             {tracePruned
               ? "Trace pruned. The digest is kept."
               : "No steps recorded for this run."}
           </p>
         ) : (
-          /*
-           * Modeled on the GitHub Actions job log: a bordered list of steps,
-           * each a single summary line — status glyph, name, duration — that
-           * expands into a recessed monospace panel. Failed steps open
-           * themselves, since that's what anyone opening a trace came for.
-           */
+          // Modeled on the GitHub Actions job log: a bordered list of steps,
+          // each a summary line (status glyph, name, duration) expanding into
+          // a recessed monospace panel. Failed steps open themselves.
           <ListBox as="ol" id="trace">
             {steps.map((step, i) => {
               const isTool = step.type === "tool";
@@ -544,11 +525,10 @@ export default async function RunDetailPage({
                       <ChevronRight className="text-subtle h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90" />
                     </summary>
 
-                    {/* Theme tokens, not a pinned-dark terminal: a log panel
-                        that stays black in a light app is a second theme on one
-                        page, and the payloads below are the part people read
-                        longest. The monospace type and the recessed surface
-                        carry the "this is a log" reading on their own. */}
+                    {/* Theme tokens, not a pinned-dark terminal: a panel that
+                        stays black in a light app is a second theme on one page.
+                        Monospace type and the recessed surface already read as
+                        "this is a log" on their own. */}
                     <div className="border-border bg-bg-subtle space-y-2 border-t px-3 py-2.5 pl-[38px] font-mono text-[11px] leading-relaxed">
                       {step.error && (
                         <p className="text-danger-text">
@@ -558,19 +538,17 @@ export default async function RunDetailPage({
                       )}
                       {isTool ? (
                         // Two labelled blocks, not one `{args, result}` blob:
-                        // "what did it send" and "what came back" are separate
-                        // questions, and the answers are wanted one at a time.
+                        // "what did it send" and "what came back" are answered
+                        // one at a time.
                         <div className="space-y-2">
                           <Payload label="args" data={step.argsJson} />
                           <Payload label="result" data={step.resultJson} />
                         </div>
                       ) : (
-                        // `.markdown` in globals.css is built on the same theme
-                        // vars as everything else, so reasoning text needs no
-                        // local overrides now that the panel follows the theme.
-                        // Capped like a payload: a long chain of thought is one
-                        // step among many, and letting it run the full page
-                        // height buries every step after it.
+                        // `.markdown` uses the same theme vars as everything
+                        // else, so no local overrides needed. Capped like a
+                        // payload: an uncapped chain of thought would bury
+                        // every step after it.
                         <div className="max-h-84 overflow-auto">
                           <Markdown>{text}</Markdown>
                         </div>
@@ -590,10 +568,9 @@ export default async function RunDetailPage({
 /**
  * The plain-text reading of a payload, when it has one.
  *
- * A tool that returns prose returns it as `{ text: "…" }`, and JSON escapes
- * every newline in it — so the JSON view of a long answer is one unreadable
- * line of `\n`s. That text is worth a view of its own; anything structured has
- * nothing to show beyond its JSON and gets no second tab.
+ * A tool returning prose does so as `{ text: "…" }`, and JSON escapes every
+ * newline — so the JSON view of a long answer is one unreadable line of
+ * `\n`s. That text earns its own view; structured data gets no second tab.
  */
 function plainText(data: unknown): string | null {
   if (typeof data === "string") return data.trim() || null;
@@ -613,9 +590,8 @@ function formatBytes(n: number): string {
 /**
  * One labelled block inside the log panel — `args` or `result`.
  *
- * Serializing happens here, on the server: `PayloadView` below only lays out
- * strings it is handed, so a 200KB tool result is stringified once rather than
- * on every re-render of the row it sits in.
+ * Serialized here, server-side: `PayloadView` only lays out strings it's
+ * handed, so a 200KB result is stringified once, not on every re-render.
  */
 function Payload({ label, data }: { label: string; data: unknown }) {
   const json = JSON.stringify(data, null, 2) ?? "undefined";

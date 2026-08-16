@@ -7,9 +7,8 @@ import { Search, X } from "lucide-react";
 /**
  * Search over the digests this account has accumulated.
  *
- * The query lives in the URL rather than in component state so a result is a
- * link someone can keep — "the run where churn first moved" is exactly the kind
- * of thing you want to paste to somebody.
+ * The query lives in the URL, not component state, so a result is a link
+ * worth pasting to someone — e.g. "the run where churn first moved".
  */
 export function DigestSearch({ initialQuery = "" }: { initialQuery?: string }) {
   const router = useRouter();
@@ -20,9 +19,8 @@ export function DigestSearch({ initialQuery = "" }: { initialQuery?: string }) {
     const query = new URLSearchParams(params.toString());
     if (next.trim()) query.set("q", next.trim());
     else query.delete("q");
-    // The status filter is about run outcomes and the search is about digest
-    // text; leaving both on returns the intersection, which reads as "no
-    // results" for reasons nothing on screen explains.
+    // Status and text search compound: leaving both on returns their
+    // intersection, which reads as "no results" for no visible reason.
     query.delete("status");
     router.push(query.toString() ? `/runs?${query}` : "/runs");
   }

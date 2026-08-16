@@ -8,8 +8,8 @@ const writeToolHash = vi.fn();
  *
  * `vi.importActual` below pulls in the real `tool-hashes`, which imports the
  * database module, which dereferences DATABASE_URL at import time. Without
- * this the whole suite fails to load on any machine that has not exported one
- * — it was passing only by accident of the developer's shell.
+ * this the suite fails to load on any machine without one exported — it was
+ * passing only by accident of the developer's shell.
  */
 vi.mock("@/db", () => ({ db: {} }));
 
@@ -145,10 +145,10 @@ describe("wrapToolsWithHandles", () => {
     process.env.HANDLES_ENABLED = "false";
     const { wrapped } = harnessFor(big);
 
-    // Not an identity function any more. `report` ends the run and `history`
-    // reads past digests; neither has anything to do with descriptors, so both
-    // survive the escape hatch. What the hatch is actually about — replacing
-    // results with descriptors — is still off.
+    // Not an identity function any more. `report`/`history` have nothing to
+    // do with descriptors, so both survive the escape hatch, but what the
+    // hatch is actually about — replacing results with descriptors — is
+    // still off.
     expect(Object.keys(wrapped).sort()).toEqual([
       "GMAIL_FETCH_EMAILS",
       "history",
@@ -170,9 +170,9 @@ describe("wrapToolsWithHandles", () => {
 });
 
 /*
- * The failure this guards: a hash written for a run that then died means the
- * next run sees identical bytes, is told `unchanged_since`, and reports
- * nothing — content that no digest ever carried is lost silently.
+ * Guards against: a hash written for a run that then died means the next run
+ * sees identical bytes, is told `unchanged_since`, and reports nothing —
+ * content no digest ever carried is silently lost.
  */
 describe("hash buffering", () => {
   it("writes no hash during the tool call itself", async () => {
@@ -492,9 +492,9 @@ describe("runLoopExhausted", () => {
 
   it("is true when local-only calls push total steps to the absolute bound, even under the external budget", () => {
     const maxSteps = 5;
-    // All local calls: countExternalSteps is 0, well under maxSteps, but the
-    // total step count has run past the absolute ceiling — a model looping
-    // on `query`/`inspect` past their own budget must still be stopped.
+    // All local calls: countExternalSteps is 0, well under maxSteps, but
+    // total steps has passed the absolute ceiling — a model looping on
+    // `query`/`inspect` past their own budget must still be stopped.
     const steps = Array.from(
       { length: maxSteps + MAX_QUERIES_PER_RUN + 2 },
       () => ({ toolCalls: [{ toolName: "query" }] }),

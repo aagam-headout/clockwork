@@ -50,8 +50,8 @@ function relative(date: Date): string {
 }
 
 /**
- * Group heading for a run's day. "Today"/"Yesterday" are relative to the app's
- * day (see `@/lib/time`) rather than the host's, so a 1am IST run stops being
+ * Group heading for a run's day. "Today"/"Yesterday" are relative to the
+ * app's day (see `@/lib/time`), not the host's — so a 1am IST run isn't
  * filed under yesterday.
  */
 function dayLabel(date: Date): string {
@@ -67,9 +67,9 @@ function dayLabel(date: Date): string {
 }
 
 /*
- * The statuses worth filtering by, in the order they matter when something has
- * gone wrong. Kept as links rather than a <select>: the filter is then part of
- * the URL (shareable, survives a refresh) and needs no client JavaScript.
+ * Statuses worth filtering by, ordered by how much they matter when something
+ * has gone wrong. Links, not a <select>: keeps the filter in the URL
+ * (shareable, survives a refresh) with no client JS.
  */
 const FILTERS = [
   { value: "", label: "All" },
@@ -88,8 +88,8 @@ export default async function RunsPage({
 }) {
   const user = await requireUser();
 
-  // Set when "Run now" landed on a workflow that was already running — the
-  // list is the right place to be, but not without being told why.
+  // Set when "Run now" hit a workflow already running — surfaced here so
+  // the redirect isn't unexplained.
   const { notice, status: statusFilter, q } = await searchParams;
   const query = q?.trim() ?? "";
   const active = FILTERS.some((f) => f.value === statusFilter)
@@ -111,13 +111,13 @@ export default async function RunsPage({
       deliveryStatus: outputs.deliveryStatus,
     })
     .from(runs)
-    // innerJoin, not leftJoin: a run's owner is its workflow's owner, so the
-    // join is how the scope is expressed at all. (A leftJoin with a WHERE on
-    // the joined table degenerates to an inner join anyway — better to say so.)
+    // innerJoin, not leftJoin: a run's owner is its workflow's owner, so this
+    // join expresses the scope. (A leftJoin with a WHERE on the joined table
+    // degenerates to inner anyway — better to say so.)
     .innerJoin(workflows, eq(runs.workflowId, workflows.id))
     /*
-     * leftJoin: a run that failed before producing anything has no output row,
-     * and an innerJoin here would drop exactly the runs most worth seeing.
+     * leftJoin: a run that failed before producing output has no output row
+     * — an innerJoin would drop exactly the runs most worth seeing.
      */
     .leftJoin(outputs, eq(outputs.runId, runs.id))
     .where(
@@ -126,14 +126,13 @@ export default async function RunsPage({
         : eq(workflows.userId, user.id),
     )
     .orderBy(desc(runs.createdAt))
-    // One page deep. Anything past this is a job for the filter above it, and
-    // the footer says so rather than letting the list end without explanation.
+    // One page deep; the filter above handles anything past this, and the
+    // footer says so.
     .limit(PAGE_SIZE);
 
   /*
-   * A query searches the digests, not the run rows — different question,
-   * different answer shape, so the results replace the list rather than
-   * filtering it.
+   * A query searches digests, not run rows — different answer shape, so
+   * results replace the list rather than filter it.
    */
   const hits = query
     ? await searchDigests({ userId: user.id, q: query, limit: 25 })
@@ -153,8 +152,8 @@ export default async function RunsPage({
     (r) => r.status === "running" || r.status === "queued",
   );
   const spend = rows.reduce((sum, r) => sum + Number(r.costUsd ?? 0), 0);
-  // The chip's own wording, so a filtered count reads "3 failed" rather than
-  // the "3 error runs" that stitching the raw status into a sentence produced.
+  // Chip's own wording, so a filtered count reads "3 failed" rather than
+  // the awkward "3 error runs".
   const activeLabel = FILTERS.find((f) => f.value === active)?.label ?? "All";
 
   return (
@@ -166,8 +165,8 @@ export default async function RunsPage({
           rows.length === 0 ? undefined : (
             <div className="flex items-center gap-2">
               <LiveRun active={inFlight} />
-              {/* Names the filter while one is on — the same "12 runs" against
-                  a filtered list read as the total. */}
+              {/* Names the filter when one is active — otherwise "12 runs"
+                  reads as the total. */}
               <Badge tone={"neutral"} dot>
                 {rows.length} {active ? activeLabel.toLowerCase() : "runs"}
                 {!active && failed > 0 ? ` · ${failed} failed` : ""}
@@ -239,7 +238,7 @@ export default async function RunsPage({
                       href={`/runs/${run.id}`}
                       className="group hover:bg-surface-hover flex items-center gap-3 px-4 py-3 transition-colors"
                     >
-                      {/* The dot sits on the title's cap-height rather than the
+                      {/* Dot aligns to the title's cap-height, not the
                           two-line block's midpoint. */}
                       <span className="flex h-5 shrink-0 items-center">
                         <StatusDot
@@ -255,9 +254,9 @@ export default async function RunsPage({
                           </span>
                           <Badge tone="neutral">{run.trigger}</Badge>
                         </div>
-                        {/* Metadata as separate spans on a fixed gap, not a
-                            "·"-joined string: the separators used to survive
-                            when the value between them was missing. */}
+                        {/* Separate spans on a fixed gap, not a "·"-joined
+                            string — separators used to survive a missing
+                            value between them. */}
                         <div className="text-subtle mt-1 flex min-w-0 items-center gap-2.5 font-mono text-[11px] tabular-nums">
                           <span className="inline-flex items-center gap-1">
                             <Clock className="h-3 w-3" />
@@ -278,8 +277,8 @@ export default async function RunsPage({
                         </div>
                       </div>
 
-                      {/* Fixed-width right columns so cost and time line up
-                          down the list instead of ragging off the name. */}
+                      {/* Fixed-width right columns keep cost and time aligned
+                          down the list, not ragged off the name. */}
                       <span className="text-subtle hidden w-16 shrink-0 text-right font-mono text-[11px] tabular-nums sm:block">
                         {run.costUsd != null
                           ? formatUsd(Number(run.costUsd))
@@ -288,9 +287,8 @@ export default async function RunsPage({
                       <span className="text-subtle hidden w-20 shrink-0 text-right text-[11px] sm:block">
                         {relative(at)}
                       </span>
-                      {/* A run can be green and have reached nobody — that is
-                          the failure this badge exists to make visible, and the
-                          list is where someone would notice it. */}
+                      {/* A run can succeed and reach nobody — this badge makes
+                          that failure visible where it'd be noticed. */}
                       {(run.deliveryStatus === "failed" ||
                         run.deliveryStatus === "partial") && (
                         <Badge
@@ -329,10 +327,9 @@ export default async function RunsPage({
 }
 
 /**
- * Search results — the matching passage of each digest, not its first lines.
- *
- * `ts_headline` produced the excerpt server-side with the highlight markers
- * emptied, so this is plain text and stays plain text.
+ * Search results — each digest's matching passage, not its first lines.
+ * `ts_headline` produced the excerpt server-side with highlight markers
+ * emptied, so it's plain text.
  */
 function DigestResults({
   hits,

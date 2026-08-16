@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/server";
 import { LOCAL_AUTH_BYPASS } from "@/lib/auth/local";
 
-// Signed-in gate, and nothing more. *Which* rows a signed-in user may see is
-// decided per query by the scoped accessors in src/lib/data/scope.ts, and
+// Signed-in gate, nothing more. *Which* rows a signed-in user may see is
+// decided per query by the scoped accessors in src/lib/data/scope.ts;
 // account status is enforced in requireUser() — see src/lib/auth/user.ts.
 //
 // The local Docker stack has no Neon Auth service to sign in against, so the
@@ -19,13 +19,13 @@ export default async function proxy(req: NextRequest, event: unknown) {
   /*
    * @neondatabase/auth 0.4.2-beta proxies the incoming request's *method*
    * through to its upstream `get-session` endpoint, which only answers GET.
-   * So every POST — every server action, and every fetch to an API route —
-   * got a 404 back, read as "not signed in", and was bounced to the sign-in
-   * page: saving a workflow or disconnecting an app died with Next's generic
-   * "This page couldn't load", and POST /api/workflows/propose 307'd.
+   * So every POST — every server action, every fetch to an API route — got a
+   * 404, read as "not signed in", and got bounced to the sign-in page:
+   * saving a workflow died with Next's generic "This page couldn't load,"
+   * and POST /api/workflows/propose 307'd.
    *
-   * The gate only ever reads cookies off the request, so it's handed a GET
-   * with the same URL and headers and its verdict is applied to the real one.
+   * The gate only reads cookies off the request, so it's handed a GET with
+   * the same URL and headers, and its verdict is applied to the real one.
    */
   const probe =
     req.method === "GET" || req.method === "HEAD"
@@ -39,9 +39,9 @@ export default async function proxy(req: NextRequest, event: unknown) {
     res.status < 400 &&
     (res.headers.get("location") ?? "").includes("/auth/sign-in");
 
-  // `fetch` follows a redirect transparently, so an expired session used to
-  // reach the client as a JSON parse failure on the sign-in page's HTML.
-  // API routes get a status they can report instead.
+  // `fetch` follows a redirect transparently, so an expired session reached
+  // the client as a JSON parse failure on the sign-in page's HTML. API
+  // routes get a status they can report instead.
   if (bouncedToSignIn && req.nextUrl.pathname.startsWith("/api/")) {
     return NextResponse.json(
       { error: "Not signed in — reload the page and sign in again." },
@@ -54,15 +54,15 @@ export default async function proxy(req: NextRequest, event: unknown) {
 
 export const config = {
   matcher: [
-    // Everything except: Next internals, the auth UI pages themselves, the
-    // Neon Auth API proxy (must stay reachable to sign in at all), the
-    // GH Actions cron endpoint, and the Composio trigger webhook (both
-    // authenticated by their own secrets — neither has a session cookie).
+    // Everything except: Next internals, the auth UI pages, the Neon Auth
+    // API proxy (must stay reachable to sign in at all), the GH Actions cron
+    // endpoint, and the Composio trigger webhook (both authenticated by
+    // their own secrets — neither has a session cookie).
     //
-    // The exemptions are anchored with `(?:/|$)`. Unanchored, `api/triggers`
-    // also exempts a future `/api/triggers-admin`, which would then be
-    // reachable with no session at all. Non-capturing: Next rejects a matcher
-    // containing capturing groups.
+    // Exemptions are anchored with `(?:/|$)`. Unanchored, `api/triggers`
+    // would also exempt a future `/api/triggers-admin`, reachable with no
+    // session at all. Non-capturing: Next rejects a matcher with capturing
+    // groups.
     "/((?!_next/static|_next/image|favicon.ico|auth(?:/|$)|api/auth(?:/|$)|api/cron/tick(?:/|$)|api/triggers(?:/|$)).*)",
   ],
 };

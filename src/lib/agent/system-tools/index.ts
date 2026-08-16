@@ -8,16 +8,14 @@ import type { SystemToolContext } from "./context";
 export type { SystemToolContext } from "./context";
 
 /*
- * A workflow's tools come from two different places, and the distinction
- * matters for onboarding a new one:
+ * A workflow's tools come from two places:
  *
  * - Connector tools come from whatever integration a workflow uses
  *   (Composio, MCP, ...). They vary per workflow, and `wrap-tools.ts` wraps
  *   them generically without knowing their names in advance.
- * - System tools are engine-owned and present on every run regardless of which
- *   connectors it uses. `query` and `inspect` read a payload a connector tool
- *   produced; `report` does something different — it ends the run, and is the
- *   only way a run produces an outcome at all.
+ * - System tools are engine-owned and present on every run regardless of
+ *   connectors. `query`/`inspect` read a payload a connector tool produced;
+ *   `report` ends the run — the only way a run produces an outcome.
  *
  * A future system tool is one more file here plus one more entry below —
  * `wrap-tools.ts` never needs to change to gain one.
@@ -32,20 +30,18 @@ export const SYSTEM_TOOL_NAMES = [
 /**
  * @param handles whether the handle harness is on for this run.
  *
- * `query` and `inspect` only mean anything when results are being replaced by
- * descriptors, so the `HANDLES_ENABLED=false` escape hatch drops them. `report`
- * is not part of that bargain: it is how a run produces an outcome at all, so
- * turning the harness off must not take it away — doing so would leave every
- * run with no digest and no signals.
+ * `query`/`inspect` only mean anything when results are replaced by
+ * descriptors, so `HANDLES_ENABLED=false` drops them. `report` stays regardless
+ * — it's how a run produces an outcome at all, so disabling the harness must
+ * not remove it.
  */
 export function buildSystemTools(
   ctx: SystemToolContext,
   { handles }: { handles: boolean },
 ): ToolSet {
   /*
-   * `report` ends the run and `history` reads the workflow's own past digests;
-   * neither has anything to do with descriptors, so both stay on when the
-   * handle harness is off. Only the two tools that read a stored payload go.
+   * `report` and `history` have nothing to do with descriptors, so both stay
+   * on when the handle harness is off — only the two payload-reading tools go.
    */
   const always = {
     report: createReportTool(ctx),

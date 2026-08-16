@@ -9,8 +9,8 @@ export const DEFAULT_BUILDER_MODEL = "anthropic/claude-sonnet-5";
 /*
  * The builder is the hardest job in the app: hold a multi-turn conversation,
  * decide when it has enough to commit, call read tools, and emit a valid
- * structured spec. Small models fail that in ways the user only discovers after
- * a bad workflow runs for a week — so unlike the *workflow's* model (where the
+ * structured spec. Small models fail in ways the user only discovers after a
+ * bad workflow runs for a week — so unlike the *workflow's* model (where the
  * whole catalog is fair game and cheap is usually right), this picker is
  * limited to frontier-class families that reliably do tool use + structured
  * output.
@@ -32,12 +32,12 @@ const BUILDER_FAMILIES: RegExp[] = [
 
 /*
  * Every family above also ships small, fast, or narrow variants under the same
- * prefix — gpt-5-nano, glm-4.6v-flash, grok-4.1-fast-non-reasoning. Those are
- * exactly the ones that lose the thread mid-conversation, so they're excluded.
+ * prefix — gpt-5-nano, glm-4.6v-flash, grok-4.1-fast-non-reasoning — exactly
+ * the ones that lose the thread mid-conversation, so they're excluded.
  * Codex/image/deep-research go too: specialized, not conversational.
  *
  * Matched per name segment, never as a substring: "gemini" ends in "mini", and
- * a substring test silently drops every Gemini Pro.
+ * a substring test would silently drop every Gemini Pro.
  */
 const NOT_BUILDER_SEGMENTS = new Set([
   "nano",
@@ -88,9 +88,9 @@ export function builderModels<T extends { id: string }>(catalog: T[]): T[] {
 
 /**
  * The builder model to start on, given the catalog the active provider serves.
- * `DEFAULT_BUILDER_MODEL` is Anthropic-flavoured, so under a direct OpenAI
- * provider it isn't routable at all — fall back to the cheapest capable model
- * that provider does offer.
+ * `DEFAULT_BUILDER_MODEL` is Anthropic-flavoured, so it isn't routable at all
+ * under a direct OpenAI provider — fall back to the cheapest capable model
+ * that provider offers.
  */
 export function defaultBuilderModel<T extends { id: string }>(
   catalog: T[],

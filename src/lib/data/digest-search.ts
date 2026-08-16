@@ -4,13 +4,13 @@ import { db } from "@/db";
 import { outputs, runs, workflows } from "@/db/schema";
 
 /*
- * One search over the digest corpus, serving two callers: the /runs search box
- * and the agent's `history` tool.
+ * One search over the digest corpus, serving two callers: the /runs search
+ * box and the agent's `history` tool.
  *
- * Sharing the function is what makes the owner scoping trustworthy. The join
- * to `workflows` and the filter on `workflows.userId` are structural, not
- * optional arguments — so neither caller can widen past the owner, and a tool
- * parameter certainly cannot.
+ * Sharing the function is what makes owner scoping trustworthy. The join to
+ * `workflows` and the filter on `workflows.userId` are structural, not
+ * optional arguments — neither caller can widen past the owner, and a tool
+ * parameter certainly can't.
  */
 
 export const MAX_SEARCH_LIMIT = 50;
@@ -92,12 +92,12 @@ export async function searchDigests(args: SearchArgs): Promise<DigestHit[]> {
   conditions.push(sql`${outputs.body} <> ''`);
 
   /*
-   * `ts_headline` returns the passage that matched, rather than the first 200
-   * characters of a digest that happens to mention the term at the bottom.
+   * `ts_headline` returns the matched passage, not the first 200 characters
+   * of a digest that mentions the term at the bottom.
    *
-   * StartSel and StopSel are emptied on purpose. The default wraps matches in
-   * <b>, and the only way to show that is to render database-derived HTML —
-   * not a trade worth making for bolded words in a search result.
+   * StartSel/StopSel are emptied on purpose: the default wraps matches in
+   * <b>, which would mean rendering database-derived HTML just to bold a
+   * search result.
    */
   const excerpt = query
     ? sql<string>`ts_headline('english', ${outputs.body}, websearch_to_tsquery('english', ${query}), 'MaxWords=40, MinWords=20, ShortWord=3, MaxFragments=2, StartSel="", StopSel=""')`
@@ -135,16 +135,16 @@ export type SignalPoint = { date: Date; signals: Record<string, unknown> };
 /**
  * Every reported signal for one workflow, oldest first.
  *
- * No full-text involved and no new index: `runs_workflow_created_idx` already
- * covers this access path. A jsonb index on `signals` is not justified until
- * something filters on a signal's value rather than reading it.
+ * No full-text, no new index: `runs_workflow_created_idx` already covers
+ * this access path. A jsonb index on `signals` isn't justified until
+ * something filters on a signal's value rather than just reading it.
  */
 export async function signalTimeline(
   userId: string,
   workflowId: string,
-  /** How far back to read, in days. A count rather than a Date so the clock
-   * reading happens here — a server component cannot call `Date.now()` during
-   * render without tripping React's purity rule. */
+  /** How far back to read, in days. A count, not a Date, so the clock read
+   * happens here — a server component can't call `Date.now()` during render
+   * without tripping React's purity rule. */
   days: number,
 ): Promise<SignalPoint[]> {
   const since = new Date(Date.now() - days * 86_400_000);

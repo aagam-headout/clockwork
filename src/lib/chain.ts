@@ -3,12 +3,12 @@ import { LIMITS } from "@/lib/limits";
 /*
  * Chain shape validation, kept pure.
  *
- * The caller loads the owner's workflows and passes them in, so the cycle and
- * depth logic — the part that is easy to get wrong — is testable without a
- * database, and the query stays where the ownership scoping already lives. A
+ * The caller loads the owner's workflows and passes them in, so the cycle
+ * and depth logic — the part easy to get wrong — is testable without a
+ * database, and the query stays where ownership scoping already lives. A
  * parent id belonging to someone else is simply absent from `nodes`, so it
- * reads as "not found" rather than as a permission error that would confirm
- * the row exists.
+ * reads as "not found" rather than a permission error confirming the row
+ * exists.
  */
 
 export type ChainNode = {
@@ -119,8 +119,8 @@ export function validateChain(
 
   /*
    * Depth is measured across the whole resulting chain, not just up from the
-   * new parent. A workflow being re-parented brings its own descendants with
-   * it, so checking only its own new depth would let `d` adopt the root of an
+   * new parent. Re-parenting brings a workflow's descendants with it, so
+   * checking only its own new depth would let `d` adopt the root of an
    * a -> b -> c chain and quietly produce a four-deep one.
    */
   const above = chainDepth(parentId, nodes);

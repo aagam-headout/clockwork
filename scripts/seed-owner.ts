@@ -1,24 +1,23 @@
 /**
  * Finishes the multi-user backfill (migration 0003).
  *
- * The SQL half of the backfill can only work from emails already recorded in
- * the database. It cannot see `OWNER_EMAIL`, because drizzle-kit executes plain
- * `.sql` files with no access to the environment — and `workflows.owner_email`
- * has always been nullable, so rows created before that column existed have no
- * email to match on at all.
+ * The SQL backfill only works from emails already in the database — it can't
+ * see `OWNER_EMAIL` (drizzle-kit runs plain `.sql` with no env access), and
+ * `workflows.owner_email` has always been nullable, so pre-existing rows may
+ * have no email to match at all.
  *
- * This script closes both gaps: it makes sure the owner has a `users` row, and
- * adopts every still-unowned workflow into it. Run it after `pnpm db:migrate`,
- * and before the migration that makes `workflows.user_id` NOT NULL:
+ * This script closes both gaps: ensures the owner has a `users` row, and
+ * adopts every still-unowned workflow into it. Run after `pnpm db:migrate`,
+ * before the migration that makes `workflows.user_id` NOT NULL:
  *
  *   pnpm db:migrate && pnpm db:seed-owner && pnpm db:migrate
  *
- * Idempotent — running it twice is a no-op, and running it after other people
- * have signed up only ever touches rows that are still unowned.
+ * Idempotent: re-running is a no-op, and running after others sign up only
+ * touches rows still unowned.
  *
- * Deliberately talks to Postgres directly rather than importing `@/db`: it runs
- * under plain Node as a deploy step, with none of the path aliasing or
- * extensionless resolution the bundler provides to application code.
+ * Talks to Postgres directly instead of importing `@/db`: it runs under plain
+ * Node as a deploy step, without the bundler's path aliasing or extensionless
+ * resolution.
  */
 import { Pool } from "pg";
 
@@ -34,8 +33,8 @@ async function main() {
   const pool = new Pool({ connectionString });
 
   try {
-    // `user_id` is NOT NULL once the constraints migration has run, in which
-    // case there is by definition nothing left to adopt.
+    // Once the constraints migration has run, `user_id` is NOT NULL — nothing
+    // left to adopt.
     const { rows: columns } = await pool.query<{ is_nullable: string }>(
       `select is_nullable from information_schema.columns
         where table_name = 'workflows' and column_name = 'user_id'`,
@@ -72,16 +71,16 @@ async function main() {
 
     /*
      * One transaction: a half-finished adoption would leave some workflows
-     * owned and others not, and the next run would have no way to tell which
-     * owner the stragglers were meant to get.
+     * owned and others not, with no way for the next run to tell which owner
+     * the stragglers were meant to get.
      */
     const client = await pool.connect();
     try {
       await client.query("begin");
 
-      // The email index is functional — lower(email) — so it can't be named as
-      // an ON CONFLICT target by column. A read-then-insert is the honest form
-      // here, and this script is single-threaded by definition.
+      // The email index is functional (lower(email)), so it can't be an ON
+      // CONFLICT target by column — read-then-insert is fine since this
+      // script is single-threaded.
       const { rows: existing } = await client.query<{ id: string }>(
         `select id from users where lower(email) = $1 limit 1`,
         [ownerEmail],

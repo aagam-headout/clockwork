@@ -1,14 +1,13 @@
 /**
  * Local-only auth bypass.
  *
- * Neon Auth is a hosted service, so the Docker stack can't run it the way it
- * runs Postgres. Rather than make every local session depend on a cloud
- * login, `LOCAL_AUTH_BYPASS=true` treats the single local user as the owner.
+ * Neon Auth is hosted, so the Docker stack can't run it like Postgres. Rather
+ * than make every local session depend on a cloud login, `LOCAL_AUTH_BYPASS=true`
+ * treats the single local user as the owner.
  *
- * Two locks, both required, and neither settable from the browser:
+ * Two locks, both required, neither settable from the browser:
  *   1. `NODE_ENV !== "production"` — the compose stack runs `next dev`, so a
- *      production build can never take this path even if the flag leaks into
- *      a deployed environment.
+ *      production build can't take this path even if the flag leaks in.
  *   2. the explicit env flag itself.
  *
  * Never set this in a deployed environment.

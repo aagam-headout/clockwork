@@ -1,15 +1,15 @@
 /*
  * A deliberately tiny expression language for alert conditions.
  *
- * Hand-rolled rather than `eval`, `new Function`, or a dependency, because this
- * evaluates a string a user typed into a form and stored in the database, on a
- * server, unattended. The grammar below is the entire attack surface: there is
- * no property access, no call syntax, no assignment, and an identifier resolves
- * only to a signal the workflow declared. Anything else is a parse error before
- * the workflow is ever saved.
+ * Hand-rolled rather than `eval`, `new Function`, or a dependency, because
+ * this evaluates a string a user typed into a form, stored in the database,
+ * on a server, unattended. The grammar below is the entire attack surface:
+ * no property access, no call syntax, no assignment, and an identifier
+ * resolves only to a signal the workflow declared. Anything else is a parse
+ * error before the workflow is ever saved.
  *
- * Evaluation is three-valued. A condition that references a signal the agent
- * did not report is `indeterminate`, not `false` — the caller decides what to
+ * Evaluation is three-valued. A condition referencing a signal the agent
+ * didn't report is `indeterminate`, not `false` — the caller decides what to
  * do about that, and for alerting it must not mean "stay quiet".
  */
 
@@ -161,11 +161,9 @@ function tokenize(source: string): Token[] {
  *   primary := "(" or ")" | ident comparison-op literal | boolean-ident
  */
 function parser(tokens: Token[], declared: SignalDecl[]): Node {
-  /*
-   * A Map, not an object literal. An object would answer `get("constructor")`
-   * with something truthy from its prototype, which is exactly the lookup an
-   * attacker would try.
-   */
+  // A Map, not an object literal: an object would answer `get("constructor")`
+  // with something truthy from its prototype — exactly the lookup an
+  // attacker would try.
   const bySignal = new Map(declared.map((d) => [d.key, d]));
   let pos = 0;
 
@@ -310,8 +308,8 @@ function evalNode(node: Node, values: SignalValues): Tri {
     }
 
     case "and": {
-      // A definite `false` on either side settles it, even if the other side
-      // could not be evaluated — that is what makes a partly-reported envelope
+      // A definite `false` on either side settles it, even if the other
+      // side couldn't be evaluated — what makes a partly-reported envelope
       // still useful rather than uniformly indeterminate.
       const left = evalNode(node.left, values);
       if (left === "false") return "false";
@@ -339,12 +337,10 @@ function evalNode(node: Node, values: SignalValues): Tri {
       if (value === undefined || value === null) return "indeterminate";
       const literal = node.right.value;
 
-      /*
-       * The reported value has to match its own declaration. The parser checked
-       * the literal against the declared type, but nothing can check what the
-       * agent actually put in the envelope until it is here — and a string
-       * where a number was promised is not comparable, nor is it `false`.
-       */
+      // The reported value has to match its declaration. The parser checked
+      // the literal against the declared type, but only here can anything
+      // check what the agent actually put in the envelope — a string where
+      // a number was promised isn't comparable, nor is it `false`.
       if (typeof value !== typeof literal) return "indeterminate";
 
       switch (node.op) {

@@ -1,6 +1,5 @@
-// Client-safe model helpers: no gateway/SDK imports, so both the server
-// catalog loader and the picker UI can share one definition of "tier" and
-// one cost formula.
+// Client-safe model helpers: no gateway/SDK imports, so the server catalog
+// loader and picker UI share one "tier" definition and cost formula.
 
 export type ModelTier = "light" | "mid" | "heavy";
 
@@ -18,11 +17,9 @@ export type ModelInfo = {
   tier: ModelTier;
 };
 
-/*
- * A workflow run is prompt-heavy: a long tool-result transcript in, a short
- * digest out. Blending 4:1 in favour of input reflects that far better than
- * averaging the two prices, so cheap-input models rank where they belong.
- */
+// A workflow run is prompt-heavy: a long tool-result transcript in, a short
+// digest out. Blending 4:1 toward input reflects that better than averaging
+// the two prices, so cheap-input models rank where they belong.
 const BLEND = { input: 0.8, output: 0.2 };
 
 /** Tokens a typical digest run burns — used for the per-run cost estimate. */
@@ -37,8 +34,8 @@ export function blendedPerM(
 }
 
 /**
- * Price bands, in blended USD per 1M tokens. Anything without pricing is
- * treated as mid — unknown cost shouldn't get promoted into the cheap tier.
+ * Price bands, in blended USD per 1M tokens. Unpriced models are treated as
+ * mid — unknown cost shouldn't get promoted into the cheap tier.
  */
 export function tierFor(blended?: number): ModelTier {
   if (blended == null) return "mid";

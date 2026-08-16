@@ -5,19 +5,16 @@ import { useState, useSyncExternalStore } from "react";
 /**
  * Every timestamp in the app, formatted in the *reader's* timezone.
  *
- * The pages that show these are server components, so `date.toLocaleString()`
- * there formats in the *server's* zone — UTC in production. A digest delivered at
- * 08:00 IST rendered as "2:30 AM", which reads as a broken scheduler rather
- * than a display bug.
+ * These pages are server components, so `date.toLocaleString()` there formats
+ * in the *server's* zone — UTC in production. A digest sent at 08:00 IST
+ * rendered as "2:30 AM", reading as a broken scheduler rather than a display bug.
  *
- * So the first paint (server, and the hydration that has to match it) is
- * deliberately formatted in a fixed zone, and an effect re-formats in the
- * browser's zone right after mount. Both renders agree, so there's no
- * mismatch, and the reader ends up with local time.
+ * So the first paint (server, and hydration matching it) is formatted in a
+ * fixed zone, then an effect re-formats in the browser's zone after mount.
+ * Both renders agree, no mismatch, and the reader ends up with local time.
  *
- * Note this is *display* only. Scheduling is a separate thing with its own
- * per-workflow `timezone` column — a workflow set to Asia/Kolkata fires on IST
- * no matter where it's read from.
+ * Display only — scheduling has its own per-workflow `timezone` column, so a
+ * workflow set to Asia/Kolkata fires on IST regardless of where it's read.
  */
 export type TimeFormat =
   | "time" // 2:05 PM
@@ -49,10 +46,9 @@ const OPTIONS: Record<TimeFormat, Intl.DateTimeFormatOptions> = {
 const SSR_ZONE = "UTC";
 
 /**
- * False during SSR and the hydrating render, true from the first client render
- * onwards — the standard hydration-safe "am I in a browser yet" store. A
- * `useEffect` + `setState` would do the same job, but React 19 flags that as a
- * cascading render, and this needs no state at all.
+ * False during SSR and hydration, true from the first client render on — the
+ * standard "am I in a browser yet" store. `useEffect` + `setState` would work
+ * too, but React 19 flags that as a cascading render; this needs no state.
  */
 const subscribe = () => () => {};
 function useMounted() {
@@ -72,19 +68,17 @@ function render(value: Date, format: TimeFormat, timeZone?: string) {
 
 /**
  * "Good morning — Monday, August 11", both halves decided by the reader's
- * clock. The greeting has the same server-zone problem as any timestamp: at
- * 09:00 IST the server is still on yesterday evening's UTC hour and the page
- * opened with "Good evening".
+ * clock. Same server-zone problem as any timestamp: at 09:00 IST the server
+ * is still on yesterday evening's UTC hour, opening with "Good evening".
  */
 export function LocalDayGreeting({ className }: { className?: string }) {
-  // Fixed at first render so the server and hydration agree; the effect below
-  // is what makes the greeting local, not a later clock reading.
+  // Fixed at first render so server and hydration agree; the effect below is
+  // what makes the greeting local.
   const [now] = useState(() => new Date());
   const mounted = useMounted();
 
-  // Pre-mount there's no honest answer — the server's hour is the wrong clock —
-  // and a wrong greeting is worse than a late one, so the date carries the
-  // header alone for that one render.
+  // Pre-mount, the server's hour is the wrong clock, and a wrong greeting is
+  // worse than a late one — so the date carries the header alone that render.
   const hour = mounted ? new Date().getHours() : null;
   const greeting =
     hour == null

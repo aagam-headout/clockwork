@@ -26,8 +26,8 @@ export function decideDelivery(
   alertCondition: string | null,
   declared: SignalDecl[],
 ): DeliveryDecision {
-  // Nothing to deliver, and nothing to suppress: the agent looked and found
-  // nothing. That is the design working, not a withheld alert.
+  // Nothing to deliver, nothing to suppress: the agent looked and found
+  // nothing — the design working, not a withheld alert.
   if (envelope.noUpdates) {
     return { deliver: false, suppressed: false, suppressedReason: null };
   }
@@ -39,14 +39,12 @@ export function decideDelivery(
   const result = evaluateCondition(alertCondition, declared, envelope.signals);
 
   /*
-   * An unevaluable condition DELIVERS.
-   *
-   * This is the one deliberate asymmetry in the feature. If the threshold
-   * cannot be checked — the agent did not report the signal, or the stored
-   * expression no longer parses against the current signal schema — then
+   * An unevaluable condition DELIVERS — the one deliberate asymmetry here.
+   * If the threshold can't be checked (the agent didn't report the signal,
+   * or the stored expression no longer parses against the current schema),
    * staying quiet is a silent failure of an alerting system, at 6am, with
    * nobody watching. The digest goes out and the reason is recorded, so the
-   * run page can say the threshold did not actually gate this delivery.
+   * run page can say the threshold didn't actually gate this delivery.
    */
   if (typeof result === "object") {
     return {
@@ -86,8 +84,8 @@ export function decideChildren<
   const skipped: Array<{ child: T; reason: string }> = [];
 
   for (const child of children) {
-    // A parent that found nothing has nothing to hand down. Firing children on
-    // an empty envelope would spend a model call each to rediscover that.
+    // A parent that found nothing has nothing to hand down. Firing children
+    // on an empty envelope would spend a model call each to rediscover that.
     if (envelope.noUpdates) {
       skipped.push({ child, reason: "parent reported no updates" });
       continue;

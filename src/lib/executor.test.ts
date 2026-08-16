@@ -4,11 +4,11 @@ import { getTableName } from "drizzle-orm";
 /*
  * Executor tests with a fake `db` and a stub model.
  *
- * The thing under test here is not the agent loop — it is what the executor
- * writes down about a run, which is the only record anyone ever sees. The
- * cross-run hash is the sharpest case: committing one for a run that never
- * delivered a digest makes the *next* run report "unchanged" and drop real
- * items on the floor, silently, at 6am.
+ * The thing under test is not the agent loop — it's what the executor writes
+ * down about a run, the only record anyone ever sees. The cross-run hash is
+ * the sharpest case: committing one for a run that never delivered a digest
+ * makes the *next* run report "unchanged" and silently drop real items, at
+ * 6am.
  */
 
 type ChainState = {
@@ -117,10 +117,10 @@ vi.mock("@/lib/connection-gate", async () => {
    * `isFailure` comes from the real module, not a stub.
    *
    * It decides whether a tool result counts as a failure — the thing these
-   * tests are about — so a hand-written stand-in would be testing the stub.
-   * It is also imported by `wrap-tools.ts`, so omitting it from this factory
-   * makes it `undefined` at every call site and every run dies in the outer
-   * catch as a bare `error`, which is how this suite silently broke.
+   * tests are about — so a hand-written stand-in would test the stub. It's
+   * also imported by `wrap-tools.ts`, so omitting it here makes it
+   * `undefined` at every call site and every run dies in the outer catch as
+   * a bare `error`, which is how this suite silently broke.
    */
   const actual = await vi.importActual<typeof import("@/lib/connection-gate")>(
     "@/lib/connection-gate",
@@ -228,9 +228,9 @@ async function driveDegraded(
 }
 
 /**
- * The per-run prompt, which travels as the user message. The system message
- * carries the static prefix and the cache breakpoint, so a test asking "what
- * was this run told" wants this one.
+ * The per-run prompt, sent as the user message. The system message carries
+ * the static prefix and cache breakpoint, so a test asking "what was this
+ * run told" wants this one.
  */
 function userMessageOf(options: Record<string, unknown>): string {
   const messages = options.messages as Array<{ role: string; content: string }>;
@@ -258,7 +258,7 @@ beforeEach(() => {
   delete process.env.HANDLES_ENABLED;
 
   // The claim update, then the workflow lookup. Everything else defaults to
-  // "no rows", which is what a first run looks like.
+  // "no rows" — a first run.
   queue(`update:${getTableName(runs)}`, [
     {
       id: RUN_ID,
@@ -271,15 +271,15 @@ beforeEach(() => {
   queue(`update:${getTableName(workflows)}`, [{ failures: 1 }]);
 });
 
-// A stub left behind by a failed assertion inside a test (before its own
-// cleanup line runs) must not leak into the next test's `fetch`.
+// A stub left behind by a failed assertion must not leak into the next
+// test's `fetch`.
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 /**
  * Runs the loop with a stub model that calls the fetch tool once (populating
- * the wrapper's buffered hash) and then finishes however the test says.
+ * the buffered hash), then finishes however the test says.
  */
 function stubModel(
   finish: { text?: string; finishReason?: string; steps?: unknown[] },
@@ -426,8 +426,8 @@ describe("degraded reads", () => {
 
     await executeRun(RUN_ID);
     expect(savedOutput()?.body).toContain("could not be read this run");
-    // The run itself is still honestly `ok`, with no error text — the run page
-    // renders any error on a non-truncated run as "Run failed".
+    // Still honestly `ok`, with no error text — the run page renders any
+    // error on a non-truncated run as "Run failed".
     expect(runVerdict().status).toBe("ok");
     expect(runVerdict().error).toBeNull();
   });
@@ -438,9 +438,8 @@ describe("degraded reads", () => {
     expect(savedOutput()?.body).toBe("## Digest\n- one thing");
   });
 
-  // R1: a degraded run that produced no digest used to record as an ordinary
-  // clean `ok` — the note only ever landed in a digest that, here, doesn't
-  // exist. It must come back honestly `truncated` instead.
+  // R1: a degraded run with no digest used to record as an ordinary clean
+  // `ok` — the note had nowhere to land. It must come back `truncated`.
   it("records a degraded run that emits NO_UPDATES as truncated, naming the degradation, and flushes nothing", async () => {
     stubModel({ text: NO_UPDATES }, async (tools) => {
       const descriptor = (await tools.GMAIL_FETCH_EMAILS.execute({}, {})) as {
@@ -461,9 +460,9 @@ describe("degraded reads", () => {
     expect(writeToolHash).not.toHaveBeenCalled();
   });
 
-  // R1 (companion case): a degraded run that DID produce a digest keeps the
-  // existing behaviour — the note lives in the body, the run stays an honest
-  // `ok`, and the hashes still don't flush.
+  // R1 (companion): a degraded run that DID produce a digest keeps the
+  // existing behaviour — note in the body, run stays `ok`, hashes still
+  // don't flush.
   it("keeps a degraded run that produced a digest as ok, with the note in the body, and still flushes nothing", async () => {
     stubModel({}, async (tools) => {
       const descriptor = (await tools.GMAIL_FETCH_EMAILS.execute({}, {})) as {
@@ -509,8 +508,8 @@ describe("delivery-gated flush", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    // NO_UPDATES makes the run "unchanged", so the webhook target is skipped
-    // rather than attempted — the design working, not a delivery failure.
+    // NO_UPDATES makes the run "unchanged", so the webhook is skipped rather
+    // than attempted — the design working, not a failure.
     stubModel({ text: NO_UPDATES });
     const result = await executeRun(RUN_ID);
 
@@ -525,10 +524,9 @@ describe("delivery-gated flush", () => {
     vi.unstubAllGlobals();
   });
 
-  // R3: `writeToolHash` already swallows its own errors internally, so this
-  // is defence in depth — but if it ever didn't, a throw here must not be
-  // able to fall through to the outer `catch` and overwrite an already
-  // successful, already delivered run as `error`.
+  // R3: `writeToolHash` already swallows its own errors — this is defence
+  // in depth, so a throw here must not fall through to the outer `catch`
+  // and overwrite an already successful, delivered run as `error`.
   it("keeps a run recorded as ok/delivered even when the flush itself throws", async () => {
     writeToolHash.mockRejectedValueOnce(new Error("hash table unavailable"));
     stubModel({});
@@ -841,11 +839,10 @@ describe("FINDING B: the degraded note lives in the digest, not runs.error, when
     expect(savedOutput()?.body).toBe(NO_UPDATES);
   });
 
-  // Mutant: a run that hits the total-steps bound AND is also blind (the
-  // model's own final word was NO_UPDATES) must keep BOTH the truncation
-  // reason and the degraded note in `runs.error` — collapsing this to just
-  // the truncation reason (dropping the note) is a silent regression, since
-  // there is no digest for the note to live in instead.
+  // Mutant: a run that hits the total-steps bound AND is blind (model's own
+  // final word was NO_UPDATES) must keep BOTH the truncation reason and the
+  // degraded note in `runs.error` — dropping the note is a silent
+  // regression, since there's no digest for it to live in instead.
   it("a run that is both total-steps-truncated and blind keeps both the truncation reason and the note in runs.error", async () => {
     stubModel(
       {
@@ -956,8 +953,8 @@ describe("prompt cache breakpoint", () => {
 
 describe("dynamic tool results reach the trace and the auth check", () => {
   /**
-   * Composio's tools arrive as *dynamic* tools, so the SDK files their results
-   * under `dynamicToolResults`. A step shaped the way the SDK really shapes it.
+   * Composio's tools arrive as *dynamic* tools, so the SDK files results
+   * under `dynamicToolResults`. Shaped the way the SDK really shapes it.
    */
   function dynamicStep(output: unknown) {
     return [
@@ -997,7 +994,7 @@ describe("dynamic tool results reach the trace and the auth check", () => {
   });
 
   // The dead-connection-looks-green bug: a rejected credential arrives as an
-  // ordinary value in the result body, and it arrives on the dynamic list.
+  // ordinary value, on the dynamic list.
   it("detects a credential rejection carried on a dynamic result", async () => {
     isAuthError.mockReturnValue(true);
     generateText.mockImplementation(
@@ -1028,9 +1025,9 @@ describe("dynamic tool results reach the trace and the auth check", () => {
 /*
  * Outcome routing.
  *
- * The seam these tests use is `stubModel`'s `duringRun` hook, which hands over
- * the very ToolSet the run was built with — so calling `tools.report.execute`
- * here is the same call the model would make, validation and all.
+ * These tests use `stubModel`'s `duringRun` hook, which hands over the very
+ * ToolSet the run was built with — so `tools.report.execute` here is the
+ * same call the model would make, validation and all.
  */
 
 /** The full outputs row, including the envelope columns. */
@@ -1187,12 +1184,10 @@ describe("alert conditions", () => {
   });
 
   it("flushes no hashes for a digest a threshold withheld", async () => {
-    /*
-     * An empty delivery log is not "everything succeeded" here — nobody read
-     * these bytes. Recording the hashes would tell the next run the payload
-     * was already reported, so a value that later crosses the line arrives
-     * marked unchanged.
-     */
+    // An empty delivery log isn't "everything succeeded" here — nobody read
+    // these bytes. Recording the hashes would tell the next run the payload
+    // was already reported, so a later value crossing the line arrives
+    // marked unchanged.
     queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
     stubModel({}, async (tools) => {
       await tools.report.execute(
@@ -1388,7 +1383,7 @@ describe("cost cap", () => {
 
   it("issues no spend query at all for an uncapped workflow", async () => {
     // The fixture carries no cap. A pointless query here would run before
-    // every run of every uncapped workflow, which is nearly all of them.
+    // every run of every uncapped workflow — nearly all of them.
     stubModel({});
     const result = await executeRun(RUN_ID);
 
@@ -1498,12 +1493,9 @@ describe("chained runs go through the quota path", () => {
 
     await executeRun(RUN_ID);
 
-    /*
-     * `enqueueRun` stamps `lastAttemptAt` on the workflow it queues, and a bare
-     * insert does not — so this is the observable difference between going
-     * through the quota checks and walking past them. A chain multiplies runs,
-     * which is exactly what the per-user ceilings exist to bound.
-     */
+    // `enqueueRun` stamps `lastAttemptAt` on the workflow it queues, and a
+    // bare insert doesn't — the observable difference between going through
+    // the quota checks and walking past them.
     const stamped = calls.some(
       (c) =>
         c.op === "update" &&
@@ -1561,8 +1553,8 @@ describe("what a chained child is told", () => {
 
     const prompt = userMessageOf(generateText.mock.calls[0][0]);
     // The digest is markdown a model wrote for a human. Sent through
-    // JSON.stringify it arrived escaped, cost tokens on the escapes, and could
-    // be cut mid-string by the length cap into something that does not parse.
+    // JSON.stringify it arrived escaped, cost tokens on the escapes, and
+    // could be cut mid-string into something that doesn't parse.
     expect(prompt).toContain("## Deploys\n- api v2.4 shipped");
     expect(prompt).toContain("Morning brief");
     expect(prompt).toContain("failures: 2");
@@ -1620,12 +1612,10 @@ describe("a retry sweep that has nothing left to retry", () => {
   }
 
   it("settles a part-delivered digest as partial, not failed", async () => {
-    /*
-     * The webhook reached its endpoint; the Slack send did not and cannot be
-     * retried — `deliverOutput` only verifies tool-based targets, it does not
-     * perform them. Writing `failed` over this reports a digest that a reader
-     * did receive as one that never arrived.
-     */
+    // The webhook reached its endpoint; the Slack send didn't and can't be
+    // retried — `deliverOutput` only verifies tool-based targets, it doesn't
+    // perform them. Writing `failed` here would misreport a digest a reader
+    // did receive as one that never arrived.
     queueRetryRow(
       [
         { type: "webhook", ok: true },

@@ -35,22 +35,21 @@ function slugify(name: string) {
       .trim()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/(^-|-$)/g, "") ||
-    // Every character was punctuation ("!!!"), which would otherwise insert an
-    // empty slug — and the second such workflow would hit the unique index.
+    // All-punctuation names ("!!!") would otherwise produce an empty slug,
+    // and a second one would hit the unique index.
     "workflow"
   );
 }
 
 /**
- * `workflows.slug` is unique, and two workflows called "Morning digest" is an
- * entirely reasonable thing to want. Without this, the second save died on a
- * Postgres constraint violation — which reached the user as an unexplained
- * error screen with the filled-in form gone.
+ * `workflows.slug` is unique, and two workflows named "Morning digest" is
+ * reasonable. Without this, the second save died on a Postgres constraint
+ * violation, reaching the user as an unexplained error screen with the
+ * filled-in form gone.
  *
- * Scoped to the owner, which matters twice over now that there is more than
- * one: unscoped, one user naming a workflow "digest" would push the next
- * person's to "digest-2", and the suffix they got back would tell them whether
- * a stranger already owns that name.
+ * Scoped to the owner: unscoped, one user naming a workflow "digest" would
+ * push the next person's to "digest-2", and the suffix would leak whether a
+ * stranger already owns that name.
  */
 async function uniqueSlug(
   userId: string,
@@ -86,18 +85,18 @@ async function uniqueSlug(
  * went through — though on that path the action redirects and the state is
  * never rendered.
  *
- * Returning the message instead of throwing is the whole point: a thrown
- * validation error ("Name, goal, and at least one toolkit are required") hit
- * the error boundary, replacing the page — and every field the user had just
- * filled in — with a generic failure screen.
+ * Returning the message instead of throwing is the point: a thrown validation
+ * error ("Name, goal, and at least one toolkit are required") hit the error
+ * boundary, replacing the page — and every field the user had filled in —
+ * with a generic failure screen.
  */
 export type WorkflowFormState = {
   error: string | null;
   /**
    * What was submitted, echoed back. React resets an uncontrolled form once
-   * its action settles — so without this, a rejected save cleared every field
-   * the user had just typed and left them retyping the whole thing to fix one
-   * mistake. The form re-seeds its `defaultValue`s from here.
+   * its action settles, so without this a rejected save cleared every field
+   * the user typed, forcing a full retype to fix one mistake. The form
+   * re-seeds its `defaultValue`s from here.
    */
   values?: Record<string, string>;
 };
@@ -112,10 +111,10 @@ function formValues(formData: FormData): Record<string, string> {
 }
 
 /**
- * Next signals both `redirect()` and `notFound()` by throwing a tagged error.
+ * Next signals `redirect()` and `notFound()` by throwing a tagged error.
  * `requireUser()` redirects, so every catch in this file sits downstream of
- * one — and swallowing it would show "NEXT_REDIRECT" as the error message
- * while leaving an unauthorized caller on the page.
+ * one — swallowing it would show "NEXT_REDIRECT" as the error message while
+ * leaving an unauthorized caller on the page.
  */
 function isControlFlowError(err: unknown): boolean {
   const digest = (err as { digest?: unknown })?.digest;
@@ -166,8 +165,8 @@ async function parseDeliver(formData: FormData): Promise<DeliverTarget[]> {
 
   if (formData.get("deliverWebhook") === "on") {
     const url = field(formData, "webhookUrl");
-    // Resolves DNS and rejects anything on a private network — this server
-    // fetches the URL later, so an unchecked one is an SSRF primitive.
+    // Resolves DNS and rejects private-network targets — the server fetches
+    // this URL later, so unchecked it's an SSRF primitive.
     await assertSafeWebhookUrl(url);
     deliver.push({ type: "webhook", url });
   }
@@ -184,12 +183,11 @@ async function parseDeliver(formData: FormData): Promise<DeliverTarget[]> {
 /**
  * Checks delivery targets against the user's actual connections.
  *
- * The split matters. **No connection row at all** means the user is saving
- * something that cannot work and has no way to find out why except by waiting
- * for the first run to fail — so that's rejected. **A row that exists but is
- * unhealthy** is transient, and blocking it would trap someone who only wanted
- * to rename a workflow while their Slack token happens to be expired — so that
- * is allowed with a warning.
+ * The split matters: **no connection row at all** means the save cannot work
+ * and would only fail on the first run, so it's rejected. **A row that exists
+ * but is unhealthy** is transient — blocking it would trap someone renaming a
+ * workflow while their Slack token happens to be expired — so it's allowed
+ * with a warning.
  */
 async function checkDeliveryConnections(
   userId: string,
@@ -244,17 +242,17 @@ async function parseWorkflowForm(
   const timezone = field(formData, "timezone", "Asia/Kolkata");
   const model = field(formData, "model", "anthropic/claude-sonnet-5");
   /*
-   * Clamped, not trusted. The builder's schema caps this at 30, but this path
-   * is a plain form post — and a server action is an ordinary endpoint anyone
-   * with a session can call directly, so `maxSteps=100000` would otherwise buy
-   * a full-length run at maximum tool-call rate.
+   * Clamped, not trusted. The builder's schema caps this at 30, but a server
+   * action is an ordinary endpoint anyone with a session can call directly,
+   * so `maxSteps=100000` would otherwise buy a full-length run at maximum
+   * tool-call rate.
    */
   const maxSteps = Math.min(
     Math.max(1, Math.floor(Number(formData.get("maxSteps")) || 15)),
     LIMITS.maxSteps,
   );
   // Read-only is the default, so the form ships the opt-out ("allowWrites")
-  // rather than the flag itself — an absent checkbox then means "stay safe".
+  // rather than the flag itself — an absent checkbox means "stay safe".
   const readOnly = formData.get("allowWrites") !== "on";
   const toolkits = formData.getAll("toolkits").map(String);
   const eventTriggers = formData
@@ -269,10 +267,9 @@ async function parseWorkflowForm(
 
   /*
    * The outcome configuration: what the run may measure, and the two gates
-   * those measurements feed. Validated here rather than at run time on
-   * purpose — a typo in a threshold should be a red field in a form, not a
-   * surprise at 6am three weeks later on a workflow everyone assumed was
-   * watching something.
+   * those measurements feed. Validated here, not at run time — a typo in a
+   * threshold should be a red field in a form, not a surprise at 6am three
+   * weeks later on a workflow everyone assumed was watching something.
    */
   const signalSchema = parseSignalSchema(
     jsonField(formData, "signalSchema") ?? [],
@@ -308,11 +305,10 @@ async function parseWorkflowForm(
   }
 
   if (triggerType === "cron") {
-    // Only a cron workflow has a schedule to police. An event or chained one
-    // is woken by something else entirely.
-    // The scheduler ticks every 5 minutes, so a faster cron is a schedule the
-    // app cannot honour — and the cheapest way for one account to monopolise
-    // the tick.
+    // Only a cron workflow has a schedule to police; event/chained ones wake
+    // from something else. The scheduler ticks every 5 minutes, so a faster
+    // cron is a schedule the app can't honour, and the cheapest way for one
+    // account to monopolise the tick.
     let interval: number;
     try {
       interval = minIntervalMinutes(cron, timezone);
@@ -358,12 +354,12 @@ async function parseWorkflowForm(
 }
 
 /**
- * The monthly budget field. Blank means uncapped, which is the default and the
- * state of every workflow that existed before caps did.
+ * The monthly budget field. Blank means uncapped — the default, and the state
+ * of every workflow that existed before caps did.
  *
  * Zero is rejected rather than quietly treated as uncapped: someone typing 0
- * means "spend nothing", and silently doing the opposite of that is worse than
- * telling them the field does not work that way.
+ * means "spend nothing", and silently doing the opposite is worse than saying
+ * the field doesn't work that way.
  */
 function parseCostCap(raw: string): string | null {
   if (!raw) return null;
@@ -390,8 +386,8 @@ function jsonField(formData: FormData, key: string): unknown {
 
 /**
  * Everything about a workflow's outcome configuration that must hold before
- * the row is written. Throws, matching how the rest of this file reports a
- * validation failure back to the form.
+ * the row is written. Throws, matching how this file reports validation
+ * failures back to the form.
  */
 async function assertOutcomeConfig(
   userId: string,
@@ -441,9 +437,9 @@ async function assertOutcomeConfig(
   }
 
   /*
-   * Scoped to the owner. A parent id belonging to someone else is simply
-   * absent from this list, so it reads as "not found" rather than as a
-   * permission error — which would confirm the row exists.
+   * Scoped to the owner: a parent id belonging to someone else is simply
+   * absent from this list, so it reads as "not found" rather than a
+   * permission error that would confirm the row exists.
    */
   const owned = await db
     .select({
@@ -526,9 +522,9 @@ function splitList(value: string): string[] {
 /**
  * Registering the trigger with Composio is best-effort: the workflow is
  * already saved and correct, and a Composio hiccup shouldn't lose the edit.
- * A trigger that failed to register simply never fires, which is invisible
- * from the workflow list — so the reason comes back as a string for the
- * caller to show. Re-saving the workflow retries it.
+ * A trigger that fails to register simply never fires — invisible from the
+ * workflow list — so the reason comes back as a string for the caller to
+ * show. Re-saving the workflow retries it.
  */
 async function registerTriggers(userId: string): Promise<string | null> {
   try {
@@ -550,9 +546,9 @@ async function registerTriggers(userId: string): Promise<string | null> {
 /**
  * `/workflows`, plus the trigger warning when registration didn't take — or,
  * when it did, a line saying the save landed. Every one of these actions ends
- * in a redirect, and a redirect that changes nothing visible ("did the pause
- * take?") is indistinguishable from a no-op, so the successful paths carry a
- * `done` message the same way the failing ones carry `error`.
+ * in a redirect, and a redirect that changes nothing visible is
+ * indistinguishable from a no-op, so successful paths carry a `done` message
+ * the same way failing ones carry `error`.
  */
 function workflowsPath(triggerError: string | null, done?: string) {
   if (triggerError)
@@ -566,10 +562,10 @@ function workflowsError(message: string) {
 }
 
 /*
- * Both writers follow the same shape: everything that can fail sits inside the
- * try, and the redirect is outside it — `redirect()` works by throwing, so a
- * try/catch wrapped around it would swallow the navigation and report the
- * successful save as an error.
+ * Both writers follow the same shape: everything that can fail sits inside
+ * the try, and the redirect is outside it — `redirect()` throws, so wrapping
+ * it in try/catch would swallow the navigation and report the save as an
+ * error.
  */
 export async function createWorkflow(
   _prev: WorkflowFormState,
@@ -586,8 +582,8 @@ export async function createWorkflow(
     const slug = await uniqueSlug(user.id, parsed.name);
 
     // Stamped at creation because a scheduled run has no session to ask: the
-    // row itself is the only statement of who this workflow belongs to, and
-    // it selects both the provider key and the connections the run uses.
+    // row is the only statement of ownership, and it selects both the
+    // provider key and the connections the run uses.
     await db.insert(workflows).values({ ...parsed, slug, userId: user.id });
     triggerError = await registerTriggers(user.id);
     if (warnings.length > 0) notice = `Workflow created. ${warnings.join(" ")}`;
@@ -600,9 +596,9 @@ export async function createWorkflow(
 }
 
 /**
- * Caps how much one account can own. Signup is open, so without this a single
- * user can fill the scheduler with workflows and crowd everyone else out of
- * the tick budget.
+ * Caps how much one account can own. Signup is open, so without this one user
+ * could fill the scheduler with workflows and crowd everyone else out of the
+ * tick budget.
  */
 async function assertWorkflowQuota(userId: string) {
   const [row] = await db
@@ -656,9 +652,8 @@ export async function updateWorkflow(
     const updated = await db
       .update(workflows)
       .set({ ...parsed, slug, updatedAt: new Date() })
-      // Ownership lives in the WHERE, not in a check before it: one statement,
-      // no window between the check and the write, and no second place to
-      // forget the scope.
+      // Ownership lives in the WHERE, not a check before it: one statement,
+      // no window between check and write, no second place to forget scope.
       .where(and(eq(workflows.id, id), eq(workflows.userId, user.id)))
       .returning({ id: workflows.id });
 
@@ -672,13 +667,13 @@ export async function updateWorkflow(
     }
 
     /*
-     * Raising or clearing a budget releases the workflow the budget paused —
-     * and only that one. Scoping on `pausedReason` is the same property a
-     * reconnect relies on: a workflow the user paused by hand stays paused.
+     * Raising or clearing a budget releases only the workflow the budget
+     * paused. Scoping on `pausedReason` is the same property a reconnect
+     * relies on: a workflow paused by hand stays paused.
      *
-     * The new cap is re-judged rather than assumed: lowering a cap while
-     * already over it must not re-enable a workflow that would immediately
-     * pause again on its next run.
+     * The new cap is re-judged, not assumed: lowering a cap while already
+     * over it must not re-enable a workflow that would immediately pause
+     * again on its next run.
      */
     if (before?.pausedReason === "cost_cap") {
       const verdict = await checkCostCap({
@@ -754,8 +749,8 @@ export async function toggleWorkflow(id: string, enabled: boolean) {
 
   revalidatePath("/workflows");
   // These buttons live on the list itself, so the message goes back to the
-  // list rather than through the error boundary — the row the user clicked is
-  // still on screen next to the explanation.
+  // list rather than the error boundary — the clicked row stays on screen
+  // next to the explanation.
   redirect(
     failure
       ? workflowsError(failure)
@@ -767,10 +762,10 @@ export async function toggleWorkflow(id: string, enabled: boolean) {
  * Pauses any chained workflow left pointing at nothing.
  *
  * The parent foreign key is ON DELETE SET NULL, which keeps a child's run
- * history rather than cascading it away — but leaves the child with a trigger
- * that can never fire. Paused is the honest state, and `pausedReason` lets the
- * workflows page say why instead of showing a workflow that looks scheduled
- * and never runs.
+ * history instead of cascading it away — but leaves the child with a trigger
+ * that can never fire. Paused is the honest state, and `pausedReason` lets
+ * the workflows page say why instead of showing one that looks scheduled and
+ * never runs.
  */
 async function pauseOrphanedChildren(userId: string): Promise<void> {
   await db
@@ -819,11 +814,11 @@ export async function deleteWorkflow(id: string) {
 /**
  * Disconnects a toolkit for the signed-in user.
  *
- * Keyed by toolkit slug, not by Composio account id. The previous signature
- * took an id straight from the client and deleted whatever it named — safe
- * only while the app had exactly one user, and a "delete anyone's Slack
- * connection" button the moment it had two. Resolving the account from
- * (user, toolkit) server-side means the ownership check *is* the lookup.
+ * Keyed by toolkit slug, not Composio account id. The previous signature took
+ * an id straight from the client and deleted whatever it named — safe only
+ * with exactly one user, a "delete anyone's Slack connection" button the
+ * moment there were two. Resolving the account from (user, toolkit)
+ * server-side means the ownership check *is* the lookup.
  */
 export async function disconnectToolkit(toolkit: string) {
   const user = await requireUser();
@@ -852,10 +847,10 @@ export async function disconnectToolkit(toolkit: string) {
   } catch (err) {
     /*
      * A Composio failure here — most commonly a 403 because the API key only
-     * has read access to `connected_accounts` — used to bubble out of the
-     * action and replace the whole page with Next's generic "This page
-     * couldn't load". The message is the only thing that tells the user what
-     * to fix, so it rides back on the URL and renders as an alert.
+     * has read access to `connected_accounts` — used to bubble out and
+     * replace the page with Next's generic "This page couldn't load". The
+     * message is the only thing telling the user what to fix, so it rides
+     * back on the URL and renders as an alert.
      */
     revalidatePath("/connections");
     redirect(
@@ -866,9 +861,9 @@ export async function disconnectToolkit(toolkit: string) {
   await markDisconnected(user.id, toolkit);
 
   /*
-   * Workflows that needed this toolkit are paused rather than deleted, and
-   * marked with *why* — so reconnecting can re-enable exactly these, and not
-   * the ones the user paused deliberately.
+   * Workflows that needed this toolkit are paused, not deleted, and marked
+   * with *why* — so reconnecting re-enables exactly these, not the ones the
+   * user paused deliberately.
    */
   if (dependents.length > 0) {
     await db
@@ -909,8 +904,8 @@ export async function disconnectToolkit(toolkit: string) {
 
 /**
  * Queues a manual run and hands the user straight to its live page. The run
- * itself continues in `after()`, so the button doesn't stay pending for the
- * minutes an agent run can take.
+ * continues in `after()`, so the button doesn't stay pending for the minutes
+ * an agent run can take.
  */
 export async function runWorkflowNow(id: string) {
   // Resolved inside the try, acted on after it — `redirect()` throws, so it
@@ -921,9 +916,9 @@ export async function runWorkflowNow(id: string) {
     const user = await requireUser();
     const workflow = await ownedWorkflow(id, user.id);
 
-    // Deleted since the page rendered — or someone else's. Throwing here
+    // Deleted since the page rendered, or someone else's. Throwing here
     // reached the user as an error screen; the list plus a sentence is the
-    // honest answer, and it's the same answer in both cases by design.
+    // honest answer — the same one in both cases, by design.
     if (!workflow) {
       redirect(workflowsError("That workflow no longer exists."));
     }
@@ -931,9 +926,9 @@ export async function runWorkflowNow(id: string) {
     const queued = await enqueueRun(id, "manual");
 
     if (queued.skipped) {
-      // Already in flight — starting a second concurrent run of the same
-      // workflow is exactly what the one-active-run index exists to prevent,
-      // so say that rather than appearing to do nothing.
+      // Already in flight — a second concurrent run is exactly what the
+      // one-active-run index prevents, so say that instead of appearing to
+      // do nothing.
       revalidatePath("/runs");
       destination =
         queued.reason === "already_running"

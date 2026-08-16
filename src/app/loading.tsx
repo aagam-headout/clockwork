@@ -1,11 +1,10 @@
 import { PageShell, Skeleton } from "@/components/ui";
 
 /*
- * Every page in this app is force-dynamic and talks to Postgres (and often
- * Composio) before it can render, so the default was a blank frame on each
- * navigation. One shared skeleton in the shape all the pages share — header,
- * stat row, list — covers the whole tree; nothing here needs to be per-route
- * accurate, only structurally honest.
+ * Every page here is force-dynamic and hits Postgres (often Composio too)
+ * before rendering, so the default was a blank frame per navigation. One
+ * shared skeleton in the common shape — header, stat row, list — covers the
+ * whole tree; it only needs to be structurally honest, not per-route accurate.
  */
 export default function Loading() {
   return (
@@ -16,16 +15,16 @@ export default function Loading() {
       <Skeleton className="h-8 w-48" />
       <Skeleton className="mt-2 h-5 w-72" />
 
-      {/* Same grid and 92px floor as the Stat row it stands in for, so the
-          real tiles land on the boxes the eye already fixed on. */}
+      {/* Same grid and 92px floor as the Stat row, so real tiles land where
+          the eye already fixed. */}
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {[0, 1, 2, 3, 4].map((i) => (
           <Skeleton key={i} className="rounded-container h-[92px]" />
         ))}
       </div>
 
-      {/* Every list in the app is one bordered box of hairline rows, not a
-          stack of detached cards — a section label above it, then the box. */}
+      {/* Lists here are one bordered box of hairline rows, not detached cards
+          — section label above, then the box. */}
       <div className="mt-8">
         <Skeleton className="h-4 w-28" />
         <div className="divide-border border-border rounded-container mt-3 divide-y overflow-hidden border">

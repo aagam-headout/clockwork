@@ -3,10 +3,9 @@ import { VercelProvider } from "@composio/vercel";
 
 /*
  * Constructed on first use, not at import. The SDK throws when
- * COMPOSIO_API_KEY is missing, and eagerly constructing it meant that a
- * missing key took down every page that transitively imports this module —
- * including ones that never touch Composio. Lazily, a missing key fails only
- * the call that actually needed it.
+ * COMPOSIO_API_KEY is missing, and eager construction would take down every
+ * page that transitively imports this module, even ones that never touch
+ * Composio. Lazily, a missing key fails only the call that needed it.
  */
 let client: Composio<VercelProvider> | null = null;
 

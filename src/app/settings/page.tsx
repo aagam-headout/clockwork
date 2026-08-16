@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 
-// Model provider moved under Account (it's a per-account credential choice,
-// same as email or password) — see /account/[[...path]]/page.tsx. This route
-// stays only so old bookmarks and the `switchProvider` action's pre-move
-// callers don't 404; it forwards along whatever query string it got.
+// Model provider moved under Account (a per-account credential, like
+// email/password) — see /account/[[...path]]/page.tsx. This route stays so
+// old bookmarks and pre-move `switchProvider` callers don't 404; it forwards
+// the query string.
 export default async function SettingsPage({
   searchParams,
 }: {

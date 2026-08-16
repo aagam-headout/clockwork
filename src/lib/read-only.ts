@@ -1,41 +1,40 @@
 /**
- * Read-only enforcement gate. This runs server-side, before any tool
- * schema reaches the model — the agent never even sees a write tool it
- * wasn't explicitly granted via a workflow's `deliver` targets.
+ * Read-only enforcement gate. Runs server-side, before any tool schema
+ * reaches the model — the agent never sees a write tool not explicitly
+ * granted via a workflow's `deliver` targets.
  */
 
 // Read-verb tool slugs, e.g. GITHUB_LIST_REPOS, GMAIL_FETCH_EMAILS,
-// SLACK_LIST_CHANNELS. Composio slugs are SCREAMING_SNAKE, verb usually
-// appears as its own segment.
+// SLACK_LIST_CHANNELS. Composio slugs are SCREAMING_SNAKE with the verb
+// usually its own segment.
 const READ_VERB = /(^|_)(GET|LIST|SEARCH|FETCH|READ|RETRIEVE|FIND|QUERY)(_|$)/;
 
 /*
- * Write verbs, checked *after* the read verbs and given priority over them.
- * Plenty of real slugs carry both — GITHUB_GET_OR_CREATE_..., NOTION_
- * SEARCH_AND_UPDATE_... — and a read verb anywhere in the name used to be
- * enough to let those through. Deny wins, so a mixed slug is treated as a
- * write.
+ * Write verbs, checked *after* read verbs and given priority. Plenty of real
+ * slugs carry both — GITHUB_GET_OR_CREATE_..., NOTION_SEARCH_AND_UPDATE_...
+ * — and a read verb anywhere used to be enough to let those through. Deny
+ * wins, so a mixed slug is a write.
  *
- * This is still name-based inference. The stronger check is Composio's own
- * per-tool metadata, but the AI-SDK tool objects returned by
- * `composio.tools.get` don't carry it, so the slug is what we have.
+ * Still name-based inference. The stronger check is Composio's own per-tool
+ * metadata, but the AI-SDK tool objects from `composio.tools.get` don't
+ * carry it, so the slug is what we have.
  */
 const WRITE_VERB =
   /(^|_)(CREATE|UPDATE|DELETE|REMOVE|SEND|POST|PUT|PATCH|ADD|SET|EDIT|WRITE|UPLOAD|INSERT|APPEND|MOVE|ARCHIVE|CLOSE|MERGE|ASSIGN|INVITE|MARK|REPLY|TRASH|DRAFT|CANCEL|APPROVE|REVOKE|SHARE|RENAME|DUPLICATE|CLEAR|RESET|ENABLE|DISABLE|EXECUTE|RUN)(_|$)/;
 
 /*
  * Destructive verbs: the subset of writes that removes or resets something a
- * later run can't put back. Turning writes on is a workflow-level "you may act
- * in my apps" — it is not consent to an unattended delete, and there is nobody
- * on the other end of a 3am cron to confirm with. So these stay blocked even
- * with `readOnly: false`, unless the owner names the exact slug in the allow
- * list. See `buildToolFilter`.
+ * later run can't undo. Turning writes on is a workflow-level "you may act
+ * in my apps" — not consent to an unattended delete, and nobody's on the
+ * other end of a 3am cron to confirm with. So these stay blocked even with
+ * `readOnly: false` unless the owner names the exact slug in the allow list.
+ * See `buildToolFilter`.
  */
 const DESTRUCTIVE_VERB =
   /(^|_)(DELETE|DESTROY|DROP|ERASE|PURGE|REMOVE|TRASH|WIPE|RESET|REVOKE|CLEAR|UNINSTALL|UNSUBSCRIBE|TERMINATE)(_|$)/;
 
 // Composio's built-in search toolkit needs no auth and is read-only by
-// construction — always allow it regardless of a workflow's toolkit list.
+// construction — always allow it, regardless of the workflow's toolkits.
 const ALWAYS_ALLOWED_PREFIXES = ["COMPOSIO_SEARCH_"];
 
 export function isReadOnlyToolSlug(slug: string): boolean {
@@ -45,9 +44,9 @@ export function isReadOnlyToolSlug(slug: string): boolean {
 }
 
 /**
- * Whether a slug names an irreversible operation. Same name-based inference as
- * the read/write split, and deliberately broad: a false positive costs the
- * owner one line in the allow list, a false negative costs them their data.
+ * Whether a slug names an irreversible operation. Same name-based inference
+ * as the read/write split, deliberately broad: a false positive costs one
+ * allow-list line, a false negative costs the owner their data.
  */
 export function isDestructiveToolSlug(slug: string): boolean {
   if (ALWAYS_ALLOWED_PREFIXES.some((p) => slug.startsWith(p))) return false;
@@ -56,8 +55,8 @@ export function isDestructiveToolSlug(slug: string): boolean {
 
 /**
  * Delivery targets a workflow can declare. Each maps to the one write tool
- * slug it's allowed to use (or to no tool at all, when the executor delivers
- * it directly), so the model can't redirect output anywhere else.
+ * slug it's allowed to use (or none, when the executor delivers directly),
+ * so the model can't redirect output elsewhere.
  */
 export type DeliverTarget =
   | { type: "dashboard" } // no tool call — executor persists the output row
@@ -110,20 +109,19 @@ export function deliverToolkits(deliver: DeliverTarget[]): string[] {
 
 /**
  * Builds the final allowed-slug predicate for one run: read tools from the
- * workflow's toolkits, plus exactly the write tools its declared delivery
- * targets need — nothing else, regardless of what the toolkit exposes.
+ * workflow's toolkits, plus exactly the write tools its delivery targets
+ * need — nothing else, regardless of what the toolkit exposes.
  *
- * `allowTools` (when non-empty) narrows further to an explicit whitelist, and
+ * `allowTools` (non-empty) narrows further to an explicit whitelist;
  * `denyTools` removes slugs outright. Both accept a trailing `*` wildcard.
- * Narrowing matters beyond safety: a toolkit can expose hundreds of tools,
- * and every schema loaded is prompt tokens spent on every step.
+ * Narrowing matters beyond safety too: every loaded schema is prompt tokens
+ * spent on every step, and a toolkit can expose hundreds of tools.
  *
- * `readOnly: false` drops only the read/write gate — a workflow the owner has
- * explicitly opted out of read-only may call any tool its toolkits expose,
- * still subject to the allow and deny lists, and still minus the destructive
- * slugs: those need their exact name in `allowTools`. A wildcard doesn't
- * count, on purpose — `GITHUB_*` is how someone means "the GitHub tools", not
- * "and delete my repos".
+ * `readOnly: false` drops only the read/write gate — the workflow may then
+ * call any tool its toolkits expose, still subject to the allow/deny lists
+ * and still minus the destructive slugs, which need their exact name in
+ * `allowTools`. A wildcard doesn't count, on purpose — `GITHUB_*` means "the
+ * GitHub tools," not "and delete my repos."
  */
 export function buildToolFilter(
   deliver: DeliverTarget[],

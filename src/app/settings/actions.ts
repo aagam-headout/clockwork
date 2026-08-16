@@ -17,8 +17,8 @@ import { takeToken } from "@/lib/rate-limit";
 const SETTINGS_PATH = "/account/model-provider";
 
 function backWith(kind: "error" | "notice", message: string): never {
-  // Redacted on the way out: provider SDK errors quote the request they failed
-  // on, and this string is rendered straight into the page.
+  // Redacted on the way out — provider SDK errors quote the failed request,
+  // and this string renders straight into the page.
   redirect(
     `${SETTINGS_PATH}?${kind}=${encodeURIComponent(redactSecrets(message))}`,
   );
@@ -27,9 +27,8 @@ function backWith(kind: "error" | "notice", message: string): never {
 /**
  * Switches which SDK provider serves models for the signed-in account.
  *
- * Refuses a provider the account has no key for — the switch would leave every
- * workflow unable to run, and the failure would surface later as a broken
- * scheduled run instead of here, where the user can act on it.
+ * Refuses a provider with no key — otherwise every workflow breaks later as
+ * a failed scheduled run instead of failing here, where it's actionable.
  */
 export async function switchProvider(formData: FormData) {
   const user = await requireUser();
@@ -45,7 +44,7 @@ export async function switchProvider(formData: FormData) {
   }
 
   await setProviderForUser(user.id, user.email, provider);
-  // The catalog is memoized per provider for an hour; without this the picker
+  // Catalog is memoized per provider for an hour; without this the picker
   // would keep offering the old provider's models until it expired.
   clearModelCatalogCache();
 
@@ -57,10 +56,9 @@ export async function switchProvider(formData: FormData) {
 /**
  * Stores an API key for the signed-in account.
  *
- * The key is verified against the provider before it is saved, so "added"
- * always means "works". That costs one live call, which is also why it's rate
- * limited — this form would otherwise be a free oracle for testing stolen keys
- * against Anthropic and OpenAI.
+ * Verified against the provider before saving, so "added" always means
+ * "works" — one live call, hence the rate limit (else this form is a free
+ * oracle for testing stolen keys against Anthropic/OpenAI).
  */
 export async function addProviderKey(formData: FormData) {
   const user = await requireUser();

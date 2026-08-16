@@ -23,11 +23,10 @@ import { CONNECT_WAIT_MS } from "@/lib/limits";
 /**
  * Where Composio sends the browser after OAuth.
  *
- * This route exists because the previous flow didn't have one: Composio
- * redirected straight back to /connections, which re-rendered with whatever
- * state happened to be there — usually still "pending", with no way to tell a
- * completed connection from an abandoned one. Confirming the handshake here is
- * what makes "connected" mean connected.
+ * Previously there was no such route: Composio redirected straight to
+ * /connections, which re-rendered whatever state was there — usually still
+ * "pending", with no way to tell a completed connection from an abandoned
+ * one. Confirming the handshake here is what makes "connected" mean connected.
  */
 export async function GET(
   req: NextRequest,
@@ -56,10 +55,10 @@ export async function GET(
   let account;
   try {
     /*
-     * The callback fires on redirect, not on token exchange, so the account is
-     * usually — but not always — already ACTIVE by the time we get here. A
-     * short poll covers the gap; anything slower is left to the reconcile job
-     * rather than holding the request open for the SDK's 60-second default.
+     * The callback fires on redirect, not token exchange, so the account is
+     * usually — not always — already ACTIVE by now. A short poll covers the
+     * gap; anything slower is left to the reconcile job rather than holding
+     * the request open for the SDK's 60-second default.
      */
     account = await waitForActiveAccount(
       conn.pendingAccountId,
@@ -68,8 +67,8 @@ export async function GET(
   } catch (err) {
     const message = composioErrorMessage(err);
 
-    // A timeout is not a failure — the handshake may still complete. Leaving
-    // the row `initiated` lets the reconcile sweep finish it, and calling it
+    // A timeout isn't a failure — the handshake may still complete. Leaving
+    // the row `initiated` lets the reconcile sweep finish it; calling it
     // "failed" here would be a lie the user acts on.
     if (/timeout|timed out/i.test(message)) {
       return back(
@@ -90,10 +89,10 @@ export async function GET(
   });
 
   /*
-   * Only now is the old account dead weight. Deleting it before the new one
+   * Only now is the old account dead weight — deleting it before the new one
    * was confirmed would leave the user with nothing if the handshake failed.
-   * A failure here is fine — the id stays in `staleAccountIds` and the
-   * reconcile job retries.
+   * A failure here is fine: the id stays in `staleAccountIds` and reconcile
+   * retries.
    */
   if (supersededAccountId) {
     after(async () => {
@@ -109,8 +108,8 @@ export async function GET(
   after(async () => {
     try {
       await resumeWorkflowsBlockedOn(user.id, toolkit);
-      // Triggers couldn't be registered while the toolkit was down, and any
-      // that were are pinned to the account we just replaced.
+      // Triggers couldn't register while the toolkit was down, and any that
+      // did are pinned to the account we just replaced.
       await syncEventTriggers(user.id);
     } catch (err) {
       console.error("[connections] post-connect sync failed", err);
@@ -123,9 +122,9 @@ export async function GET(
 /**
  * Re-enables workflows this toolkit's absence had paused.
  *
- * Scoped to `pausedReason = 'needs_reconnect'` so it only ever undoes an
- * automatic pause — a workflow the user paused deliberately stays paused. And
- * a workflow that needs two apps only comes back when *both* are healthy.
+ * Scoped to `pausedReason = 'needs_reconnect'`, so it only undoes an
+ * automatic pause — a deliberately paused workflow stays paused. A workflow
+ * needing two apps only resumes once *both* are healthy.
  */
 async function resumeWorkflowsBlockedOn(userId: string, toolkit: string) {
   const dependents = await workflowsUsingToolkit(userId, toolkit);

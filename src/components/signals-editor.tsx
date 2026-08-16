@@ -8,16 +8,15 @@ import { LIMITS } from "@/lib/limits";
 /*
  * Signals and the alert condition that reads them.
  *
- * Its own file rather than more of `workflow-form.tsx`, which is already long
- * enough that finding anything in it is a scroll. The two belong together: a
- * condition is written against the signal names declared right above it, and
- * the helper text under the condition field is the only place those names are
- * listed for the person typing it.
+ * Its own file, not more of the already-long `workflow-form.tsx`. The two
+ * belong together: a condition is written against the signal names declared
+ * above it, and the helper text under the condition field is the only place
+ * those names are listed for the person typing it.
  *
  * The rows travel as one JSON hidden field. Individual `name="signal.0.key"`
- * inputs would need the server to reassemble an array out of a flat FormData
- * and to guess at gaps left by a deleted row; one field is parsed once, by
- * `parseSignalSchema`, which is the same reader the run path uses.
+ * inputs would need the server to reassemble an array from flat FormData and
+ * guess at gaps from deleted rows; one field is parsed once, by
+ * `parseSignalSchema`, the same reader the run path uses.
  */
 
 const TYPES: SignalType[] = ["number", "string", "boolean"];

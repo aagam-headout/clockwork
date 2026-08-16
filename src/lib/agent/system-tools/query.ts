@@ -70,17 +70,15 @@ export function createQueryTool(ctx: SystemToolContext) {
       const { value, total, truncated } = outcome;
 
       /*
-       * A long text is the one thing that must never come back as a handle.
-       * There is no narrowing operation for a string — `path` cannot go into
-       * it and `take` only applies to arrays — so re-handling one puts the
-       * agent in a loop that spends its whole budget and never yields a
-       * character of the article it was told to fetch. A bounded slice with
-       * its own offset is the only answer that terminates.
+       * A long text must never come back as a handle. There's no narrowing
+       * op for a string — `path` can't index into it, `take` only applies to
+       * arrays — so re-handling one loops the agent through its whole budget
+       * without yielding a single character. A bounded slice with its own
+       * offset is the only answer that terminates.
        */
       if (typeof value === "string") {
-        // Raw length, not a JSON.stringify of the whole string just to measure
-        // it — quoting/escaping only ever adds a few chars, well inside the
-        // slack this threshold already has.
+        // Raw length, not JSON.stringify just to measure it — quoting adds at
+        // most a few chars, well within this threshold's slack.
         const oversized = value.length >= HANDLE_THRESHOLD_CHARS;
         if (oversized || offset > 0) {
           const slice = value.slice(offset, offset + MAX_STRING_SLICE_CHARS);
@@ -94,19 +92,17 @@ export function createQueryTool(ctx: SystemToolContext) {
         return { value };
       }
 
-      // Other scalars are small by construction and are handed back whole —
-      // only a container can be narrowed further, so only a container is
-      // worth re-handling.
+      // Other scalars are small by construction and handed back whole — only
+      // a container is worth re-handling.
       if (value === null || typeof value !== "object") return { value };
 
       // `total`/`truncated` are present only when `offset`/`take` actually
-      // paged an array — carried through either return shape below, so a
-      // model paging a large list sees the same signal whether or not this
-      // page still needed re-handling.
+      // paged an array, and carried through either return shape below, so a
+      // paging model sees the same signal regardless of re-handling.
       const page = total === undefined ? {} : { total, truncated };
 
-      // A narrowing that is still huge gets the same treatment as a tool
-      // result, so the agent can narrow again rather than blowing the budget.
+      // A narrowing still too huge gets the same treatment as a tool result,
+      // so the agent can narrow again instead of blowing the budget.
       const json = JSON.stringify(value) ?? "";
       if (json.length >= HANDLE_THRESHOLD_CHARS) {
         return { ...ctx.store.put(`query(${handle})`, value, json), ...page };

@@ -6,8 +6,8 @@ import { startOfMonthInZone, judgeCap } from "./cost-cap";
 
 describe("startOfMonthInZone", () => {
   it("finds the month start for a zone ahead of UTC", () => {
-    // 2026-08-15 12:00 UTC is 17:30 IST on the 15th; the month began at
-    // 2026-08-01 00:00 IST, which is 2026-07-31 18:30 UTC.
+    // 2026-08-15 12:00 UTC = 17:30 IST on the 15th; month began 2026-08-01
+    // 00:00 IST = 2026-07-31 18:30 UTC.
     const out = startOfMonthInZone(
       "Asia/Kolkata",
       new Date("2026-08-15T12:00:00Z"),
@@ -21,8 +21,7 @@ describe("startOfMonthInZone", () => {
   });
 
   it("finds the month start for a zone behind UTC", () => {
-    // 2026-08-01 03:00 UTC is still 2026-07-31 20:00 in Los Angeles, so that
-    // zone's month has not turned over yet.
+    // 2026-08-01 03:00 UTC is still 2026-07-31 20:00 in LA — month not over yet.
     const out = startOfMonthInZone(
       "America/Los_Angeles",
       new Date("2026-08-01T03:00:00Z"),

@@ -25,9 +25,8 @@ export type ToolkitSummary = {
 };
 
 /**
- * Search across the whole Composio catalog and connect anything in it — the
- * app is not limited to a curated toolkit list. `connectedSlugs` is used only
- * to mark rows that are already linked.
+ * Search the whole Composio catalog and connect anything in it — not limited
+ * to a curated list. `connectedSlugs` only marks rows already linked.
  */
 export function ConnectorBrowser({
   connectedSlugs,
@@ -37,10 +36,9 @@ export function ConnectorBrowser({
   connectedSlugs: string[];
   initialItems: ToolkitSummary[];
   /**
-   * The section heading. It's rendered here rather than by the page so it can
-   * live inside the same sticky block as the search field and the filter chips
-   * — the catalog grid is long, and the controls that drive it shouldn't scroll
-   * away from it.
+   * The section heading, rendered here so it can share the sticky block with
+   * the search field and filter chips — these controls shouldn't scroll away
+   * from the long catalog grid they drive.
    */
   header?: React.ReactNode;
 }) {
@@ -67,12 +65,10 @@ export function ConnectorBrowser({
           }>(`/api/toolkits?q=${encodeURIComponent(query)}`);
           // Ignore responses that a newer keystroke has already superseded.
           if (id === requestId.current) {
-            // A 200 with a malformed body would otherwise put `undefined` in
-            // state, and the grid maps over it on the next render.
+            // Guards against a malformed 200 putting `undefined` in state.
             setItems(Array.isArray(data.items) ? data.items : []);
             setHasMore(Boolean(data.hasMore));
-            // A category picked from the old result set may not exist in the
-            // new one, which would render an empty grid with no explanation.
+            // Old category may not exist in the new result set.
             setCategory(null);
           }
         } catch (err) {
@@ -89,9 +85,8 @@ export function ConnectorBrowser({
     return () => clearTimeout(timer);
   }, [query]);
 
-  // Fetches the next page for the current search and appends it — the
-  // catalog can run past a thousand toolkits, so nothing here refetches or
-  // replaces what's already on screen.
+  // Fetches and appends the next page — catalog can exceed a thousand
+  // toolkits, so nothing here refetches or replaces what's on screen.
   async function loadMore() {
     const id = ++requestId.current;
     setLoadingMore(true);
@@ -115,8 +110,7 @@ export function ConnectorBrowser({
     }
   }
 
-  // "/" focuses the field from anywhere on the page, as long as the user isn't
-  // already typing somewhere else.
+  // "/" focuses the field, unless the user is already typing elsewhere.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -135,8 +129,8 @@ export function ConnectorBrowser({
 
   const connected = new Set(connectedSlugs);
 
-  // Facets are derived from the result set rather than the full catalog, so a
-  // chip never promises rows the current search can't show.
+  // Facets come from the result set, not the full catalog, so a chip never
+  // promises rows the current search can't show.
   const categories = useMemo(() => {
     const counts = new Map<string, number>();
     for (const item of items) {
@@ -157,10 +151,9 @@ export function ConnectorBrowser({
   return (
     <div>
       {/*
-       * Sticks once it reaches the top of the viewport. The negative inset plus
-       * matching padding lets the background bleed past the content column, so
-       * cards passing underneath don't show at the edges; below `md` it parks
-       * under the 56px mobile top bar instead of behind it.
+       * Sticks at viewport top. Negative inset plus matching padding lets the
+       * background bleed past the content column, hiding cards passing
+       * underneath; below `md` it sits under the 56px mobile top bar.
        */}
       <div className="bg-bg/95 sticky top-14 z-20 -mx-2 -mt-4 px-2 pt-4 pb-3 backdrop-blur-md md:top-0">
         {header}
@@ -281,8 +274,7 @@ export function ConnectorBrowser({
                       {toolkit.name}
                     </span>
                     {toolkit.toolsCount != null && (
-                      // A bare glyph and a number told nobody what was being
-                      // counted; the title and the screen-reader text do.
+                      // Title and sr-only text clarify what the count means.
                       <span
                         title={`${toolkit.toolsCount} tools`}
                         className="text-subtle inline-flex shrink-0 items-center gap-0.5 text-[11px] tabular-nums"
@@ -311,9 +303,8 @@ export function ConnectorBrowser({
                     <Check className="h-3.5 w-3.5" />
                   </span>
                 ) : toolkit.noAuth ? (
-                  /* Composio rejects an auth config for these outright
-                     ("does not require authentication"), so offering Connect
-                     only produced a 400. Their tools are already usable. */
+                  /* Composio 400s an auth config for these ("does not require
+                     authentication"); their tools are already usable. */
                   <span
                     title="Ready to use — no connection needed"
                     className="text-subtle flex h-6 w-6 shrink-0 items-center justify-center self-start"
@@ -375,8 +366,8 @@ function FilterChip({
       aria-pressed={active}
       className={`rounded-chip inline-flex h-7 cursor-pointer items-center gap-1.5 border px-2.5 text-[11px] font-medium capitalize transition-[background,border-color,color] duration-150 ${
         active
-          ? // `border-solid` is Tailwind's border-*style* utility, so the
-            // inverted chip names the token directly.
+          ? // `border-solid` is Tailwind's border-style utility, so name the
+            // token directly for the inverted chip.
             "bg-solid text-solid-fg border-[var(--solid)]"
           : "border-border bg-surface text-muted hover:border-border-strong hover:text-foreground"
       }`}

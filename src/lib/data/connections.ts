@@ -8,10 +8,10 @@ import type { DeliverTarget } from "@/lib/read-only";
  * Connection state as the app talks about it.
  *
  * These are our words, not Composio's. Composio has seven statuses
- * (INITIALIZING, INITIATED, ACTIVE, FAILED, EXPIRED, INACTIVE, REVOKED) and
+ * (INITIALIZING, INITIATED, ACTIVE, FAILED, EXPIRED, INACTIVE, REVOKED), and
  * the previous code collapsed six of them into "invisible" by filtering on
- * `!== ACTIVE`. Keeping them distinct is what lets the UI say *why* a toolkit
- * needs attention instead of silently dropping it.
+ * `!== ACTIVE`. Keeping them distinct lets the UI say *why* a toolkit needs
+ * attention instead of silently dropping it.
  */
 export type ConnectionStatus =
   | "active"
@@ -38,10 +38,10 @@ export type UserConnection = {
 };
 
 /**
- * What each status is called on screen. The stored values are lowercase slugs
- * and were rendering straight into status chips — "initiated" and "inactive"
- * are Composio's vocabulary, and reading them side by side nobody can tell
- * which one means "nearly there" and which means "broken".
+ * What each status is called on screen. The stored slugs used to render
+ * straight into status chips — "initiated" and "inactive" are Composio's
+ * vocabulary, and side by side nobody can tell which means "nearly there"
+ * vs. "broken".
  */
 export const CONNECTION_STATUS_LABEL: Record<ConnectionStatus, string> = {
   active: "Connected",
@@ -174,8 +174,8 @@ export async function countUserConnections(userId: string): Promise<number> {
 /**
  * Maps a Composio connected account back to its owner.
  *
- * The fallback path for the trigger webhook, for accounts linked before the
- * user namespace existed (or whose payload doesn't carry a user id).
+ * The trigger webhook's fallback path, for accounts linked before the user
+ * namespace existed, or whose payload has no user id.
  */
 export async function userIdForConnectedAccount(
   connectedAccountId: string,
@@ -191,9 +191,9 @@ export async function userIdForConnectedAccount(
 /**
  * Records the start of a connect or reconnect.
  *
- * Deliberately leaves `composioConnectedAccountId` alone: a user who opens the
- * OAuth page and then closes the tab keeps whatever connection they already
- * had. Only the callback promotes the pending account.
+ * Deliberately leaves `composioConnectedAccountId` alone: a user who opens
+ * the OAuth page and closes the tab keeps whatever connection they had.
+ * Only the callback promotes the pending account.
  */
 export async function beginConnection(args: {
   userId: string;
@@ -226,8 +226,7 @@ export async function beginConnection(args: {
         /*
          * Only a row with no working account moves to "initiated" — a live
          * connection being repaired stays "active" until the new account is
-         * confirmed, so an abandoned reconnect doesn't take a working
-         * integration offline.
+         * confirmed, so an abandoned reconnect can't take it offline.
          */
         status: sql`case when ${connections.composioConnectedAccountId} is null
                     then 'initiated' else ${connections.status} end`,
@@ -366,10 +365,10 @@ export type ComposioAccountSnapshot = {
 /**
  * Pulls Composio's view of one user's accounts into our rows.
  *
- * Three things happen, and the third is the one that matters: a row whose
- * account no longer appears in Composio's list is marked disconnected. Without
- * it, an account deleted in the Composio dashboard would stay "active" here
- * forever and every run would fail at the tool call instead of the preflight.
+ * The part that matters: a row whose account no longer appears in Composio's
+ * list is marked disconnected. Without it, an account deleted in the Composio
+ * dashboard would stay "active" here forever, and every run would fail at
+ * the tool call instead of the preflight.
  */
 export async function upsertFromComposio(
   userId: string,
@@ -449,10 +448,9 @@ export async function upsertFromComposio(
  * The user's workflows that depend on a toolkit.
  *
  * Delivery targets count: a workflow with Slack DM delivery needs Slack even
- * though `slack` may not appear in its `toolkits` array — `deliverToolkits()`
- * adds it at run time. Disconnecting Slack breaks that workflow just as surely
- * as it breaks one that reads from Slack, so the dependency warning has to see
- * both.
+ * if `slack` isn't in its `toolkits` array — `deliverToolkits()` adds it at
+ * run time. Disconnecting Slack breaks that workflow just as surely as one
+ * that reads from Slack, so the dependency warning must see both.
  */
 export async function workflowsUsingToolkit(userId: string, toolkit: string) {
   const deliverMatches =
@@ -485,8 +483,8 @@ export async function workflowsUsingToolkit(userId: string, toolkit: string) {
  * How many of the user's workflows depend on each toolkit, in one query.
  *
  * The per-toolkit version above is fine for a single disconnect; the
- * connections page needs the count on every card at once, and asking per card
- * would be one query per connected app on every render.
+ * connections page needs the count on every card at once, and asking per
+ * card would be one query per connected app on every render.
  */
 export async function dependentCountsByToolkit(
   userId: string,

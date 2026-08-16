@@ -59,14 +59,14 @@ describe("parseSince", () => {
 /**
  * Captures the query the search builds without a database.
  *
- * The owner filter is the security surface here, and it is applied as a
- * drizzle condition rather than raw SQL, so the assertion looks for the user
- * id anywhere in the serialised predicate.
+ * The owner filter is the security surface here, applied as a drizzle
+ * condition rather than raw SQL, so the assertion looks for the user id
+ * anywhere in the serialised predicate.
  */
 /*
  * Drizzle's condition tree holds back-references to its own tables, so
  * JSON.stringify throws on it. This walks it instead, collecting the bound
- * primitive values — which is all these assertions need.
+ * primitive values — all these assertions need.
  */
 function boundValues(node: unknown, seen = new WeakSet()): string[] {
   if (node === null || node === undefined) return [];
@@ -188,8 +188,8 @@ describe("searchDigests", () => {
   it("excludes unchanged runs", async () => {
     /*
      * An unchanged run's body is the literal "NO_UPDATES" sentinel, not an
-     * empty string, so the body filter alone let the sentinel itself come back
-     * as a search hit — in /runs and in the agent's `history` tool.
+     * empty string, so the body filter alone let the sentinel come back as a
+     * search hit — in /runs and in the agent's `history` tool.
      */
     const captured: { where?: string; columns?: string[]; limit?: number } = {};
     select.mockReturnValue(selectChain(captured));
@@ -202,8 +202,8 @@ describe("searchDigests", () => {
 
 describe("signalTimeline", () => {
   it("bounds how many points one chart can read", async () => {
-    // The day window is not a bound: an event workflow can produce hundreds of
-    // runs a day, and a chart cannot draw more points than it has pixels.
+    // The day window is not a bound: an event workflow can produce hundreds
+    // of runs a day, more than a chart has pixels to draw.
     const captured: { where?: string; limit?: number } = {};
     select.mockReturnValue(selectChain(captured));
 

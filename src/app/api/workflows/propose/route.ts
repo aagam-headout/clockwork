@@ -18,19 +18,19 @@ import { LIMITS } from "@/lib/limits";
 import { parseCondition } from "@/lib/outcome/condition";
 import { parseSignalSchema } from "@/lib/outcome/envelope";
 
-// Two model calls now (research, then the spec), and the research one waits on
-// real app APIs.
+// Two model calls: research, then the spec — research waits on real app
+// APIs.
 export const maxDuration = 120;
 
 /** Research is capped hard: it exists to check facts, not to run the workflow. */
 const RESEARCH_TIMEOUT_MS = 45_000;
 
 /*
- * Optional first pass: let the assistant actually look inside the apps the user
- * pointed it at — read which Slack channels exist, what a calendar looks like,
- * how repos are named — so the goal it writes references real things instead of
- * plausible-sounding placeholders. Read-only, always: this is a form-filling
- * conversation, and nothing typed here should change state in a connected app.
+ * Optional first pass: let the assistant look inside the apps the user pointed
+ * it at — which Slack channels exist, what a calendar looks like, how repos
+ * are named — so the goal references real things instead of plausible-sounding
+ * placeholders. Always read-only: this is a form-filling conversation, and
+ * nothing typed here should change state in a connected app.
  */
 async function research(
   userId: string,
@@ -74,8 +74,8 @@ request needs no lookup, reply with "none".`,
 }
 
 /*
- * Where a hallucinated model id lands. Read off the offered list rather than
- * hardcoded, so it stays routable under whichever provider is switched on.
+ * Where a hallucinated model id lands. Read from the offered list, not
+ * hardcoded, so it stays routable under whichever provider is active.
  */
 function fallbackWorkflowModel(offered: ModelInfo[]): string {
   return (
@@ -86,9 +86,9 @@ function fallbackWorkflowModel(offered: ModelInfo[]): string {
 }
 
 /**
- * The gateway lists hundreds of models — too many to put in a prompt. Offer the
- * cheapest handful of light and mid models (plus one heavy option) with their
- * per-1M cost so the agent can trade cost against capability itself.
+ * The gateway lists hundreds of models — too many for a prompt. Offer the
+ * cheapest handful of light and mid models (plus one heavy) with per-1M cost,
+ * so the agent can trade cost against capability itself.
  */
 function modelChoices(catalog: ModelInfo[]) {
   const pick = (tier: ModelInfo["tier"], n: number) =>
@@ -97,9 +97,9 @@ function modelChoices(catalog: ModelInfo[]) {
 }
 
 /*
- * The toolkit list is whatever is connected right now — any Composio app the
- * user has linked, not a fixed set — so the schema and prompt are built per
- * request instead of at module load.
+ * The toolkit list is whatever's connected right now — any linked Composio
+ * app, not a fixed set — so schema and prompt build per request, not at
+ * module load.
  */
 function buildProposalSchema(toolkitSlugs: string[], modelIds: string[]) {
   return z.object({
@@ -169,8 +169,8 @@ function systemPrompt(
   allowWrites: boolean,
   brokenSlugs: string[] = [],
 ) {
-  // The default audience is in Asia/Kolkata, where UTC's date is wrong for
-  // almost six hours a day.
+  // Default audience is Asia/Kolkata, where UTC's date is wrong for almost
+  // six hours a day.
   const today = new Date().toLocaleDateString("en-CA", {
     timeZone: "Asia/Kolkata",
   });
@@ -331,8 +331,8 @@ export async function POST(req: NextRequest) {
 
   /*
    * The most expensive endpoint in the app: two model calls plus a round of
-   * live tool calls per request. The model spend is the user's own, but the
-   * tool calls run on the shared Composio key.
+   * live tool calls per request. Model spend is the user's own; tool calls
+   * run on the shared Composio key.
    */
   const gate = await takeToken(user.id, "propose");
   if (!gate.ok) {
@@ -348,9 +348,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // The builder is a conversation: the client sends the whole turn history plus
-  // the spec currently in the form, so "make it hourly" refines instead of
-  // starting over. `description` stays accepted for a single-shot request.
+  // The builder is a conversation: the client sends the full turn history plus
+  // the form's current spec, so "make it hourly" refines instead of starting
+  // over. `description` stays accepted for a single-shot request.
   const body = await req.json();
   const history: Array<{ role: "user" | "assistant"; content: string }> =
     Array.isArray(body.messages)
@@ -381,15 +381,15 @@ export async function POST(req: NextRequest) {
 
   try {
     // The builder runs on the signed-in user's provider, same as the picker
-    // beside the chat — otherwise it could offer models it can't itself use.
+    // beside the chat — otherwise it could offer models it can't use.
     const [connected, catalog] = await Promise.all([
       getConnectedToolkitOptions(user.id),
       getModelCatalogForUser(user.id),
     ]);
 
-    // Everything the user has a connection row for — including the broken
-    // ones, which the prompt names separately so the assistant can mention
-    // them rather than silently planning around their absence.
+    // Everything the user has a connection row for, including broken ones —
+    // the prompt names those separately so the assistant can mention them
+    // instead of silently planning around their absence.
     const toolkitSlugs = ["composio_search", ...connected.map((t) => t.slug)];
     const usableSlugs = new Set([
       "composio_search",
@@ -402,9 +402,9 @@ export async function POST(req: NextRequest) {
     const modelIds = offered.map((m) => m.id);
 
     // The model the *builder itself* thinks with — separate from the model it
-    // picks for the workflow. Two gates: it must be live in the gateway catalog
+    // picks for the workflow. Two gates: must be live in the gateway catalog
     // (so the body can't forward an arbitrary string to a provider) and
-    // builder-capable (so a cheap model can't be forced in past the picker).
+    // builder-capable (so a cheap model can't be forced past the picker).
     const builderModel =
       typeof body.builderModel === "string" &&
       catalog.some((m) => m.id === body.builderModel) &&
@@ -421,14 +421,14 @@ export async function POST(req: NextRequest) {
         )
       : [];
 
-    // The chat's own toggle, not something the model decides: letting a
-    // proposal grant itself write access would put the safety default behind a
-    // sentence of prose. Drafting stays read-only regardless (see `research`);
-    // this only describes what the *saved workflow* may do.
+    // The chat's own toggle, not the model's decision: letting a proposal
+    // grant itself write access would put the safety default behind a
+    // sentence of prose. Drafting stays read-only regardless (see
+    // `research`); this only describes what the *saved workflow* may do.
     const allowWrites = body.allowWrites === true;
 
-    // Research is best-effort: a flaky app API should downgrade the proposal to
-    // a guess, not fail the whole request.
+    // Research is best-effort: a flaky app API downgrades the proposal to a
+    // guess, not the whole request.
     let notes = "";
     let usedTools: string[] = [];
     if (readToolkits.length > 0) {
@@ -463,17 +463,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ reply: object.reply, spec: null, usedTools });
     }
 
-    // The model can still hallucinate a slug despite the prompt; drop anything
-    // that isn't *usable* rather than proposing a workflow that can't run. This
-    // is stricter than the list the prompt saw — a broken connection is fine to
-    // talk about and not fine to build on.
+    // The model can still hallucinate a slug despite the prompt; drop
+    // anything not *usable* rather than propose a workflow that can't run.
+    // Stricter than what the prompt saw — a broken connection is fine to
+    // talk about, not fine to build on.
     const toolkits = object.spec.toolkits.filter((slug) =>
       usableSlugs.has(slug),
     );
 
-    // Delivery was never validated at all: the assistant could set
-    // `deliverSlack` with no Slack connected, and the saved workflow would then
-    // fail its first delivery with nothing having warned anyone.
+    // Delivery was never validated: the assistant could set `deliverSlack`
+    // with no Slack connected, and the saved workflow would fail its first
+    // delivery with no warning.
     const deliverSlack = object.spec.deliverSlack && usableSlugs.has("slack");
     const model = catalog.some((m) => m.id === object.spec!.model)
       ? object.spec.model
@@ -481,10 +481,10 @@ export async function POST(req: NextRequest) {
 
     /*
      * A proposed condition the form would reject is worse than none: the user
-     * would accept the chat's suggestion and then meet a validation error they
-     * did not write. Signals are kept either way — a workflow that measures
-     * things without a threshold is still useful, and the user can add the
-     * threshold themselves.
+     * accepts the chat's suggestion, then hits a validation error they didn't
+     * write. Signals are kept either way — a workflow measuring things
+     * without a threshold is still useful, and the user can add one
+     * themselves.
      */
     const signalSchema = parseSignalSchema(object.spec.signalSchema ?? []);
     const proposedCondition = object.spec.alertCondition?.trim();
@@ -502,8 +502,8 @@ export async function POST(req: NextRequest) {
         signalSchema,
         alertCondition,
         toolkits: toolkits.length > 0 ? toolkits : ["composio_search"],
-        // The form field is the flag's inverse; ship it so the prefilled form
-        // shows the same permission the chat was drafting under.
+        // The form field is the flag's inverse; ship it so the prefilled
+        // form shows the same permission the chat drafted under.
         readOnly: !allowWrites,
       },
       // Shown in the chat so the user can see the proposal was grounded in a

@@ -7,13 +7,13 @@ import { resolveBaseUrl } from "@/lib/base-url";
 
 /**
  * Event triggers: the other half of the schedule. Cron answers "every
- * weekday at 8", Composio triggers answer "whenever this actually happens" —
- * a new email, an issue assigned to you, a Slack mention — which is what a
+ * weekday at 8"; Composio triggers answer "whenever this actually happens"
+ * — a new email, an issue assigned to you, a Slack mention — which a
  * five-minute polling tick can only approximate.
  *
  * Composio delivers them as one project-wide webhook; the ingress route
  * (`/api/triggers/composio`) resolves the event's owner and fans it out to
- * that user's subscribed workflows.
+ * their subscribed workflows.
  */
 
 export type TriggerTypeOption = {
@@ -27,10 +27,10 @@ const CATALOG_TTL_MS = 60 * 60 * 1000;
 const MAX_CATALOG_ENTRIES = 50;
 
 /*
- * Keyed by toolkit set. This was a single-entry cache, which meant toggling a
- * toolkit in the workflow form evicted the previous answer every time and the
- * hit rate sat at roughly zero. Trigger *types* are catalog data — the same
- * for every user — so one shared map is right.
+ * Keyed by toolkit set. This was a single-entry cache — toggling a toolkit
+ * in the workflow form evicted the previous answer every time, so the hit
+ * rate sat at roughly zero. Trigger *types* are catalog data, same for every
+ * user, so one shared map is right.
  */
 const catalogCache = new Map<
   string,
@@ -52,7 +52,7 @@ export async function listTriggerTypes(
 
   const items = (res.items ?? [])
     // Composio has shipped entries with a null toolkit; `t.toolkit.slug` threw
-    // on those and lost the whole catalog to one bad row.
+    // on those, losing the whole catalog to one bad row.
     .filter((t) => t?.slug)
     .map((t) => ({
       slug: t.slug,
@@ -70,10 +70,10 @@ export async function listTriggerTypes(
   return items;
 }
 /*
- * Note: this deliberately does not swallow Composio failures. It used to
- * return `[]` on any error, which made "Composio is down" and "these toolkits
- * have no triggers" the same empty list — the caller (`/api/trigger-types`)
- * turns the throw into a 502 with a reason the picker can show.
+ * Note: deliberately doesn't swallow Composio failures. It used to return
+ * `[]` on any error, making "Composio is down" and "these toolkits have no
+ * triggers" the same empty list — the caller (`/api/trigger-types`) turns
+ * the throw into a 502 with a reason the picker can show.
  */
 
 /** Which toolkit a trigger slug belongs to, from the cached type catalog. */
@@ -103,23 +103,23 @@ export type TriggerSyncResult = { slug: string; ok: boolean; error?: string };
 
 /**
  * Reconciles one user's Composio trigger instances against what their
- * workflows actually subscribe to. Creates what's missing, deletes what's no
- * longer wanted.
+ * workflows subscribe to. Creates what's missing, deletes what's no longer
+ * wanted.
  *
  * The delete half is the part that never existed. Without it, removing an
- * event from a workflow — or deleting the workflow outright — left the trigger
- * live at Composio, delivering events forever to a fan-out that matches
- * nothing.
+ * event from a workflow — or deleting the workflow outright — left the
+ * trigger live at Composio, delivering events forever to a fan-out that
+ * matches nothing.
  *
- * The desired set is *derived* from the user's enabled event workflows rather
- * than passed in. That makes the shared-slug case correct by construction: two
- * workflows listening to the same trigger, one deleted, still leaves the slug
- * in the union, so the trigger stays.
+ * The desired set is *derived* from the user's enabled event workflows
+ * rather than passed in, making the shared-slug case correct by
+ * construction: two workflows listening to the same trigger, one deleted,
+ * still leaves the slug in the union, so the trigger stays.
  *
- * `trigger_instances` is not a cache — it is the only record of the Composio
+ * `trigger_instances` is not a cache — it's the only record of the Composio
  * trigger ids we created. The SDK's `listActive` has no user filter and its
- * items carry no user id, so a trigger whose id we didn't persist can never be
- * found again.
+ * items carry no user id, so a trigger whose id we didn't persist can never
+ * be found again.
  */
 export async function syncEventTriggers(
   userId: string,
@@ -171,8 +171,8 @@ export async function syncEventTriggers(
     try {
       /*
        * Pin the connected account. Left unpinned, Composio picks "the first
-       * active connection for this user and toolkit" — which, right after a
-       * reconnect, can be the superseded account we are about to delete.
+       * active connection for this user and toolkit" — right after a
+       * reconnect, that can be the superseded account we're about to delete.
        */
       const created = await composio.triggers.create(
         cid,
@@ -215,9 +215,9 @@ export async function syncEventTriggers(
       await db.delete(triggerInstances).where(eq(triggerInstances.id, row.id));
     } catch (err) {
       /*
-       * Keep the row. Deleting it here on a failed Composio call would orphan
-       * a live trigger permanently — the id in this row is the only handle we
-       * have on it. The next sync retries.
+       * Keep the row. Deleting it here on a failed Composio call would
+       * permanently orphan a live trigger — this row's id is the only handle
+       * we have on it. The next sync retries.
        */
       results.push({
         slug: row.triggerSlug,

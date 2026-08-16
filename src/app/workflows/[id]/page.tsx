@@ -53,14 +53,14 @@ import Link from "next/link";
 const SIGNAL_WINDOW_DAYS = 90;
 
 export const dynamic = "force-dynamic";
-// "Run now" continues in `after()` after the action responds; the run itself
-// needs the full window, and `after` work is bounded by this segment's limit.
+// "Run now" continues in `after()` after the action responds; the run needs
+// the full window, bounded by this segment's maxDuration.
 export const maxDuration = 300;
 
 /*
- * Every tab in this app said "Clockwork". With three of them open — a run, the
- * workflow it belongs to, the list — the only way to tell them apart was to
- * click. One query for the name is cheap next to the page's own.
+ * Every tab said "Clockwork"; with a run, its workflow, and the list open,
+ * telling tabs apart meant clicking. One query for the name is cheap next
+ * to the page's own.
  */
 export async function generateMetadata({
   params,
@@ -69,9 +69,9 @@ export async function generateMetadata({
 }) {
   const { id } = await params;
   /*
-   * Scoped like the page itself. `generateMetadata` runs independently of the
-   * component, so leaving it unscoped leaked another user's workflow name into
-   * the browser tab title even though the page below it 404'd.
+   * Scoped like the page itself — `generateMetadata` runs independently of
+   * the component, so unscoped it leaked another user's workflow name into
+   * the tab title even when the page 404'd.
    */
   const user = await currentUser();
   const row = user ? await ownedWorkflow(id, user.id) : null;
@@ -86,8 +86,8 @@ export default async function EditWorkflowPage({
   const user = await requireUser();
 
   const { id } = await params;
-  // 404 for a workflow that isn't theirs, identical to one that doesn't exist
-  // — a distinguishable 403 would confirm the id belongs to someone.
+  // 404 for a workflow that isn't theirs, same as one that doesn't exist —
+  // a distinct 403 would confirm the id belongs to someone.
   const workflow = await ownedWorkflowOr404(id, user.id);
 
   const recentRuns = await db
@@ -100,8 +100,8 @@ export default async function EditWorkflowPage({
       durationMs: runs.durationMs,
     })
     .from(runs)
-    // Already implied by the ownership check above; scoped anyway so the query
-    // is correct on its own terms rather than by reading the lines above it.
+    // Already implied by the ownership check above; scoped anyway so the
+    // query is correct on its own terms.
     .innerJoin(workflows, eq(runs.workflowId, workflows.id))
     .where(and(eq(runs.workflowId, id), eq(workflows.userId, user.id)))
     .orderBy(desc(runs.createdAt))
@@ -110,9 +110,8 @@ export default async function EditWorkflowPage({
   const declaredSignals = parseSignalSchema(workflow.signalSchema);
   const cap = await checkCostCap(workflow);
   /*
-   * `costUsd` is null whenever pricing was unavailable for the model, and the
-   * spend sum treats those as zero — so the total is a floor, and the page
-   * says so rather than presenting a number it cannot stand behind.
+   * `costUsd` is null when pricing was unavailable, and the sum treats those
+   * as zero — so the total is a floor, and the page says so.
    */
   const hasUnpricedRun =
     cap.state !== "uncapped" &&
@@ -122,8 +121,8 @@ export default async function EditWorkflowPage({
     await Promise.all([
       getConnectedToolkitOptions(user.id),
       getModelCatalogForUser(user.id),
-      // Excludes this workflow: it cannot be its own parent, and offering it
-      // would only produce a validation error on save.
+      // Excludes this workflow — it can't be its own parent, and offering
+      // it would just error on save.
       chainParentOptions(user.id, id),
       chainNeighbours(user.id, id, workflow.parentWorkflowId),
       // Only worth the query when there is something to plot.
@@ -158,8 +157,8 @@ export default async function EditWorkflowPage({
                   paused
                 </Badge>
               )}
-              {/* An event workflow has an empty cron column; showing it as an
-                  empty code chip read as a rendering bug. */}
+              {/* Event workflows have an empty cron column; an empty code
+                  chip read as a rendering bug. */}
               {workflow.triggerType === "event" ? (
                 <Badge tone="neutral" icon={Zap}>
                   {workflow.eventTriggers.length} event
@@ -285,8 +284,8 @@ export default async function EditWorkflowPage({
                 </div>
               )}
               {chain.children.length > 0 && (
-                // Deleting a parent orphans its children and pauses them, which
-                // is invisible from here without saying so.
+                // Deleting a parent pauses its children — invisible here
+                // unless said.
                 <p className="text-subtle px-5 py-2.5 text-xs">
                   Deleting this workflow pauses the {chain.children.length}{" "}
                   {chain.children.length === 1 ? "workflow" : "workflows"} it
@@ -313,8 +312,8 @@ export default async function EditWorkflowPage({
                   <Badge tone="danger">budget spent</Badge>
                 )}
               </div>
-              {/* A bar, not a number alone: the useful question is how much
-                  room is left, which a ratio answers at a glance. */}
+              {/* A bar, not just a number — the useful question is room
+                  left, which a ratio answers at a glance. */}
               <div className="bg-surface-2 mt-3 h-1.5 w-full overflow-hidden rounded-full">
                 <div
                   className={`h-full rounded-full ${
@@ -377,8 +376,8 @@ export default async function EditWorkflowPage({
                       format="datetime"
                     />
                   </span>
-                  {/* Duration in its own column so the timestamps above it stay
-                      left-aligned and the numbers stay comparable. */}
+                  {/* Duration in its own column keeps timestamps left-aligned
+                      and numbers comparable. */}
                   <span className="text-subtle w-14 shrink-0 text-right font-mono text-[11px] tabular-nums">
                     {run.durationMs != null
                       ? `${(run.durationMs / 1000).toFixed(1)}s`

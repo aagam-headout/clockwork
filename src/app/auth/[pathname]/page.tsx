@@ -3,8 +3,7 @@ import { Logo } from "@/components/logo";
 
 // Catch-all for every Neon Auth screen: sign-in, sign-up, forgot-password,
 // reset-password, etc. AuthView switches on `pathname` — a single
-// `/auth/sign-in` page 404s the moment its "sign up" link is clicked,
-// since that navigates to /auth/sign-up.
+// `/auth/sign-in` page would 404 the moment its "sign up" link is clicked.
 export default async function AuthPage({
   params,
 }: {
@@ -13,13 +12,12 @@ export default async function AuthPage({
   const { pathname } = await params;
 
   /*
-   * The sign-out view is the one screen AuthView renders without a card: its
-   * whole output is a bare `<Loader2 className="animate-spin" />`. Dropped into
-   * the same `max-w-sm` column as the forms, that spinner sat hard against the
-   * left edge at whatever size the font stack gave it, under a heading that
-   * said nothing about what was happening. It gets its own frame — centered,
-   * sized, and labelled — while the mounted AuthView still does the actual
-   * sign-out in its effect.
+   * The sign-out view is the one screen AuthView renders without a card —
+   * just a bare `<Loader2 className="animate-spin" />`. Dropped into the same
+   * `max-w-sm` column as the forms, that spinner sat hard against the left
+   * edge with no heading explaining what was happening. It gets its own
+   * frame — centered, sized, labelled — while the mounted AuthView still does
+   * the actual sign-out in its effect.
    */
   if (pathname === "sign-out") {
     return (
@@ -56,9 +54,9 @@ export default async function AuthPage({
           </div>
         </div>
 
-        {/* AuthView brings its own card; `auth-surface` is what makes that card
-            read as ours — see the Neon Auth bridge in globals.css. Wrapping it
-            in a second bordered box just drew a box inside a box. */}
+        {/* AuthView brings its own card; `auth-surface` makes it read as
+            ours — see the Neon Auth bridge in globals.css. A second bordered
+            box just drew a box inside a box. */}
         <div className="auth-surface">
           <AuthView pathname={pathname} redirectTo="/" />
         </div>

@@ -4,10 +4,10 @@ import type { SignalDecl, SignalType, SignalValues } from "./condition";
 /*
  * The validated result of a run.
  *
- * `signals` is the machine-readable half — what conditions evaluate against and
- * what a chained child receives. `digest` remains the human artefact. Keeping
- * them in one object means a run has exactly one outcome, rather than a digest
- * and a separately-derived set of numbers that could disagree.
+ * `signals` is the machine-readable half — what conditions evaluate against
+ * and what a chained child receives. `digest` remains the human artefact.
+ * Keeping them in one object means a run has exactly one outcome, rather
+ * than a digest and a separately-derived set of numbers that could disagree.
  */
 export type Envelope = {
   digest: string;
@@ -23,7 +23,7 @@ const TYPES: SignalType[] = ["number", "string", "boolean"];
  * Reads `workflows.signalSchema`, which is jsonb and therefore `unknown`.
  *
  * Tolerant on purpose: a malformed entry is dropped rather than thrown, so a
- * hand-edited row cannot take a workflow permanently out of service. The form
+ * hand-edited row can't take a workflow permanently out of service. The form
  * validates on the way in; this is the last line on the way out.
  */
 export function parseSignalSchema(raw: unknown): SignalDecl[] {
@@ -58,10 +58,10 @@ function zodForType(type: SignalType) {
 /**
  * The `report` tool's input schema, built per workflow.
  *
- * Declared signals become named optional fields rather than a free-form record,
- * so the model sees the exact key names and types it is expected to fill — the
- * schema is the instruction, and it is cheaper than saying the same thing in
- * prose in the system prompt.
+ * Declared signals become named optional fields rather than a free-form
+ * record, so the model sees the exact key names and types it's expected to
+ * fill — the schema is the instruction, cheaper than saying the same thing
+ * in prose in the system prompt.
  */
 export function buildReportSchema(declared: SignalDecl[]) {
   const base = {
@@ -148,8 +148,8 @@ export function normalizeEnvelope(
     for (const [key, value] of Object.entries(
       signalsRaw as Record<string, unknown>,
     )) {
-      // A signal the run could not measure is absent, not zero. Dropping it
-      // here is what makes the condition indeterminate rather than false.
+      // A signal the run couldn't measure is absent, not zero — dropping it
+      // here is what makes the condition indeterminate, not false.
       if (value === null || value === undefined) continue;
 
       const decl = byKey.get(key);

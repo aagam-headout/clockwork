@@ -12,28 +12,25 @@ import {
 import { buttonClass } from "@/components/ui";
 
 /*
- * What a log viewer needs and a bare <details> list doesn't have: one switch
- * for every row, a way to get a payload out, and a way to read a payload that
- * JSON escaping has made unreadable.
+ * Adds what a bare <details> list lacks: expand/collapse all, copy-out, and a
+ * readable view of JSON-escaped payloads.
  *
- * The step rows themselves stay server-rendered — their markdown and their
- * status lines are HTML by the time they reach the browser, and lifting all of
- * that into a client tree would mean sending it twice. Only the payload blocks
- * are client, because switching view and copying are both state.
+ * Step rows stay server-rendered (their markdown/status lines are already
+ * HTML, so a client tree would just resend them). Only the payload blocks are
+ * client, since view-switching and copying are state.
  */
 
 /** Opens or closes every step in the trace. `scope` is a DOM id on the list. */
 export function TraceToggleAll({ scope }: { scope: string }) {
-  // Tracks what the button will *do* next, not what the rows currently are: a
-  // row the user opened by hand doesn't flip the meaning of this control.
+  // Tracks what the button will do next, not the rows' current state, so a
+  // manually-opened row doesn't flip the control's meaning.
   const [expanded, setExpanded] = useState(false);
 
   const toggle = () => {
     const next = !expanded;
     const root = document.getElementById(scope);
-    // Step rows only. Each row's args and result are <details> of their own,
-    // and folding those is a decision per payload — "expand all" means every
-    // step is visible, not that every payload is unrolled.
+    // Step rows only — each row's args/result are their own <details>, and
+    // "expand all" means every step visible, not every payload unrolled.
     for (const el of root?.querySelectorAll(":scope > li > details") ?? []) {
       (el as HTMLDetailsElement).open = next;
     }
@@ -57,9 +54,9 @@ export function TraceToggleAll({ scope }: { scope: string }) {
 }
 
 /**
- * Copies a payload to the clipboard. The text is passed in rather than read
- * back out of the <pre>, so what lands on the clipboard is the exact string the
- * server serialized — not a copy that picked up the panel's wrapping.
+ * Copies a payload to the clipboard. Text is passed in rather than read back
+ * out of the <pre>, so it's the exact string the server serialized, not one
+ * that picked up the panel's wrapping.
  */
 function CopyButton({
   text,
@@ -70,8 +67,8 @@ function CopyButton({
 }) {
   const [copied, setCopied] = useState(false);
 
-  // Guarded because this can sit inside a <summary>, where a plain click would
-  // also fold the block — copying is not a request to close anything.
+  // Guarded: this can sit inside a <summary>, where a plain click would also
+  // fold the block — copying isn't a request to close anything.
   const copy = async (event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -80,16 +77,15 @@ function CopyButton({
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // Clipboard access denied (insecure origin, or the user said no). The
-      // payload is on screen and selectable either way.
+      // Clipboard denied (insecure origin, or user said no); payload is still
+      // on screen and selectable.
     }
   };
 
   return (
-    // Icon only. It repeats once per payload down a long trace, and a row of
-    // "Copy args" chips competes with the payloads themselves for the eye. The
-    // label survives in the tooltip and the accessible name, where a screen
-    // reader still hears which of the two blocks it belongs to.
+    // Icon only: it repeats per payload down a long trace, and "Copy args"
+    // chips would compete with the payloads for the eye. Label survives in
+    // the tooltip and accessible name.
     <button
       type="button"
       onClick={copy}
@@ -110,17 +106,15 @@ function CopyButton({
 }
 
 /**
- * Above this many lines a payload starts collapsed. Short ones are worth
- * reading at a glance; a long one otherwise buries the next step behind a
- * scroll box nobody asked for.
+ * Above this many lines a payload starts collapsed, so a long one doesn't
+ * bury the next step behind an unwanted scroll box.
  */
 const FOLD_LINES = 12;
 
 /**
- * A one-line payload this short is rendered as a row rather than a fold. Half
- * the tool calls in a trace have args like `{"channel":"#ops"}` or a result of
- * `null`, and a disclosure triangle in front of that asks the reader to open
- * something already fully on screen.
+ * A one-line payload this short renders as a row, not a fold — a disclosure
+ * triangle in front of `{"channel":"#ops"}` or `null` just asks the reader to
+ * open something already fully visible.
  */
 const INLINE_CHARS = 56;
 
@@ -130,14 +124,13 @@ const VIEW_MAX_HEIGHT = "max-h-[18rem]";
 /**
  * One `args` or `result` block in the trace.
  *
- * Two views where the payload has both. JSON is the shape — what the tool was
- * handed, what came back, nesting intact. Text is the same content with the
- * escaping undone, which is the only readable form of a tool that answers in
- * prose. The tabs appear only when there is a second view to switch to.
+ * Two views where the payload has both: JSON keeps the shape (nesting
+ * intact), text is the same content with escaping undone — the only readable
+ * form for a tool that answers in prose. Tabs appear only when there's a
+ * second view to switch to.
  *
- * Copy lives on the block's own toolbar rather than the summary line: it acts
- * on what is being shown, so it belongs next to the switch that decides that,
- * and the summary line goes back to being a label and a size.
+ * Copy lives on the block's own toolbar, not the summary line, since it acts
+ * on whatever's currently shown.
  */
 export function PayloadView({
   label,
@@ -159,8 +152,8 @@ export function PayloadView({
 
   if (lines === 1 && json.length <= INLINE_CHARS && text == null) {
     return (
-      // The empty span holds the chevron column, so an inline row's tag starts
-      // on the same x as a folded one's.
+      // Empty span holds the chevron column, so an inline row's tag lines up
+      // with a folded one's.
       <div className="flex items-center gap-2">
         <span className="w-3 shrink-0" />
         <PayloadTag label={label} />
@@ -176,8 +169,8 @@ export function PayloadView({
         <ChevronRight className="text-subtle h-3 w-3 shrink-0 transition-transform group-open/payload:rotate-90" />
         <PayloadTag label={label} />
 
-        {/* Closed, the row previews the payload; open, the space is simply
-            left empty — a rule through it only drew a line to nowhere. */}
+        {/* Closed: previews the payload. Open: left empty — a rule through it
+            just drew a line to nowhere. */}
         <span className="text-muted min-w-0 flex-1 truncate group-open/payload:hidden">
           {json.replace(/\s+/g, " ").trim()}
         </span>
@@ -186,8 +179,8 @@ export function PayloadView({
         <span className="text-subtle shrink-0 text-[10px] tabular-nums">
           {lines} lines · {size}
         </span>
-        {/* On the header, so a closed block can be copied without unfolding
-            it. It still copies whichever view is selected below. */}
+        {/* On the header so a closed block can be copied without unfolding;
+            still copies whichever view is selected below. */}
         <CopyButton
           text={shown}
           label={`Copy ${label}${text != null && view === "text" ? " as text" : ""}`}
@@ -206,9 +199,9 @@ export function PayloadView({
             </ViewTab>
           </div>
         )}
-        {/* `whitespace-pre-wrap` in the text view: prose has no meaningful
-            column width, so wrapping it beats a horizontal scrollbar. JSON
-            keeps its indentation and scrolls sideways instead. */}
+        {/* `whitespace-pre-wrap` in text view: prose has no meaningful column
+            width, so wrapping beats a horizontal scrollbar. JSON keeps its
+            indentation and scrolls sideways instead. */}
         <pre
           className={`text-foreground ${VIEW_MAX_HEIGHT} overflow-auto px-2.5 py-2 ${
             view === "text" ? "whitespace-pre-wrap" : ""

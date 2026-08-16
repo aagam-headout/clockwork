@@ -5,12 +5,12 @@ import { Mono } from "@/components/ui";
  * The one panel behind every dead end — 404, a thrown server error, a failed
  * root layout. Two rules it exists to enforce:
  *
- *  - The person reads plain English first. A stack trace or a `digest` string
- *    is an answer to "what do I paste to whoever can fix this", not to "what
- *    happened", so it starts collapsed.
- *  - It's a `<details>`, not state — this renders inside `global-error`, where
- *    the app's providers may be the thing that broke, so it must work with no
- *    JavaScript beyond React itself.
+ *  - Plain English first. A stack trace or `digest` string answers "what do
+ *    I paste to whoever fixes this", not "what happened" — so it starts
+ *    collapsed.
+ *  - `<details>`, not state — this renders inside `global-error`, where the
+ *    app's providers may be what broke, so it must work with no JS beyond
+ *    React itself.
  */
 export function ErrorState({
   code,

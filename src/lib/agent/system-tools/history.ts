@@ -10,14 +10,13 @@ import type { SystemToolContext } from "./context";
 /**
  * Lets a run read its own past digests.
  *
- * Until now a run's entire memory was one previous digest, so it could say
- * "this changed since yesterday" but never "this is the third week running" —
- * the observation that actually matters in monitoring.
+ * Previously a run's only memory was the one prior digest, so it could say
+ * "this changed since yesterday" but never "third week running" — the
+ * observation that matters most in monitoring.
  *
- * The owner and the default workflow come from the run, never from an
- * argument. `scope` chooses between this workflow and every workflow the same
- * owner has, and there is no third value: nothing the model can pass reaches
- * another account's digests.
+ * Owner and default workflow come from the run, never an argument. `scope`
+ * only chooses between this workflow and all of the same owner's workflows —
+ * nothing the model passes can reach another account's digests.
  */
 export function createHistoryTool(ctx: SystemToolContext) {
   return tool({
@@ -58,9 +57,8 @@ export function createHistoryTool(ctx: SystemToolContext) {
         });
       } catch {
         /*
-         * History is supporting context, not the work. A search that fails must
-         * not take the run down with it — the model is told plainly and carries
-         * on with what it has.
+         * History is supporting context, not the work — a failed search must
+         * not take the run down with it.
          */
         return {
           error:
@@ -69,8 +67,8 @@ export function createHistoryTool(ctx: SystemToolContext) {
       }
 
       if (hits.length === 0) {
-        // An explicit sentence, not an empty array: a model reading `[]` may
-        // conclude the call failed and burn a step retrying it.
+        // Explicit sentence, not `[]` — a model may read an empty array as a
+        // failure and retry.
         return { result: "No prior digests match that search.", count: 0 };
       }
 

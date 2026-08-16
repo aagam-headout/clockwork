@@ -15,10 +15,9 @@ import { LIMITS } from "@/lib/limits";
 
 /**
  * How long one tick may spend starting runs. The route's `maxDuration` is
- * 300s and a single run may take up to 240s, so the dispatcher stops handing
- * out work well before the function is killed — anything left over is still
- * due on the next tick, because `lastAttemptAt` only moves for workflows that
- * actually started.
+ * 300s and a run may take up to 240s, so the dispatcher stops well before
+ * the function is killed — leftovers stay due, since `lastAttemptAt` only
+ * moves for workflows that actually started.
  */
 const TICK_BUDGET_MS = 240_000;
 
@@ -64,8 +63,7 @@ export async function runDueWorkflows(now: Date = new Date()) {
     }
   }
 
-  // Still drain: a tick with no cron work due may well have chained runs left
-  // over from the previous one.
+  // Still drain: a tick with nothing due may have chained runs left over.
   if (due.length === 0) {
     results.push(...(await drainChainedRuns(tickStartedAt)));
     return results;
@@ -74,11 +72,10 @@ export async function runDueWorkflows(now: Date = new Date()) {
   /*
    * Group by owner and interleave.
    *
-   * A flat loop over due workflows spends the tick budget in whatever order
-   * the rows came back, so one account with ten due workflows can consume the
-   * whole 240 seconds and starve everyone else — every tick, forever, since
-   * their workflows stay due. Round-robin makes the budget shortfall land on
-   * everyone equally.
+   * A flat loop spends the tick budget in whatever order rows came back, so
+   * one account with ten due workflows could consume all 240s and starve
+   * everyone else, every tick, forever. Round-robin spreads the shortfall
+   * evenly.
    */
   const byUser = new Map<string, Workflow[]>();
   for (const workflow of due) {
@@ -96,21 +93,17 @@ export async function runDueWorkflows(now: Date = new Date()) {
 
   const userIds = [...byUser.keys()];
 
-  /*
-   * Everything per-user is resolved once per tick rather than once per
-   * workflow: account status, whether they have a usable provider key, and
-   * which of their toolkits are connected.
-   */
+  // Per-user state — account status, provider key, connected toolkits —
+  // resolved once per tick, not once per workflow.
   const [accounts, activeToolkits] = await Promise.all([
     db
       .select({ id: users.id, status: users.status })
       .from(users)
       /*
        * `inArray`, not `sql\`= any(${userIds})\``. The raw form binds the
-       * array as one parameter, which neon-http accepts and node-postgres
-       * rejects with `22P02: Array value must start with "{"` — so every tick
-       * against a plain Postgres (the Docker stack, any self-host) 500'd
-       * before a single workflow was dispatched.
+       * array as one parameter, which neon-http accepts but node-postgres
+       * rejects with `22P02: Array value must start with "{"` — every tick
+       * against a plain Postgres 500'd before a workflow was dispatched.
        */
       .where(inArray(users.id, userIds)),
     activeToolkitsByUser(userIds),
@@ -123,10 +116,9 @@ export async function runDueWorkflows(now: Date = new Date()) {
       runnable.set(userId, false);
       continue;
     }
-    // Bring-your-own-key: no key means no run. Skipping here rather than
-    // enqueuing is the difference between one banner on the workflows page and
-    // 288 identical failed runs a day for an account that never finished
-    // setting up.
+    // Bring-your-own-key: no key means no run. Skipping here, rather than
+    // enqueuing, is one banner on the workflows page instead of 288 identical
+    // failed runs a day for an account still mid-setup.
     const provider = await getProviderForUser(userId);
     runnable.set(userId, await hasProviderKey(userId, provider));
   }
@@ -157,8 +149,8 @@ export async function runDueWorkflows(now: Date = new Date()) {
       continue;
     }
 
-    // Blocked on a connection: cheap to detect, and worth detecting before
-    // spending a model call to discover the same thing.
+    // Cheap to detect a blocked connection here, before spending a model
+    // call to discover the same thing.
     const required = await requiredToolkits(workflow);
     const gate = checkConnectionsWith(
       activeToolkits.get(userId) ?? new Set(),
@@ -185,19 +177,18 @@ export async function runDueWorkflows(now: Date = new Date()) {
       continue;
     }
 
-    // Sequential on purpose: a shared Vercel function has one duration
-    // budget (maxDuration) to split across every due workflow in this
-    // tick, and sequential execution keeps failures isolated and simple
-    // to reason about. Revisit if the due-count per tick grows.
+    // Sequential on purpose: one duration budget (maxDuration) is split
+    // across every due workflow this tick, and running in sequence keeps
+    // failures isolated. Revisit if the due-count per tick grows.
     try {
       const result = await runWorkflow(workflow, "cron");
       results.push({ workflowId: workflow.id, slug: workflow.slug, ...result });
     } catch (err) {
       /*
-       * `executeRun` writes its own failures to the run row, so reaching here
-       * means the claim itself failed — a dropped database connection, most
-       * likely. Unhandled, that aborted the whole tick and every workflow
-       * after this one silently missed its slot until the next one.
+       * `executeRun` writes its own failures, so reaching here means the
+       * claim itself failed — most likely a dropped database connection.
+       * Unhandled, that would abort the whole tick and every workflow after
+       * this one would silently miss its slot until the next.
        */
       console.error(`[dispatch] ${workflow.slug} failed to start`, err);
       results.push({
@@ -318,11 +309,9 @@ export async function drainChainedRuns(
           runId: next.runId,
         });
       } catch (err) {
-        /*
-         * `executeRun` records its own failures, so reaching here means the
-         * claim itself failed. Pushing on rather than aborting: one bad row
-         * must not strand every other chained run behind it.
-         */
+        // `executeRun` records its own failures, so reaching here means the
+        // claim failed. Push on rather than abort — one bad row must not
+        // strand every other chained run behind it.
         console.error(`[drain] ${next.slug} failed to start`, err);
         results.push({
           workflowId: "",
@@ -337,8 +326,8 @@ export async function drainChainedRuns(
 
   /*
    * Deliveries last: a chained run drained above may itself have produced a
-   * digest that needs delivering, and doing this afterwards gives those a
-   * chance at this same tick rather than waiting five minutes.
+   * digest to deliver, and doing this after gives it a shot this same tick
+   * instead of waiting five minutes.
    *
    * Swallowed on failure — a retry sweep that throws must not lose the
    * dispatch results this tick already earned.
@@ -424,13 +413,12 @@ async function settleUnrunnable(runId: string, verdict: Unrunnable) {
 /**
  * Records a workflow that couldn't run for want of a connection.
  *
- * Three things have to happen, and each fixes a distinct failure mode:
+ * Three things happen, each fixing a distinct failure mode:
  *
- *  - `lastAttemptAt` moves, or the workflow stays due and is re-evaluated on
- *    every five-minute tick forever.
- *  - A run row is written *at most once a day*, so the user sees the problem
- *    on /runs once instead of 288 identical rows.
- *  - The failure streak advances, and the workflow is paused at the limit.
+ *  - `lastAttemptAt` moves, or the workflow stays due forever.
+ *  - A run row is written *at most once a day*, so /runs shows the problem
+ *    once instead of 288 identical rows.
+ *  - The failure streak advances, and the workflow pauses at the limit.
  */
 async function handleBlocked(workflow: Workflow, blocked: string[]) {
   const now = new Date();

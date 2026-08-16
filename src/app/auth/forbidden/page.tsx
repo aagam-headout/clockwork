@@ -7,10 +7,10 @@ import { TriangleAlert } from "lucide-react";
 import { buttonClass } from "@/components/ui";
 
 /*
- * Signup is open, so this page is no longer "you are not the one allowed
- * user" — it is one of a small set of specific reasons an otherwise valid
- * account can't proceed. Each gets its own wording, because "not authorized"
- * with no explanation is the kind of dead end people mail you about.
+ * Signup is open, so this page is no longer "you're not the one allowed
+ * user" — it's one of a small set of specific reasons a valid account can't
+ * proceed. Each gets its own wording; "not authorized" with no explanation
+ * is the kind of dead end people mail you about.
  */
 const REASONS: Record<string, { title: string; body: string }> = {
   suspended: {

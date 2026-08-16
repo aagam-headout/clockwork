@@ -9,21 +9,20 @@ import type { ToolkitOption } from "@/components/workflow-form";
 /**
  * The toolkits a user's workflows can draw on, with the state of each.
  *
- * Two changes from the version this replaces, both load-bearing:
+ * Two load-bearing changes from the version this replaces:
  *
- *  1. It reads connection state from Postgres, not from Composio. Every page
- *     that showed a toolkit picker was making a Composio API call on each
- *     render, and swallowing failures into an empty list — so a Composio blip
- *     silently told the user they had nothing connected.
+ *  1. Reads connection state from Postgres, not Composio. The old version
+ *     made a Composio API call on every render and swallowed failures into an
+ *     empty list, so a Composio blip silently told the user nothing was
+ *     connected.
  *
- *  2. It no longer drops everything that isn't ACTIVE. An expired Slack used
- *     to vanish from the builder with no explanation, taking its workflows'
- *     toolkit selections with it. Now it comes back flagged, and the form
- *     renders it as "needs reconnect" instead of pretending it was never
- *     there.
+ *  2. No longer drops everything that isn't ACTIVE. An expired Slack used to
+ *     vanish from the builder with no explanation, taking its workflows'
+ *     toolkit selections with it. Now it comes back flagged as "needs
+ *     reconnect" instead of pretending it was never there.
  *
- * The catalog lookup is still best-effort — it only supplies display names and
- * logos, and `TOOLKIT_LABELS` covers the common ones.
+ * The catalog lookup is still best-effort, supplying only display names and
+ * logos; `TOOLKIT_LABELS` covers the common ones.
  */
 export async function getConnectedToolkitOptions(
   userId: string,

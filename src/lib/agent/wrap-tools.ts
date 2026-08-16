@@ -13,20 +13,20 @@ import type { Envelope } from "@/lib/outcome/envelope";
  * Keeps large tool payloads out of the model's context.
  *
  * A Composio result routinely runs to tens of kilobytes, and the AI SDK
- * resends the whole message history on every step — so one big result at step 2
- * is billed again at every step after it. This wrapper stores the payload and
- * hands the model a descriptor instead; the model narrows it with `query`,
- * which is local and does not spend the run's step budget — though it is still
- * a model round trip, which is why the descriptor carries a preview.
+ * resends the whole message history every step — so a big result at step 2 is
+ * billed again at every step after. This wrapper stores the payload and hands
+ * the model a descriptor instead; the model narrows it with `query`, which is
+ * local and free of the step budget — though still a model round trip, hence
+ * the preview on the descriptor.
  *
- * The tool itself always executes. Nothing here is a cache of *data* — only of
- * the knowledge that the data has not changed.
+ * The tool itself always executes. Nothing here caches *data* — only the
+ * knowledge that the data hasn't changed.
  *
  * This module owns two things: wrapping whatever *connector* tools a workflow
- * was given (Composio, MCP, ... — the ones in `SYSTEM_TOOL_NAMES` are not
- * these), and the run-loop step-budget math, which has to know both kinds of
- * tool to bound them correctly. The `query`/`inspect` tools themselves live in
- * `./system-tools` — see that module for why they're kept separate.
+ * was given (Composio, MCP, ... — not the ones in `SYSTEM_TOOL_NAMES`), and
+ * the run-loop step-budget math, which needs to know both kinds of tool to
+ * bound them correctly. `query`/`inspect` themselves live in `./system-tools`
+ * — see that module for why they're kept separate.
  */
 
 // Re-exported for callers that imported these from here before the split.
@@ -63,18 +63,18 @@ export function countExternalSteps(
  * budget is spent, or an absolute ceiling on total steps is reached.
  *
  * The absolute bound exists because `query`/`inspect` are deliberately free
- * of `maxSteps` — but exhausting their own per-run budget doesn't remove
- * them from the tool set, it just makes them return an error value the model
- * can keep calling around. Without a second, unconditional bound, a model
- * that loops on local calls forever has nothing to stop it before the run's
- * hard timeout, and that run is then billed for every step and recorded as a
- * timeout error instead of an honest `truncated`. `MAX_QUERIES_PER_RUN + 2`
- * is slack for the one real tool-call step already counted toward `maxSteps`
- * when the cap trips, plus the loop's final text-only step.
+ * of `maxSteps` — exhausting their own per-run budget doesn't remove them
+ * from the tool set, it just returns an error value the model can keep
+ * calling around. Without a second, unconditional bound, a model looping on
+ * local calls has nothing to stop it before the run's hard timeout, getting
+ * billed for every step and recorded as a timeout instead of an honest
+ * `truncated`. `MAX_QUERIES_PER_RUN + 2` covers the one real tool-call step
+ * already counted toward `maxSteps` when the cap trips, plus the loop's
+ * final text-only step.
  *
- * `stopWhen` and `hitStepCap` must never disagree about this — a mismatch
- * means a run that hit the cap gets recorded as a clean finish. Keeping the
- * arithmetic in one place is what keeps them from drifting apart.
+ * `stopWhen` and `hitStepCap` must never disagree — a mismatch would record a
+ * run that hit the cap as a clean finish. Keeping the arithmetic in one place
+ * is what keeps them from drifting apart.
  */
 export function runLoopExhausted(
   steps: Array<{ toolCalls?: Array<{ toolName: string }> }>,
@@ -86,10 +86,10 @@ export function runLoopExhausted(
 /**
  * Which bound stopped the loop, or `null` if neither has.
  *
- * The two are not interchangeable in the run row: "stopped after N steps" sent
+ * The two aren't interchangeable in the run row: "stopped after N steps" sent
  * to a run that actually looped on local calls tells the *next* run to plan
- * fewer fetches, which is the wrong lesson and makes the digest thinner for a
- * problem that was never about fetching.
+ * fewer fetches — the wrong lesson, thinning the digest for a problem that
+ * was never about fetching.
  */
 export type LoopBound = "external-steps" | "total-steps";
 
@@ -128,10 +128,10 @@ export function wrapToolsWithHandles(
   const { workflowId, store, state, signals, setEnvelope, ownerId } = options;
 
   /*
-   * `report` survives the escape hatch. Turning the handle harness off is a
-   * statement about how tool results are passed to the model, not about how a
-   * run ends — without this branch, HANDLES_ENABLED=false would leave every
-   * run unable to produce a digest at all.
+   * `report` survives the escape hatch. Turning off the handle harness is
+   * about how tool results reach the model, not about how a run ends —
+   * without this branch, HANDLES_ENABLED=false would leave every run unable
+   * to produce a digest.
    */
   if (!handlesEnabled()) {
     return {
@@ -153,10 +153,10 @@ export function wrapToolsWithHandles(
       ),
     };
   }
-  // Counts every local call, including one that found no handle or failed its
-  // query. Deliberate: a model looping on a bad handle burns the same model
-  // round trips as a model reading real data, and the budget exists to bound
-  // round trips, not successes.
+  // Counts every local call, including one that found no handle or failed
+  // its query — deliberate, since a model looping on a bad handle burns the
+  // same round trips as one reading real data, and the budget bounds round
+  // trips, not successes.
   let queriesUsed = 0;
 
   /** Every system tool shares this gate, and each counts as a degraded read. */
@@ -201,10 +201,10 @@ export function wrapToolsWithHandles(
 
         if (json.length < HANDLE_THRESHOLD_CHARS) return result;
 
-        // argsHash goes through canonicalHash so key order in the call
-        // doesn't defeat the "unchanged" check; resultHash hashes the exact
-        // JSON bytes already computed above, since it's compared byte-for-byte
-        // against a hash of the previous run's exact JSON, not re-serialised.
+        // argsHash goes through canonicalHash so key order doesn't defeat the
+        // "unchanged" check; resultHash hashes the exact JSON already
+        // computed above, since it's compared byte-for-byte against the
+        // previous run's hash, not re-serialised.
         const argsHash = canonicalHash(args);
         const resultHash = createHash("sha256").update(json).digest("hex");
         const previous = await readToolHash(workflowId, name, argsHash);

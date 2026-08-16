@@ -5,15 +5,15 @@ import type { SystemToolContext } from "./context";
 /**
  * How a run ends.
  *
- * Previously the run's outcome was `result.text` plus a string match on
- * "NO_UPDATES" — a convention, not a protocol, and one that could not carry
- * measured values at all. A tool call is validated at the point of the call,
- * so a malformed outcome comes back to the model as an error it can fix on the
- * next step rather than as a dead run nobody sees until morning.
+ * Previously the outcome was `result.text` plus a string match on
+ * "NO_UPDATES" — a convention, not a protocol, and one that couldn't carry
+ * measured values. Validating at the call site means a malformed outcome
+ * comes back as an error the model can fix next step, not a dead run nobody
+ * sees until morning.
  *
- * Unlike `query` and `inspect` this does NOT consult the shared read budget.
- * Refusing the report because the model read too much would throw away the
- * run's entire output over a budget that exists to bound reading.
+ * Unlike `query`/`inspect` this does NOT consult the shared read budget —
+ * refusing the report over a budget meant to bound reading would throw away
+ * the run's entire output.
  */
 export function createReportTool(ctx: SystemToolContext) {
   const declared = ctx.signals;

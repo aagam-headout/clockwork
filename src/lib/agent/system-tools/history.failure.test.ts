@@ -19,11 +19,10 @@ import { createHistoryTool } from "./history";
 /*
  * The failing-search case lives in its own file.
  *
- * Vitest attributes an error thrown inside a mock implementation to the test
- * that triggered it, even when the code under test caught the error and
- * returned normally — but only once that same mock has been used by an earlier
- * test in the file. A dedicated mock with no prior interaction reports what
- * actually happened, which is what this asserts.
+ * Vitest attributes an error thrown inside a mock to the test that triggered
+ * it, even when the code under test caught it and returned normally — but
+ * only once that mock has been used by an earlier test in the file. A
+ * dedicated mock with no prior interaction reports what actually happened.
  */
 describe("history tool when the search fails", () => {
   it("returns an error to the model instead of taking the run down", async () => {

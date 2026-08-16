@@ -10,12 +10,11 @@ import * as schema from "./schema";
 /*
  * Two drivers, one `db`:
  *
- * - Neon (production, and any `*.neon.tech` URL) goes over neon-http, which
- *   is the right shape for serverless — no socket to keep alive between
- *   invocations. Pooled URL for app traffic; migrations use
- *   DATABASE_URL_UNPOOLED (see drizzle.config.ts).
- * - Anything else — a Postgres container on your laptop — goes over a normal
- *   TCP pool. Local development doesn't need the Neon service at all.
+ * - Neon (production, any `*.neon.tech` URL) uses neon-http — no socket to
+ *   keep alive between invocations. Pooled URL for app traffic; migrations
+ *   use DATABASE_URL_UNPOOLED (see drizzle.config.ts).
+ * - Anything else (a local Postgres container) uses a normal TCP pool — no
+ *   Neon service needed locally.
  */
 const url = process.env.DATABASE_URL!;
 const isNeon =
@@ -33,8 +32,8 @@ function localPool(): Pool {
 }
 
 /*
- * The two drivers expose the same query builders; the cast keeps one static
- * type for every call site instead of a union nobody can call.
+ * Both drivers expose the same query builders; the cast keeps one static
+ * type per call site instead of an unusable union.
  */
 export const db = (
   isNeon

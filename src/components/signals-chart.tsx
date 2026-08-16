@@ -5,14 +5,13 @@ import type { SignalPoint } from "@/lib/data/digest-search";
 /*
  * A signal's history, as a sparkline per numeric signal.
  *
- * Inline SVG rather than a charting dependency: these are a few dozen points
- * with no axes, no tooltips and no interaction, and the whole thing is smaller
- * than the import would be.
+ * Inline SVG, not a charting dependency: a few dozen points with no axes, no
+ * tooltips, no interaction — smaller than the import would be.
  *
- * Every row here tolerates a missing value. Each output written before signals
- * existed has none at all, and a run that could not measure something reports
- * it absent rather than zero — so a chart that assumes presence would either
- * crash or, worse, draw a confident zero where the truth is "unknown".
+ * Every row tolerates a missing value. Outputs written before signals existed
+ * have none, and a run that couldn't measure something reports it absent, not
+ * zero — so a chart assuming presence would crash or, worse, draw a
+ * confident zero where the truth is "unknown".
  */
 
 const WIDTH = 320;
@@ -21,8 +20,8 @@ const HEIGHT = 40;
 function Sparkline({ values }: { values: number[] }) {
   const min = Math.min(...values);
   const max = Math.max(...values);
-  // A flat series has no range to scale against; halving the span keeps the
-  // line centred instead of dividing by zero.
+  // A flat series has no range to scale against; a span of 1 keeps the line
+  // centred instead of dividing by zero.
   const span = max - min || 1;
 
   const points = values
@@ -38,9 +37,9 @@ function Sparkline({ values }: { values: number[] }) {
     <svg
       viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
       preserveAspectRatio="none"
-      // `accent-text` rather than `accent`: the raw brand blue sits at ~3:1 on
-      // the dark surface, which is the floor for a graphic. The text variant is
-      // tuned per theme and clears it comfortably in both.
+      // `accent-text`, not `accent`: raw brand blue sits at ~3:1 on the dark
+      // surface, the floor for a graphic. The text variant clears it in both
+      // themes.
       className="text-accent-text h-10 w-full"
       aria-hidden
     >
@@ -71,8 +70,8 @@ export function SignalsChart({
         .filter((v): v is number => typeof v === "number");
       return { decl, values };
     })
-    // Two points is the minimum that shows a direction; one is a number, and
-    // there is already a place on the page that shows numbers.
+    // Two points is the minimum showing direction; one is just a number, and
+    // the page already shows numbers elsewhere.
     .filter((s) => s.decl.type === "number" && s.values.length >= 2);
 
   if (series.length === 0) return null;

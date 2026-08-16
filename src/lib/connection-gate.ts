@@ -6,12 +6,11 @@ import { deliverToolkits, type DeliverTarget } from "@/lib/read-only";
 /*
  * Whether a run can actually reach the apps it needs.
  *
- * Before this existed, a workflow whose Slack token had expired went ahead
- * anyway: every Slack tool call came back rejected, the agent was instructed to
- * "say so plainly in one line", and the run was recorded as **ok** with a
- * digest explaining that it couldn't read Slack. The user's dashboard showed a
- * green run. Checking first — and classifying auth failures when a run gets
- * past the check — is what makes a broken connection look broken.
+ * Before this existed, a workflow with an expired Slack token went ahead
+ * anyway: every Slack call came back rejected, the agent said so in the
+ * digest, and the run was still recorded as **ok** — a green run on the
+ * dashboard. Checking first, and classifying auth failures when a run gets
+ * past the check, is what makes a broken connection look broken.
  */
 
 /** Toolkits a run genuinely needs a connected account for. */
@@ -66,11 +65,10 @@ export function checkConnectionsWith(
 
 /*
  * Composio returns tool failures as `{ successful: false, error }` rather than
- * throwing, so an expired credential arrives as an ordinary string. Matching on
- * it is unavoidably heuristic — this errs toward recognising auth failures,
- * since the cost of a false positive is a connection marked "expired" that the
- * next reconcile sweep corrects, while a false negative is the silent-green-run
- * bug this whole module exists to fix.
+ * throwing, so an expired credential arrives as an ordinary string. Matching
+ * is unavoidably heuristic — errs toward recognising auth failures, since a
+ * false positive just gets corrected by the next reconcile sweep, while a
+ * false negative is the silent-green-run bug this module exists to fix.
  */
 const AUTH_ERROR =
   /\b(401|403)\b|unauthor|unauthentic|invalid[_ -]?(token|grant|credential|api[_ -]?key)|token[_ ]?(has )?expired|expired[_ ]?token|not[_ ]?connected|connected account|no active connection|re-?authenticat|invalid_client|access[_ ]?denied|permission[_ ]?denied/i;
@@ -91,10 +89,10 @@ export function isFailure(output: unknown): boolean {
 /**
  * Maps a tool slug back to the toolkit it came from.
  *
- * Matched against the toolkits the run actually requested, longest first: with
- * both `google` and `google_calendar` in play, a plain prefix scan would
- * attribute `GOOGLE_CALENDAR_LIST_EVENTS` to `google` and mark the wrong
- * connection expired.
+ * Matched against the requested toolkits, longest first: with both `google`
+ * and `google_calendar` in play, a plain prefix scan would attribute
+ * `GOOGLE_CALENDAR_LIST_EVENTS` to `google` and mark the wrong connection
+ * expired.
  */
 export function toolkitForSlug(
   toolSlug: string,

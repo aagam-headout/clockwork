@@ -1,11 +1,9 @@
 /**
- * Shared size/budget limits for the handle system: how big a connector-tool
- * payload must be before it becomes a handle, how much of a paged read comes
- * back per `query` call, and how many system-tool calls one run gets.
+ * Shared size/budget limits: threshold for turning a payload into a handle,
+ * how much a paged `query` read returns, and system-tool calls per run.
  *
- * Kept separate from both `wrap-tools.ts` (which wraps connector tools) and
- * `system-tools/` (which defines `query`/`inspect`) so neither has to import
- * the other just to read a number.
+ * Kept separate from `wrap-tools.ts` and `system-tools/` so neither has to
+ * import the other just to read a number.
  */
 
 export const HANDLE_THRESHOLD_CHARS = 2_000;

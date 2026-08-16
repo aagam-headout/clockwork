@@ -7,14 +7,14 @@ import { ButtonLink, buttonClass } from "@/components/ui";
 
 /**
  * Anything that throws while rendering a page lands here — a Postgres blip, a
- * Composio 5xx, a bad cron expression the parser rejects. Before this, Next's
- * stock screen replaced the app with "Application error: a client-side
- * exception has occurred", which says nothing and offers nothing to do next.
+ * Composio 5xx, a bad cron expression. Before this, Next's stock screen
+ * showed "Application error: a client-side exception has occurred", saying
+ * nothing and offering nothing to do next.
  *
- * In production the `message` is scrubbed by Next and only `digest` survives;
- * that's the string worth quoting in a bug report, so it leads the collapsed
- * details. `reset()` re-renders the segment, which is a real fix for the
- * transient half of these failures.
+ * In production `message` is scrubbed and only `digest` survives — that's
+ * the string worth quoting in a bug report, so it leads the collapsed
+ * details. `reset()` re-renders the segment, a real fix for the transient
+ * half of these failures.
  */
 export default function Error({
   error,
@@ -24,8 +24,8 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    // The server-side trace is already in the platform logs; this is the only
-    // record of the failure on the client.
+    // Server-side trace is already in platform logs; this is the only record
+    // of the failure on the client.
     console.error("[error boundary]", error);
   }, [error]);
 

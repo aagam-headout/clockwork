@@ -2,19 +2,18 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 /**
- * Agent output is markdown. Rendering it as text meant headings arrived as
- * literal `##`, links as raw URLs, and tables as pipe soup — so every digest
- * read worse in the dashboard than in the Slack message it was also sent to.
+ * Agent output is markdown. Rendered as text, headings arrived as literal
+ * `##`, links as raw URLs, tables as pipe soup — every digest read worse
+ * here than in the Slack message it was also sent to.
  *
- * The typography lives in `globals.css` under `.markdown` rather than in
- * per-element `components` overrides here: one place to tune, and it applies
- * to nested content (list items containing code, table cells) without
- * enumerating every tag.
+ * Typography lives in `globals.css` under `.markdown`, not per-element
+ * `components` overrides here: one place to tune, applying to nested content
+ * (list items with code, table cells) without enumerating every tag.
  *
- * The default `Markdown` export is hook-free, so this stays a server component.
- * GFM is on for tables, strikethrough and autolinks, which is what the agents
- * actually emit. Raw HTML is deliberately *not* enabled: the body is model
- * output, and `rehype-raw` would make it injectable markup.
+ * Hook-free, so this stays a server component. GFM is on for tables,
+ * strikethrough and autolinks — what the agents actually emit. Raw HTML is
+ * deliberately off: the body is model output, and `rehype-raw` would make it
+ * injectable markup.
  */
 export function Markdown({
   children,
@@ -23,9 +22,9 @@ export function Markdown({
 }: {
   children: string;
   /**
-   * `sm` for markdown inside something already dense — a chat bubble, a preview
-   * pane. It's a variant class rather than a set of overrides here, so the two
-   * sizes can't drift apart on what a heading or a code chip looks like.
+   * `sm` for markdown inside something already dense — a chat bubble, a
+   * preview pane. A variant class, not overrides here, so the two sizes
+   * can't drift on what a heading or code chip looks like.
    */
   size?: "base" | "sm";
   className?: string;
@@ -37,8 +36,8 @@ export function Markdown({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          // A wide table would otherwise stretch the card and push the page
-          // into a horizontal scroll; it scrolls inside its own box instead.
+          // A wide table would stretch the card into horizontal page scroll;
+          // this scrolls inside its own box instead.
           table: ({ children: cells }) => (
             <div className="-mx-1 overflow-x-auto px-1">
               <table>{cells}</table>
@@ -49,13 +48,12 @@ export function Markdown({
               {label}
             </a>
           ),
-          // A digest can carry a chart or a screenshot the agent linked to.
-          // Lazy, and async-decoded, so a long one doesn't block the panel it
-          // opens in on images below the fold.
+          // A digest can carry a chart or screenshot the agent linked to.
+          // Lazy and async-decoded, so a long one doesn't block the panel
+          // for images below the fold.
           img: ({ src, alt }) => (
-            // The src is model output — an arbitrary remote URL that
-            // next/image can neither whitelist nor optimize, so this is a
-            // plain <img> on purpose.
+            // src is model output — an arbitrary remote URL next/image can't
+            // whitelist or optimize — so a plain <img> is intentional.
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={typeof src === "string" ? src : undefined}

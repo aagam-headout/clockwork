@@ -7,14 +7,14 @@ import { LIMITS } from "@/lib/limits";
 /*
  * Month-to-date model spend for one workflow, against its own cap.
  *
- * The month boundary is computed in the WORKFLOW's timezone, not the app's and
- * not the host's. That column already exists and already drives scheduling, and
- * a budget that resets at the wrong midnight is a support ticket from someone
- * whose workflow paused a day early.
+ * The month boundary is computed in the WORKFLOW's timezone, not the app's
+ * or host's — that column already drives scheduling, and a budget resetting
+ * at the wrong midnight is a support ticket from someone whose workflow
+ * paused a day early.
  *
- * Enforcement is retroactive by construction: a run's cost is only known from
- * `runs.costUsd` after it finishes, so a cap blocks the next run rather than
- * the one that crossed it. The overshoot is bounded by a single run.
+ * Enforcement is retroactive by construction: a run's cost is only known
+ * from `runs.costUsd` after it finishes, so a cap blocks the next run, not
+ * the one that crossed it. Overshoot is bounded to a single run.
  */
 
 export type CapVerdict = {
@@ -51,8 +51,8 @@ function zoneOffsetMs(timezone: string, at: Date): number {
  *
  * Mirrors `startOfDay` in `src/lib/time.ts`: read the wall-clock parts in the
  * zone, guess the UTC instant for midnight on the first, then correct by the
- * zone's offset. One correction is enough — a DST shift moves a boundary by an
- * hour, never by a day.
+ * zone's offset. One correction suffices — a DST shift moves a boundary by an
+ * hour, never a day.
  */
 export function startOfMonthInZone(
   timezone: string,
@@ -74,9 +74,9 @@ export function startOfMonthInZone(
     month = m;
   } catch {
     /*
-     * An unknown zone must not stop a run. UTC is the safe reading: its month
-     * boundary is never later than any other zone's, so the window it produces
-     * is the widest one — a cap can then only be enforced early, never late.
+     * An unknown zone must not stop a run. UTC is the safe fallback: its month
+     * boundary is never later than any other zone's, giving the widest window —
+     * so a cap can only be enforced early, never late.
      */
     return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), 1));
   }
@@ -106,9 +106,9 @@ export async function monthToDateSpend(
   const [row] = await db
     .select({
       /*
-       * `costUsd` is null whenever pricing was unavailable for the model. Zero
-       * is the only honest stand-in, and it makes the total a lower bound —
-       * which the workflow page says out loud rather than hiding.
+       * `costUsd` is null when pricing was unavailable for the model. Zero is
+       * the only honest stand-in, making the total a lower bound — which the
+       * workflow page says out loud rather than hiding.
        */
       total: sql<string>`coalesce(sum(${runs.costUsd}), 0)`,
     })
@@ -125,12 +125,11 @@ export async function checkCostCap(workflow: {
 }): Promise<CapVerdict> {
   const raw = workflow.monthlyCostCapUsd;
   /*
-   * No cap, no query. The overwhelming majority of workflows are uncapped and
-   * this sits on the hot path before every run — so the check has to cover
-   * every shape an absent cap arrives in, not just `null`. A row selected
-   * before this column existed hands back `undefined`, and `Number(undefined)`
-   * is NaN, which is not `null` and would have bought a pointless query on
-   * every run of every uncapped workflow.
+   * No cap, no query. Most workflows are uncapped and this sits on the hot
+   * path before every run, so the check must cover every shape an absent cap
+   * arrives in, not just `null`. A row from before this column existed hands
+   * back `undefined`, and `Number(undefined)` is NaN — not `null` — which
+   * would otherwise cost a pointless query on every uncapped run.
    */
   const cap = raw === null || raw === undefined ? null : Number(raw);
   if (cap === null || !Number.isFinite(cap) || cap <= 0) {

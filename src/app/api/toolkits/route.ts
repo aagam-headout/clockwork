@@ -3,9 +3,9 @@ import { searchToolkits } from "@/lib/composio";
 import { requireUserApi } from "@/lib/auth/user";
 import { takeToken } from "@/lib/rate-limit";
 
-// Backs the connector search on /connections. The catalog itself isn't secret,
-// but it is fetched with the app-wide Composio key — so one account typing in
-// the search box is spending everyone's quota, and it is rate limited.
+// Backs the connector search on /connections. The catalog isn't secret, but
+// it's fetched with the app-wide Composio key, so one account typing spends
+// everyone's quota — hence rate limited.
 export async function GET(req: NextRequest) {
   const auth = await requireUserApi();
   if (!auth.ok) return auth.response;
@@ -27,8 +27,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const items = await searchToolkits(query, limit, offset);
-    // A full page back means there may be more — cheaper than a second
-    // count query, and off by at most one "Load more" click at the tail.
+    // A full page back means there may be more — cheaper than a count query,
+    // off by at most one "Load more" click at the tail.
     return NextResponse.json({ items, hasMore: items.length === limit });
   } catch (err) {
     return NextResponse.json(

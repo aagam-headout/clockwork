@@ -23,14 +23,14 @@ export function DismissibleAlert({
   const router = useRouter();
 
   function dismiss() {
-    // Read the URL off `window` rather than `useSearchParams`, which would
-    // force every page holding a banner behind a Suspense boundary.
+    // Read from `window`, not `useSearchParams` — that would force every
+    // page with a banner behind a Suspense boundary.
     const url = new URL(window.location.href);
     for (const key of params) url.searchParams.delete(key);
     const pathname = url.pathname;
     const query = url.searchParams.toString();
-    // `replace` so Back doesn't step straight into the dismissed banner, and
-    // no scroll reset — the banner sits at the top of a page already there.
+    // `replace` so Back can't step into the dismissed banner; no scroll
+    // reset since it's already at the top of the page.
     router.replace(query ? `${pathname}?${query}` : pathname, {
       scroll: false,
     });

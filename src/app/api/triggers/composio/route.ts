@@ -10,11 +10,11 @@ export const maxDuration = 300;
 
 /**
  * Composio trigger ingress. One project-wide webhook carries every trigger
- * event; this fans each one out to the enabled event workflows that
- * subscribed to that slug.
+ * event; this fans each out to the enabled event workflows subscribed to
+ * that slug.
  *
- * The signature is verified against COMPOSIO_WEBHOOK_SECRET — this endpoint
- * is public, and an unverified body would let anyone start runs (and spend
+ * Signature verified against COMPOSIO_WEBHOOK_SECRET — this endpoint is
+ * public, and an unverified body would let anyone start runs (and spend
  * model budget) at will.
  */
 export async function POST(request: Request) {
@@ -39,12 +39,12 @@ export async function POST(request: Request) {
   /*
    * Whose event is this?
    *
-   * The payload carries the Composio user id the trigger fired for, and
-   * `metadata.connectedAccount` as a second source. Both are mapped back
-   * through the namespace this app derives its Composio ids with; anything
-   * that doesn't map — an event from another deploy sharing the API key, or an
-   * account linked before the namespace existed — falls back to a lookup on
-   * the connected account id.
+   * The payload carries the Composio user id the trigger fired for, plus
+   * `metadata.connectedAccount` as a second source. Both map back through the
+   * namespace this app derives its Composio ids with; anything that doesn't
+   * map — an event from another deploy sharing the API key, or an account
+   * linked before the namespace existed — falls back to a lookup on the
+   * connected account id.
    */
   const meta = (event as { metadata?: { connectedAccount?: { id?: string } } })
     .metadata;
@@ -56,13 +56,13 @@ export async function POST(request: Request) {
   }
 
   /*
-   * Fail closed. The previous behaviour — fan out to every enabled workflow
-   * subscribed to this slug — was harmless with one user and is a cross-tenant
-   * run trigger with two: one person's new Slack message would start another
-   * person's workflow, spending their model budget on their data.
+   * Fail closed. The old behaviour — fan out to every enabled workflow
+   * subscribed to this slug — was harmless with one user but a cross-tenant
+   * trigger with two: one person's Slack message could start another
+   * person's workflow, spending their budget on their data.
    *
-   * 202 rather than a 4xx so Composio treats it as delivered and doesn't
-   * retry-storm an event that will never be routable.
+   * 202, not 4xx, so Composio treats it as delivered and doesn't retry-storm
+   * an event that will never be routable.
    */
   if (!ownerId) {
     console.warn("[triggers] unmapped composio user", {

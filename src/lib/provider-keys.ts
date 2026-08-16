@@ -18,11 +18,11 @@ import { LOCAL_AUTH_BYPASS } from "@/lib/auth/local";
  * Every run this app performs is paid for by the person who scheduled it, so
  * the key is theirs and lives here encrypted. Three rules hold this together:
  *
- *  1. Plaintext is produced in exactly one function (`loadProviderKey`), and
- *     only server-side callers that need to sign a request use it.
+ *  1. Plaintext is produced in exactly one function (`loadProviderKey`), used
+ *     only by server-side callers that need to sign a request.
  *  2. Nothing else ever leaves this module — `listKeyMeta` is deliberately
  *     the only shape a component can render.
- *  3. A key is verified against the provider before it is stored, so "saved"
+ *  3. A key is verified against the provider before it's stored, so "saved"
  *     never means "saved and broken".
  */
 
@@ -40,11 +40,11 @@ function aadFor(userId: string, provider: ProviderId): string {
 }
 
 /**
- * The Docker stack resets its database on `docker compose down -v`, so there
- * is nowhere durable to paste a key. Falling back to the environment keeps
- * local development working — behind the same two locks that gate the auth
- * bypass, so a production build can never reach this. One place, so every
- * caller that needs "is there a key" agrees with the one that decrypts it.
+ * The Docker stack resets its database on `docker compose down -v`, so
+ * there's nowhere durable to paste a key. Falling back to the environment
+ * keeps local development working — behind the same two locks that gate the
+ * auth bypass, so a production build can never reach this. One place, so
+ * every "is there a key" caller agrees with the one that decrypts it.
  */
 function bypassKey(provider: ProviderId): string | null {
   if (!LOCAL_AUTH_BYPASS) return null;
@@ -52,9 +52,9 @@ function bypassKey(provider: ProviderId): string | null {
 }
 
 /**
- * What the settings UI renders. Note the explicit column list: a
- * `select().from(userProviderKeys)` here would put ciphertext, IV and auth tag
- * into the RSC flight payload, which is fully readable in the browser.
+ * What the settings UI renders. Note the explicit column list: a bare
+ * `select().from(userProviderKeys)` would put ciphertext, IV and auth tag
+ * into the RSC flight payload, fully readable in the browser.
  */
 export async function listKeyMeta(userId: string): Promise<StoredKeyMeta[]> {
   const rows = await db
@@ -87,13 +87,9 @@ export async function hasProviderKey(
     .limit(1);
   if (row) return true;
 
-  /*
-   * Same environment fallback `loadProviderKey` applies, and for the same
-   * reason — but it has to be here too, or it is unreachable from the path
-   * that matters. The dispatcher asks this question before enqueuing, so
-   * without it every cron tick on the Docker stack answers `no_provider_key`
-   * and no local workflow ever runs, however the environment is configured.
-   */
+  // Same environment fallback `loadProviderKey` applies, and for the same
+  // reason — needed here too, or the dispatcher's pre-enqueue check answers
+  // `no_provider_key` on every cron tick, and no local workflow ever runs.
   return bypassKey(provider) !== null;
 }
 
@@ -101,9 +97,9 @@ export async function hasProviderKey(
  * True if the user can run anything at all. Drives the onboarding checklist.
  *
  * Checks the bypass fallback too — otherwise a local Docker setup running
- * entirely on an env-var key (no row ever saved) would fail this while every
- * per-provider `hasProviderKey` check above it passes, and the checklist
- * would tell a working setup it still needs a key.
+ * entirely on an env-var key (no row ever saved) would fail this even though
+ * `hasProviderKey` passes, and the checklist would call a working setup
+ * unfinished.
  */
 export async function hasAnyProviderKey(userId: string): Promise<boolean> {
   const [row] = await db
@@ -121,8 +117,9 @@ export async function hasAnyProviderKey(userId: string): Promise<boolean> {
 /**
  * The plaintext key, or null.
  *
- * The single place a stored secret is decrypted. Not exported from any barrel
- * file, and every caller is server-side by construction (`server-only` above).
+ * The single place a stored secret is decrypted. Not exported from any
+ * barrel file, and every caller is server-side by construction
+ * (`server-only` above).
  */
 export async function loadProviderKey(
   userId: string,
@@ -153,8 +150,8 @@ export async function loadProviderKey(
     );
   } catch (err) {
     // A row that won't decrypt is unusable — most likely ENCRYPTION_KEY
-    // changed without the old version still being available. Say so loudly in
-    // the log; the caller sees it as "no key", which is the honest result.
+    // changed without the old version staying available. Log it loudly; the
+    // caller sees it as "no key", the honest result.
     console.error("[provider-keys] decrypt failed", { userId, provider, err });
     return null;
   }
@@ -183,9 +180,9 @@ export class InvalidProviderKeyError extends Error {
 /**
  * Verifies a key against the provider with one cheap call.
  *
- * Worth the round trip: a mistyped key otherwise saves fine and only surfaces
- * as a failed run hours later, on a schedule, with the failure recorded
- * against the workflow rather than the key.
+ * Worth the round trip: a mistyped key otherwise saves fine and only
+ * surfaces as a failed run hours later, recorded against the workflow
+ * rather than the key.
  */
 async function verifyKey(provider: ProviderId, apiKey: string): Promise<void> {
   const meta = providerMeta(provider);
@@ -209,8 +206,8 @@ async function verifyKey(provider: ProviderId, apiKey: string): Promise<void> {
           });
 
     if (!res.ok) {
-      // The status, never the body: provider error bodies echo the request,
-      // and this string is rendered back to the user.
+      // The status, never the body: provider error bodies echo the
+      // request, and this string is rendered back to the user.
       throw new InvalidProviderKeyError(
         `${meta.label} rejected that key (HTTP ${res.status}).`,
       );

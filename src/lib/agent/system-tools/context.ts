@@ -5,9 +5,8 @@ import type { Envelope } from "@/lib/outcome/envelope";
 /**
  * What every system tool needs from the run.
  *
- * `query` and `inspect` share one budget and one payload store — this is the
- * seam a future system tool plugs into instead of reaching into
- * `wrap-tools.ts` for them directly.
+ * `query` and `inspect` share one budget and one payload store — the seam a
+ * future system tool plugs into instead of reaching into `wrap-tools.ts`.
  */
 export type SystemToolContext = {
   store: ResultStore;
@@ -20,9 +19,8 @@ export type SystemToolContext = {
   /**
    * Where `report` deposits the run's outcome.
    *
-   * The executor owns the slot rather than reading a return value, because the
-   * agent loop swallows tool results — the value has to survive the loop for
-   * the run to have an outcome at all.
+   * The executor owns the slot rather than reading a return value: the agent
+   * loop swallows tool results, so the value must survive it another way.
    */
   setEnvelope: (envelope: Envelope) => void;
   /** Whose digests `history` may read. Never taken from a tool argument. */

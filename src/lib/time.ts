@@ -1,16 +1,15 @@
 /**
  * Server-side day arithmetic.
  *
- * Instants are *displayed* in the reader's own zone by `<LocalTime>`, but a few
- * things have to be decided on the server before any browser sees them — which
- * outputs count as "today", which day heading a run sits under. `new Date()`
- * there runs in the host's zone, which is UTC in production: for an IST reader
- * the overview stayed empty until 05:30 and every early-morning run was filed
- * under yesterday.
+ * Instants are *displayed* in the reader's own zone by `<LocalTime>`, but a
+ * few things must be decided on the server first — which outputs count as
+ * "today", which day heading a run sits under. `new Date()` there runs in
+ * the host's zone, UTC in production: for an IST reader the overview stayed
+ * empty until 05:30 and every early-morning run was filed under yesterday.
  *
- * So bucketing uses one declared zone rather than the host's. Set
+ * So bucketing uses one declared zone instead of the host's. Set
  * `APP_TIMEZONE` to the zone the app's day should follow; it defaults to the
- * same Asia/Kolkata the workflow form defaults to. Readers elsewhere still see
+ * same Asia/Kolkata the workflow form uses. Readers elsewhere still see
  * their own local clock on every timestamp — only the day boundary is fixed.
  */
 export const APP_TIMEZONE = process.env.APP_TIMEZONE || "Asia/Kolkata";
@@ -42,10 +41,10 @@ export function dayKey(date: Date): string {
  */
 export function startOfDay(date: Date = new Date()): Date {
   const { y, m, d } = partsInZone(date);
-  // Guess midnight UTC for that calendar day, then correct by however far the
-  // zone was offset at that moment. One correction is enough: a DST shift can
-  // move the boundary by an hour, never by a day. (Asia/Kolkata has no DST at
-  // all; this keeps the helper honest for zones that do.)
+  // Guess midnight UTC for that calendar day, then correct by how far the
+  // zone was offset at that moment. One correction suffices: a DST shift
+  // moves the boundary by an hour, never a day. (Asia/Kolkata has no DST;
+  // this keeps the helper honest for zones that do.)
   const guess = Date.UTC(y, m - 1, d);
   return new Date(guess - zoneOffsetMs(new Date(guess)));
 }

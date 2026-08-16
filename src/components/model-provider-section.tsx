@@ -26,21 +26,20 @@ function ago(date: Date | null): string | null {
 }
 
 /**
- * Which provider serves this account's model calls, and the key that pays for
- * them.
+ * Which provider serves this account's model calls, and the key paying for it.
  *
  * Clockwork is bring-your-own-key: the operator's credentials never serve
- * anyone's runs. That makes this page load-bearing rather than a preference —
- * an account with no key here cannot run anything, which is why the copy
- * explains the bargain instead of just labelling the field.
+ * anyone's runs. That makes this page load-bearing, not a preference — an
+ * account with no key here can't run anything, so the copy explains the
+ * bargain instead of just labelling the field.
  */
 export async function ModelProviderSection({ user }: { user: AppUser }) {
   const [active, catalog, keys, rows] = await Promise.all([
     getProviderForUser(user.id),
     getModelCatalogForUser(user.id),
-    // Metadata only — never a `select()` over the whole table. The ciphertext
-    // columns would otherwise ride into the RSC payload, which is readable in
-    // the browser.
+    // Metadata only, never a `select()` over the whole table — the
+    // ciphertext columns would otherwise ride into the RSC payload, readable
+    // in the browser.
     listKeyMeta(user.id),
     db
       .select({
@@ -55,9 +54,9 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
 
   const keyByProvider = new Map(keys.map((k) => [k.provider, k]));
 
-  // Switching providers doesn't rewrite stored model ids, so a workflow can be
-  // left pinned to a model the active provider can't route. Those runs fail
-  // loudly at execution time — say so here instead, while it's still fixable.
+  // Switching providers doesn't rewrite stored model ids, so a workflow can
+  // stay pinned to a model the active provider can't route. Those fail loudly
+  // at execution time — say so here while it's still fixable.
   const stranded = rows.filter((w) => !providerRoutes(active, w.model));
 
   return (
@@ -77,10 +76,10 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
             const verified = ago(key?.verifiedAt ?? null);
 
             /*
-             * The paste field is the whole row for a provider with no key, and
-             * a closed disclosure for one that has a key. Rendering it open in
-             * both states put three identical password fields on the page and
-             * made "already set up" look the same as "not set up yet".
+             * The paste field is the whole row for a provider with no key,
+             * and a closed disclosure for one that has one. Open in both
+             * states, it put identical password fields on the page and made
+             * "already set up" look like "not set up yet".
              */
             const keyForm = (
               <form action={addProviderKey} className="flex gap-2">
@@ -93,8 +92,7 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
                   placeholder={`Paste your ${p.label} key`}
                   className="input min-w-0 flex-1"
                 />
-                {/* Verified against the provider before it's stored, so a
-                    saved key is never a broken one. */}
+                {/* Verified before storage, so a saved key is never broken. */}
                 <SubmitButton pendingLabel="Checking…">
                   {key ? "Replace" : "Add key"}
                 </SubmitButton>
