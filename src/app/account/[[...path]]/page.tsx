@@ -1,14 +1,18 @@
 import { redirect } from "next/navigation";
-import { AccountView } from "@neondatabase/auth-ui";
+import {
+  AccountSettingsCards,
+  SecuritySettingsCards,
+} from "@neondatabase/auth-ui";
 import { requireUser } from "@/lib/auth/user";
 import { AccountNav } from "@/components/account-nav";
 import { ModelProviderSection } from "@/components/model-provider-section";
-import { PageHeader, PageShell } from "@/components/ui";
+import { WorkflowDefaultsSection } from "@/components/workflow-defaults-section";
+import { PageHeader, PageShell, SectionIntro } from "@/components/ui";
 import { DismissibleAlert } from "@/components/dismissible-alert";
 
 export const dynamic = "force-dynamic";
 
-const TABS = ["settings", "security", "model-provider"] as const;
+const TABS = ["settings", "model-provider", "workflow-defaults"] as const;
 type Tab = (typeof TABS)[number];
 
 function isTab(value: string | undefined): value is Tab {
@@ -16,10 +20,11 @@ function isTab(value: string | undefined): value is Tab {
 }
 
 // Neon Auth's UserButton links to `${account.basePath}/${SETTINGS}` (i.e.
-// /account/settings) and /account/security via AccountView's own nav.
-// `model-provider` is our own tab, unknown to Auth-UI — see AccountNav.
-// Without this catch-all those links 404; bare /account or any unrecognised
-// path redirects to settings.
+// /account/settings) and /account/security. Profile and security now render
+// together under /account/settings (see below), so /account/security simply
+// falls through `isTab` and redirects there like any unrecognised path.
+// `model-provider` and `workflow-defaults` are our own tabs, unknown to
+// Auth-UI — see AccountNav.
 export default async function AccountPage({
   params,
   searchParams,
@@ -61,16 +66,23 @@ export default async function AccountPage({
         <div className="min-w-0 flex-1">
           {tab === "model-provider" ? (
             <ModelProviderTab />
+          ) : tab === "workflow-defaults" ? (
+            <WorkflowDefaultsTab />
           ) : (
             // `auth-surface` remaps two shadcn token names that mean something
             // else in our scale — see the Neon Auth bridge in globals.css.
-            // `hideNav`: AccountNav is this section's only nav now, so
-            // Auth-UI's own (which can't include our extra tab) stays off.
-            <div className="auth-surface rise">
-              <AccountView
-                hideNav
-                view={tab === "security" ? "SECURITY" : "SETTINGS"}
+            // Profile and security used to be separate Auth-UI views/tabs;
+            // now both card groups render together on this one tab, under the
+            // section intro every tab opens with.
+            <div className="grid gap-4 md:gap-6">
+              <SectionIntro
+                title="Profile & security"
+                description="Your name, email, and how you sign in."
               />
+              <div className="auth-surface rise grid gap-4 md:gap-6">
+                <AccountSettingsCards />
+                <SecuritySettingsCards />
+              </div>
             </div>
           )}
         </div>
@@ -82,4 +94,9 @@ export default async function AccountPage({
 async function ModelProviderTab() {
   const user = await requireUser();
   return <ModelProviderSection user={user} />;
+}
+
+async function WorkflowDefaultsTab() {
+  const user = await requireUser();
+  return <WorkflowDefaultsSection user={user} />;
 }

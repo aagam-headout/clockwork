@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, workflows, outputs } from "@/db/schema";
 import { requireUser } from "@/lib/auth/user";
@@ -115,39 +115,61 @@ export default async function RunsPage({
       ? Math.min(Math.floor(parsedLimit), MAX_LIMIT)
       : DEFAULT_LIMIT;
 
-  const rows = await db
-    .select({
-      id: runs.id,
-      trigger: runs.trigger,
-      status: runs.status,
-      startedAt: runs.startedAt,
-      createdAt: runs.createdAt,
-      durationMs: runs.durationMs,
-      inputTokens: runs.inputTokens,
-      outputTokens: runs.outputTokens,
-      costUsd: runs.costUsd,
-      workflowName: workflows.name,
-      deliveryStatus: outputs.deliveryStatus,
-    })
-    .from(runs)
-    // innerJoin, not leftJoin: a run's owner is its workflow's owner, so this
-    // join expresses the scope. (A leftJoin with a WHERE on the joined table
-    // degenerates to inner anyway — better to say so.)
-    .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+  // Shared by the page query and the totals below, so a filter can't apply
+  // to the list and not to the counts describing it.
+  const scope = active
+    ? and(eq(workflows.userId, user.id), eq(runs.status, active))
+    : eq(workflows.userId, user.id);
+
+  const [rows, [totals]] = await Promise.all([
+    db
+      .select({
+        id: runs.id,
+        trigger: runs.trigger,
+        status: runs.status,
+        startedAt: runs.startedAt,
+        createdAt: runs.createdAt,
+        durationMs: runs.durationMs,
+        inputTokens: runs.inputTokens,
+        outputTokens: runs.outputTokens,
+        costUsd: runs.costUsd,
+        workflowName: workflows.name,
+        deliveryStatus: outputs.deliveryStatus,
+      })
+      .from(runs)
+      // innerJoin, not leftJoin: a run's owner is its workflow's owner, so this
+      // join expresses the scope. (A leftJoin with a WHERE on the joined table
+      // degenerates to inner anyway — better to say so.)
+      .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+      /*
+       * leftJoin: a run that failed before producing output has no output row
+       * — an innerJoin would drop exactly the runs most worth seeing.
+       */
+      .leftJoin(outputs, eq(outputs.runId, runs.id))
+      .where(scope)
+      .orderBy(desc(runs.createdAt))
+      // "Load more" re-requests with a bigger limit rather than an offset —
+      // simplest thing that works while the list is a single ordered page.
+      .limit(limit),
+
     /*
-     * leftJoin: a run that failed before producing output has no output row
-     * — an innerJoin would drop exactly the runs most worth seeing.
+     * Header counts come from the whole history, not the loaded page.
+     * Summing the page instead would make "12 runs · $0.40" mean "of the 20
+     * we happened to fetch" — and would hide a run still in flight further
+     * down. No `outputs` join here: a run with two output rows would count
+     * twice.
      */
-    .leftJoin(outputs, eq(outputs.runId, runs.id))
-    .where(
-      active
-        ? and(eq(workflows.userId, user.id), eq(runs.status, active))
-        : eq(workflows.userId, user.id),
-    )
-    .orderBy(desc(runs.createdAt))
-    // "Load more" re-requests with a bigger limit rather than an offset —
-    // simplest thing that works while the list is a single ordered page.
-    .limit(limit);
+    db
+      .select({
+        total: sql<number>`count(*)::int`,
+        failed: sql<number>`(count(*) filter (where ${runs.status} = 'error'))::int`,
+        running: sql<number>`(count(*) filter (where ${runs.status} in ('running', 'queued')))::int`,
+        spend: sql<string>`coalesce(sum(${runs.costUsd}), 0)::text`,
+      })
+      .from(runs)
+      .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+      .where(scope),
+  ]);
 
   /*
    * A query searches digests, not run rows — different answer shape, so
@@ -166,11 +188,10 @@ export default async function RunsPage({
     else groups.push({ label, items: [run] });
   }
 
-  const failed = rows.filter((r) => r.status === "error").length;
-  const inFlight = rows.some(
-    (r) => r.status === "running" || r.status === "queued",
-  );
-  const spend = rows.reduce((sum, r) => sum + Number(r.costUsd ?? 0), 0);
+  const total = totals?.total ?? 0;
+  const failed = totals?.failed ?? 0;
+  const inFlight = (totals?.running ?? 0) > 0;
+  const spend = Number(totals?.spend ?? 0);
   // Chip's own wording, so a filtered count reads "3 failed" rather than
   // the awkward "3 error runs".
   const activeLabel = FILTERS.find((f) => f.value === active)?.label ?? "All";
@@ -187,7 +208,7 @@ export default async function RunsPage({
               {/* Names the filter when one is active — otherwise "12 runs"
                   reads as the total. */}
               <Badge tone={"neutral"} dot>
-                {rows.length} {active ? activeLabel.toLowerCase() : "runs"}
+                {total} {active ? activeLabel.toLowerCase() : "runs"}
                 {!active && failed > 0 ? ` · ${failed} failed` : ""}
               </Badge>
               {spend > 0 && (
@@ -330,19 +351,28 @@ export default async function RunsPage({
             </section>
           ))}
 
-          {rows.length === limit && (
-            <div className="flex justify-center">
-              <Link
-                href={`/runs?${new URLSearchParams({
-                  ...(active ? { status: active } : {}),
-                  limit: String(limit + LOAD_MORE_STEP),
-                }).toString()}`}
-                className="rounded-control border-border text-muted hover:border-border-strong hover:text-foreground flex h-8 items-center border px-3 text-[13px] font-medium transition-colors"
-              >
-                Load more
-              </Link>
-            </div>
-          )}
+          {/* Against the real total, not a full page — a history of exactly
+              20 shouldn't offer a button that loads nothing. At the ceiling
+              the link would clamp back to this page, so it says so instead. */}
+          {rows.length < total &&
+            (limit < MAX_LIMIT ? (
+              <div className="flex justify-center">
+                <Link
+                  href={`/runs?${new URLSearchParams({
+                    ...(active ? { status: active } : {}),
+                    limit: String(Math.min(limit + LOAD_MORE_STEP, MAX_LIMIT)),
+                  }).toString()}`}
+                  className="rounded-control border-border text-muted hover:border-border-strong hover:text-foreground flex h-8 items-center border px-3 text-[13px] font-medium transition-colors"
+                >
+                  Load more
+                </Link>
+              </div>
+            ) : (
+              <p className="text-subtle text-center text-xs">
+                Showing the {MAX_LIMIT} most recent runs. Narrow it with the
+                filter above.
+              </p>
+            ))}
         </div>
       )}
     </PageShell>

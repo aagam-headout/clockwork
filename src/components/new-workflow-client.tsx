@@ -23,6 +23,7 @@ export function NewWorkflowClient({
   availableToolkits,
   models,
   parentOptions,
+  accountDefaults,
 }: {
   action: (
     state: WorkflowFormState,
@@ -31,6 +32,9 @@ export function NewWorkflowClient({
   availableToolkits: ToolkitOption[];
   models: ModelInfo[];
   parentOptions: ParentOption[];
+  /** Account-level defaults (Settings → Workflow defaults). A proposal
+   *  overrides these field by field, not wholesale. */
+  accountDefaults?: Partial<WorkflowFormValues>;
 }) {
   const [proposal, setProposal] = useState<Partial<WorkflowFormValues> | null>(
     null,
@@ -57,7 +61,11 @@ export function NewWorkflowClient({
           key={proposal ? JSON.stringify(proposal) : "blank"}
           action={action}
           submitLabel="Create workflow"
-          defaultValues={proposal ?? undefined}
+          // Merged, not replaced: a proposal never names a budget, so the
+          // account's default has to survive one. Where it does name a field
+          // — timezone included, which its schema makes required — the
+          // proposal wins: it was written against the goal just described.
+          defaultValues={{ ...accountDefaults, ...proposal }}
           availableToolkits={availableToolkits}
           models={models}
           parentOptions={parentOptions}

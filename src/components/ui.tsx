@@ -356,6 +356,55 @@ export function SectionLabel({
   );
 }
 
+/**
+ * Title and one line of context above a tab's cards. Every account tab opens
+ * with one so the section is named once, on the page — not repeated inside
+ * each card.
+ */
+export function SectionIntro({
+  title,
+  description,
+}: {
+  title: string;
+  description: React.ReactNode;
+}) {
+  return (
+    <div>
+      <h2 className="heading-16 text-foreground">{title}</h2>
+      <p className="text-muted mt-1.5 max-w-prose text-sm leading-relaxed">
+        {description}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The card the account tabs put their controls in: padded body, optional
+ * tinted footer holding a single right-aligned action. Geometry matches the
+ * shadcn card Auth-UI renders on the profile/security tab, so the three tabs
+ * read as one surface.
+ */
+export function SettingsCard({
+  children,
+  footer,
+}: {
+  children: React.ReactNode;
+  /** Submit button or similar; omit for a card that's read-only. */
+  footer?: React.ReactNode;
+}) {
+  return (
+    <Card as="section">
+      <div className="p-6">{children}</div>
+
+      {footer && (
+        <div className="border-border bg-bg-subtle rounded-b-container flex items-center justify-end gap-3 border-t px-6 py-4">
+          {footer}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function Mono({
   children,
   className = "",

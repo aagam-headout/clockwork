@@ -4,9 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const TABS = [
-  { href: "/account/settings", label: "Profile" },
-  { href: "/account/security", label: "Security" },
+  { href: "/account/settings", label: "Profile & security" },
   { href: "/account/model-provider", label: "Model provider" },
+  { href: "/account/workflow-defaults", label: "Workflow defaults" },
 ];
 
 /**

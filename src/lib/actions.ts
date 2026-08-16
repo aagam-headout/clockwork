@@ -26,7 +26,7 @@ import { assertSafeWebhookUrl } from "@/lib/net/safe-url";
 import { validateChain } from "@/lib/chain";
 import { parseCondition, type SignalDecl } from "@/lib/outcome/condition";
 import { parseSignalSchema } from "@/lib/outcome/envelope";
-import { checkCostCap } from "@/lib/cost-cap";
+import { checkCostCap, MAX_COST_CAP_USD } from "@/lib/cost-cap";
 
 function slugify(name: string) {
   return (
@@ -365,12 +365,22 @@ function parseCostCap(raw: string): string | null {
   if (!raw) return null;
 
   const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) {
+  // Rounded first: the column keeps two decimals, so 0.004 would land as
+  // "0.00" — which `judgeCap` treats as uncapped, the opposite of the ask.
+  const stored = Number(value.toFixed(2));
+  if (!Number.isFinite(value) || stored <= 0) {
     throw new Error(
-      "Use a positive monthly budget, or leave it blank for no limit.",
+      "Use a monthly budget of at least $0.01, or leave it blank for no limit.",
     );
   }
-  return value.toFixed(2);
+  // Caught here so an over-wide number is a red field rather than the
+  // error boundary the column's own overflow would raise.
+  if (value > MAX_COST_CAP_USD) {
+    throw new Error(
+      `Keep the monthly budget under $${MAX_COST_CAP_USD.toLocaleString()}.`,
+    );
+  }
+  return stored.toFixed(2);
 }
 
 /** A JSON-encoded hidden field, as the multi-value parts of the form post. */

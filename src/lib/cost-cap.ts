@@ -23,6 +23,15 @@ export type CapVerdict = {
   cap: number | null;
 };
 
+/*
+ * The largest cap the column can hold — `numeric(10, 2)`, so eight digits
+ * before the point. Worth checking in the parser rather than letting
+ * Postgres raise `numeric field overflow`: that arrives as an unhandled
+ * throw and shows the error boundary, replacing a form the user could have
+ * corrected.
+ */
+export const MAX_COST_CAP_USD = 99_999_999.99;
+
 /** How far a zone is ahead of UTC at a given instant, in milliseconds. */
 function zoneOffsetMs(timezone: string, at: Date): number {
   const wall = new Date(

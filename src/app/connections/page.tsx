@@ -1,9 +1,5 @@
 import { after } from "next/server";
-import {
-  getToolkitCatalog,
-  searchToolkits,
-  type ToolkitSummary,
-} from "@/lib/composio";
+import { getToolkitCatalog, type ToolkitSummary } from "@/lib/composio";
 import { requireUser } from "@/lib/auth/user";
 import {
   CONNECTION_STATUS_LABEL,
@@ -35,6 +31,13 @@ import { Plug, Trash2, RefreshCw, ArrowDown } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Connections" };
+
+/**
+ * How much of the catalog the "Add a connector" grid starts with. Matches
+ * `/api/toolkits`' page size: the browser refetches page one on mount, so a
+ * smaller seed only buys a visible reflow.
+ */
+const BROWSER_SEED_COUNT = 24;
 
 type ConnectedRow = {
   slug: string;
@@ -83,26 +86,30 @@ export default async function ConnectionsPage({
    * Composio is unreachable — only the catalog (names, logos, browse grid)
    * needs the API, and a failure there is cosmetic.
    */
-  const [rows, dependents, catalogResult, fullCatalog] = await Promise.all([
+  const [rows, dependents, catalogResult] = await Promise.all([
     getUserConnections(user.id),
     dependentCountsByToolkit(user.id),
     // Only this one can fail in a way worth reporting; the other two are
     // local reads — a real database failure belongs on the error boundary.
-    searchToolkits("", 12).then(
+    getToolkitCatalog().then(
       (items) => ({ items, error: null as string | null }),
       (err: unknown) => ({
         items: [] as ToolkitSummary[],
         error: err instanceof Error ? err.message : String(err),
       }),
     ),
-    // Full catalog, not the top-12 slice above — a connected app ranked
-    // past #12 by usage still needs its real name/logo below, not a
-    // fallback to the raw slug and a generic icon.
-    getToolkitCatalog().catch(() => [] as ToolkitSummary[]),
   ]);
 
-  const catalog = catalogResult.items;
+  /*
+   * The whole catalog, not a page of it: a connected app ranked past the
+   * browser's first page by usage still needs its real name and logo on its
+   * card below. It's one memoized fetch either way — asking for a slice as
+   * well would just double the round trip on a cold cache.
+   */
+  const fullCatalog = catalogResult.items;
   const loadError = catalogResult.error;
+  // The browser seeds from the most-used handful and pages in the rest itself.
+  const catalog = fullCatalog.slice(0, BROWSER_SEED_COUNT);
 
   /*
    * Self-healing, after the response goes out: anything not checked against

@@ -7,6 +7,7 @@ import { PageShell } from "@/components/ui";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
 import { getModelCatalogForUser } from "@/lib/models";
 import { chainParentOptions } from "@/lib/data/scope";
+import { getWorkflowDefaultsForUser } from "@/lib/workflow-defaults";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "New workflow" };
@@ -14,11 +15,13 @@ export const metadata = { title: "New workflow" };
 export default async function NewWorkflowPage() {
   const user = await requireUser();
 
-  const [availableToolkits, models, parentOptions] = await Promise.all([
-    getConnectedToolkitOptions(user.id),
-    getModelCatalogForUser(user.id),
-    chainParentOptions(user.id),
-  ]);
+  const [availableToolkits, models, parentOptions, accountDefaults] =
+    await Promise.all([
+      getConnectedToolkitOptions(user.id),
+      getModelCatalogForUser(user.id),
+      chainParentOptions(user.id),
+      getWorkflowDefaultsForUser(user.id),
+    ]);
 
   return (
     // An app screen, not a document: on large viewports the page itself
@@ -41,6 +44,7 @@ export default async function NewWorkflowPage() {
           availableToolkits={availableToolkits}
           models={models}
           parentOptions={parentOptions}
+          accountDefaults={accountDefaults}
         />
       </div>
     </PageShell>

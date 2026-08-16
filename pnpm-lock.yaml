@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@neondatabase/auth-ui@0.2.1-beta':
-    hash: c9cc9d64eb38aa754158475ffdfddbc3112a1d63e913c966e9614f9bfab3ca57
+    hash: 13d39291c442112c97ffc9803169807aa1b5ff14a35265b2279d2272d245e852
     path: patches/@neondatabase__auth-ui@0.2.1-beta.patch
 
 importers:
@@ -33,7 +33,7 @@ importers:
         version: 0.4.2-beta(96f3a4919f1516e051d3b8a70137de51)
       '@neondatabase/auth-ui':
         specifier: 0.2.1-beta
-        version: 0.2.1-beta(patch_hash=c9cc9d64eb38aa754158475ffdfddbc3112a1d63e913c966e9614f9bfab3ca57)(2887e9013f339ef9f54bbc856732a011)
+        version: 0.2.1-beta(patch_hash=13d39291c442112c97ffc9803169807aa1b5ff14a35265b2279d2272d245e852)(2887e9013f339ef9f54bbc856732a011)
       '@neondatabase/serverless':
         specifier: ^1.1.0
         version: 1.1.0
@@ -5625,7 +5625,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.3
     optional: true
 
-  '@neondatabase/auth-ui@0.2.1-beta(patch_hash=c9cc9d64eb38aa754158475ffdfddbc3112a1d63e913c966e9614f9bfab3ca57)(2887e9013f339ef9f54bbc856732a011)':
+  '@neondatabase/auth-ui@0.2.1-beta(patch_hash=13d39291c442112c97ffc9803169807aa1b5ff14a35265b2279d2272d245e852)(2887e9013f339ef9f54bbc856732a011)':
     dependencies:
       '@better-auth/passkey': 1.4.18(@better-auth/core@1.4.18(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.4.3))(jose@6.1.2)(kysely@0.28.17)(nanostores@1.4.2))(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-auth@1.4.18(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@neondatabase/serverless@1.1.0)(@types/pg@8.21.0)(kysely@0.28.17)(pg@8.23.0))(next@16.3.0(@babel/core@7.29.7)(@types/node@20.19.43)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.10(@types/node@20.19.43)(vite@8.2.1(@types/node@20.19.43)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))))(better-call@1.1.8(zod@4.4.3))(nanostores@1.4.2)
       '@captchafox/react': 1.13.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -5723,7 +5723,7 @@ snapshots:
   '@neondatabase/auth@0.4.2-beta(96f3a4919f1516e051d3b8a70137de51)':
     dependencies:
       '@better-fetch/fetch': 1.1.21
-      '@neondatabase/auth-ui': 0.2.1-beta(patch_hash=c9cc9d64eb38aa754158475ffdfddbc3112a1d63e913c966e9614f9bfab3ca57)(2887e9013f339ef9f54bbc856732a011)
+      '@neondatabase/auth-ui': 0.2.1-beta(patch_hash=13d39291c442112c97ffc9803169807aa1b5ff14a35265b2279d2272d245e852)(2887e9013f339ef9f54bbc856732a011)
       '@supabase/auth-js': 2.79.0
       better-auth: 1.4.18(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@neondatabase/serverless@1.1.0)(@types/pg@8.21.0)(kysely@0.28.17)(pg@8.23.0))(next@16.3.0(@babel/core@7.29.7)(@types/node@20.19.43)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.10(@types/node@20.19.43)(vite@8.2.1(@types/node@20.19.43)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)))
       jose: 6.1.2

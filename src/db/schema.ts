@@ -594,6 +594,13 @@ export const userSettings = pgTable("user_settings", {
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
   /** Which SDK provider serves models: "gateway" | "anthropic" | "openai". */
   modelProvider: text("model_provider").notNull().default("gateway"),
+  /** Prefilled on a new workflow's form; null means "use the form's own
+   *  built-in default" (Asia/Kolkata / uncapped) rather than a stored one. */
+  defaultTimezone: text("default_timezone"),
+  defaultMonthlyCostCapUsd: numeric("default_monthly_cost_cap_usd", {
+    precision: 10,
+    scale: 2,
+  }),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

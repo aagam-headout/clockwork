@@ -1,8 +1,199 @@
 diff --git a/dist/index.mjs b/dist/index.mjs
-index ef6aacd9dc6950eb4230ee72ee4e8f4768cd6075..00f8665f0b1c9ee491cf21fdeef054bf7d42d0ed 100644
+index ef6aacd9dc6950eb4230ee72ee4e8f4768cd6075..7c054026002829d62038875333a03f4dd98dc13c 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
-@@ -9512,6 +9512,7 @@ function SignInForm({ className, classNames, isSubmitting, localization, redirec
+@@ -6200,6 +6200,159 @@ function ChangeEmailCard({ className, classNames, localization, ...props }) {
+ 		})
+ 	})] });
+ }
++function ProfileCard({ className, classNames, localization: localizationProp, ...props }) {
++	const { authClient: authClient2, emailVerification, hooks: { useSession }, mutators: { updateUser }, localization: contextLocalization, nameRequired, optimistic, toast: toast$1, localizeErrors } = useContext(AuthUIContext);
++	const localization = {
++		...contextLocalization,
++		...localizationProp
++	};
++	const { data: sessionData, isPending, refetch } = useSession();
++	const form = useForm({
++		resolver: zodResolver(z.object({
++			name: nameRequired ? z.string().min(1, `${localization.NAME} ${localization.IS_REQUIRED}`) : z.string().optional(),
++			email: z.string().email({ message: localization.INVALID_EMAIL })
++		})),
++		values: {
++			name: (sessionData == null ? void 0 : sessionData.user.name) || "",
++			email: (sessionData == null ? void 0 : sessionData.user.email) || ""
++		}
++	});
++	const resendForm = useForm();
++	const [resendDisabled, setResendDisabled] = useState(false);
++	const { isSubmitting } = form.formState;
++	const updateProfile = async ({ name, email }) => {
++		const nameChanged = name !== (sessionData == null ? void 0 : sessionData.user.name);
++		const emailChanged = email !== (sessionData == null ? void 0 : sessionData.user.email);
++		if (!nameChanged && !emailChanged) {
++			await new Promise((resolve) => setTimeout(resolve));
++			toast$1({
++				variant: "error",
++				message: `${localization.NAME}/${localization.EMAIL} ${localization.IS_THE_SAME}`
++			});
++			return;
++		}
++		try {
++			if (nameChanged) await updateUser({ name });
++			if (emailChanged) await authClient2.changeEmail({
++				newEmail: email,
++				callbackURL: window.location.pathname,
++				fetchOptions: { throw: true }
++			});
++			if (emailChanged && !(sessionData == null ? void 0 : sessionData.user.emailVerified)) {
++				await (refetch == null ? void 0 : refetch());
++				toast$1({
++					variant: "success",
++					message: `${localization.EMAIL} ${localization.UPDATED_SUCCESSFULLY}`
++				});
++			} else if (emailChanged) toast$1({
++				variant: "success",
++				message: localization.EMAIL_VERIFY_CHANGE
++			});
++			else {
++				await (refetch == null ? void 0 : refetch());
++				toast$1({
++					variant: "success",
++					message: `${localization.NAME} ${localization.UPDATED_SUCCESSFULLY}`
++				});
++			}
++		} catch (error) {
++			toast$1({
++				variant: "error",
++				message: getLocalizedError({
++					error,
++					localization,
++					localizeErrors
++				})
++			});
++		}
++	};
++	const resendVerification = async () => {
++		if (!sessionData) return;
++		const email = sessionData.user.email;
++		setResendDisabled(true);
++		try {
++			await authClient2.sendVerificationEmail({
++				email,
++				fetchOptions: { throw: true }
++			});
++			toast$1({
++				variant: "success",
++				message: localization.EMAIL_VERIFICATION
++			});
++		} catch (error) {
++			toast$1({
++				variant: "error",
++				message: getLocalizedError({
++					error,
++					localization,
++					localizeErrors
++				})
++			});
++			setResendDisabled(false);
++			throw error;
++		}
++	};
++	return /* @__PURE__ */ jsxs(Fragment$1, { children: [/* @__PURE__ */ jsx(Form, {
++		...form,
++		children: /* @__PURE__ */ jsx("form", {
++			noValidate: true,
++			onSubmit: form.handleSubmit(updateProfile),
++			children: /* @__PURE__ */ jsxs(SettingsCard, {
++				className,
++				classNames,
++				title: localization.PROFILE ?? "Profile",
++				description: localization.PROFILE_DESCRIPTION ?? "Update your name and email address.",
++				isPending,
++				actionLabel: localization.SAVE,
++				isSubmitting,
++				...props,
++				children: /* @__PURE__ */ jsxs(CardContent, {
++					className: cn$1("flex flex-col gap-4", classNames == null ? void 0 : classNames.content),
++					children: [/* @__PURE__ */ jsx(FormField, {
++						control: form.control,
++						name: "name",
++						render: ({ field }) => /* @__PURE__ */ jsxs(FormItem, { children: [/* @__PURE__ */ jsx(FormLabel, {
++							className: classNames == null ? void 0 : classNames.label,
++							children: localization.NAME
++						}), /* @__PURE__ */ jsx(FormControl, { children: isPending ? /* @__PURE__ */ jsx(Skeleton, { className: cn$1("h-9 w-full", classNames == null ? void 0 : classNames.skeleton) }) : /* @__PURE__ */ jsx(Input, {
++							className: classNames == null ? void 0 : classNames.input,
++							placeholder: localization.NAME_PLACEHOLDER,
++							disabled: isSubmitting,
++							...field
++						}) }), /* @__PURE__ */ jsx(FormMessage, { className: classNames == null ? void 0 : classNames.error })] })
++					}), /* @__PURE__ */ jsx(FormField, {
++						control: form.control,
++						name: "email",
++						render: ({ field }) => /* @__PURE__ */ jsxs(FormItem, { children: [/* @__PURE__ */ jsx(FormLabel, {
++							className: classNames == null ? void 0 : classNames.label,
++							children: localization.EMAIL
++						}), /* @__PURE__ */ jsx(FormControl, { children: isPending ? /* @__PURE__ */ jsx(Skeleton, { className: cn$1("h-9 w-full", classNames == null ? void 0 : classNames.skeleton) }) : /* @__PURE__ */ jsx(Input, {
++							className: classNames == null ? void 0 : classNames.input,
++							placeholder: localization.EMAIL_PLACEHOLDER,
++							type: "email",
++							disabled: isSubmitting,
++							...field
++						}) }), /* @__PURE__ */ jsx(FormMessage, { className: classNames == null ? void 0 : classNames.error })] })
++					})]
++				})
++			})
++		})
++	}), emailVerification && (sessionData == null ? void 0 : sessionData.user) && !(sessionData == null ? void 0 : sessionData.user.emailVerified) && /* @__PURE__ */ jsx(Form, {
++		...resendForm,
++		children: /* @__PURE__ */ jsx("form", {
++			onSubmit: resendForm.handleSubmit(resendVerification),
++			children: /* @__PURE__ */ jsx(SettingsCard, {
++				className,
++				classNames,
++				title: localization.VERIFY_YOUR_EMAIL,
++				description: localization.VERIFY_YOUR_EMAIL_DESCRIPTION,
++				actionLabel: localization.RESEND_VERIFICATION_EMAIL,
++				disabled: resendDisabled,
++				...props
++			})
++		})
++	})] });
++}
+ function AccountSettingsCards({ className, classNames, localization }) {
+ 	var _a, _b, _c;
+ 	const { additionalFields, avatar, changeEmail, credentials, hooks: { useSession }, multiSession, account: accountOptions } = useContext(AuthUIContext);
+@@ -6215,14 +6368,22 @@ function AccountSettingsCards({ className, classNames, localization }) {
+ 				classNames: classNames == null ? void 0 : classNames.card,
+ 				localization
+ 			}),
+-			((_b = accountOptions == null ? void 0 : accountOptions.fields) == null ? void 0 : _b.includes("name")) && /* @__PURE__ */ jsx(UpdateNameCard, {
+-				classNames: classNames == null ? void 0 : classNames.card,
+-				localization
+-			}),
+-			changeEmail && /* @__PURE__ */ jsx(ChangeEmailCard, {
+-				classNames: classNames == null ? void 0 : classNames.card,
+-				localization
+-			}),
++			(() => {
++				const nameEnabled = (_b = accountOptions == null ? void 0 : accountOptions.fields) == null ? void 0 : _b.includes("name");
++				if (nameEnabled && changeEmail) return /* @__PURE__ */ jsx(ProfileCard, {
++					classNames: classNames == null ? void 0 : classNames.card,
++					localization
++				});
++				if (nameEnabled) return /* @__PURE__ */ jsx(UpdateNameCard, {
++					classNames: classNames == null ? void 0 : classNames.card,
++					localization
++				});
++				if (changeEmail) return /* @__PURE__ */ jsx(ChangeEmailCard, {
++					classNames: classNames == null ? void 0 : classNames.card,
++					localization
++				});
++				return null;
++			})(),
+ 			(_c = accountOptions == null ? void 0 : accountOptions.fields) == null ? void 0 : _c.map((field) => {
+ 				if (field === "image") return null;
+ 				if (field === "name") return null;
+@@ -9512,6 +9673,7 @@ function SignInForm({ className, classNames, isSubmitting, localization, redirec
  							className: classNames == null ? void 0 : classNames.input,
  							placeholder: localization.PASSWORD_PLACEHOLDER,
  							disabled: isSubmitting,

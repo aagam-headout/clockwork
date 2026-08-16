@@ -6,6 +6,7 @@ import { useFormStatus } from "react-dom";
 import type { WorkflowFormState } from "@/lib/actions";
 import Link from "next/link";
 import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
+import { DEFAULT_TIMEZONE, TIMEZONES } from "@/lib/timezones";
 import { buttonClass } from "@/components/ui";
 import { ToolkitLogo } from "@/components/toolkit-logo";
 import { ModelPicker } from "@/components/model-picker";
@@ -29,55 +30,6 @@ import { CronBuilder, describeCron } from "@/components/cron-builder";
 import { SignalsEditor } from "@/components/signals-editor";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import type { SignalDecl } from "@/lib/outcome/condition";
-
-/*
- * A fixed zone list rather than `Intl.supportedValuesOf("timeZone")`: that
- * returns whatever ICU the runtime shipped with, so Node and the browser can
- * disagree and cause hydration mismatches. These cover every common offset;
- * the saved value is spliced in below if missing.
- */
-const TIMEZONES = [
-  "UTC",
-  "Africa/Cairo",
-  "Africa/Johannesburg",
-  "Africa/Lagos",
-  "America/Anchorage",
-  "America/Bogota",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "America/Mexico_City",
-  "America/New_York",
-  "America/Sao_Paulo",
-  "America/Toronto",
-  "Asia/Bangkok",
-  "Asia/Dubai",
-  "Asia/Hong_Kong",
-  "Asia/Jakarta",
-  "Asia/Jerusalem",
-  "Asia/Kolkata",
-  "Asia/Manila",
-  "Asia/Seoul",
-  "Asia/Shanghai",
-  "Asia/Singapore",
-  "Asia/Tokyo",
-  "Australia/Melbourne",
-  "Australia/Perth",
-  "Australia/Sydney",
-  "Europe/Amsterdam",
-  "Europe/Berlin",
-  "Europe/Dublin",
-  "Europe/Istanbul",
-  "Europe/Lisbon",
-  "Europe/London",
-  "Europe/Madrid",
-  "Europe/Moscow",
-  "Europe/Paris",
-  "Europe/Warsaw",
-  "Europe/Zurich",
-  "Pacific/Auckland",
-  "Pacific/Honolulu",
-];
 
 /** Web search needs no auth, so it's always offered — and always usable. */
 const WEB_SEARCH: ToolkitOption = {
@@ -249,7 +201,7 @@ export function WorkflowForm({
   const [triggerError, setTriggerError] = useState<string | null>(null);
 
   const [timezone, setTimezone] = useState(
-    defaultValues?.timezone ?? "Asia/Kolkata",
+    defaultValues?.timezone ?? DEFAULT_TIMEZONE,
   );
   // Mirrored in state so the footer can say what the run is actually allowed
   // to do.
