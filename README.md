@@ -18,8 +18,9 @@ A **workflow** is a plain-English goal, a trigger, a set of Composio toolkits,
 and one or more delivery targets. When it fires, an agent runs the goal with
 read-only access to those toolkits and writes a short digest.
 
-- **Triggers** — a cron expression in your own timezone, or a Composio event
-  (new email, issue assigned, Slack mention) delivered by webhook.
+- **Triggers** — a cron expression in your own timezone, a Composio event
+  (new email, issue assigned, Slack mention) delivered by webhook, or another
+  workflow finishing (chaining, below).
 - **Read-only by construction** — write tools are filtered out server-side
   before the model ever sees a schema. The only exceptions are the specific
   tools a delivery target needs.
@@ -27,6 +28,22 @@ read-only access to those toolkits and writes a short digest.
   changed. A run with nothing new sends nothing; it just records that.
 - **One run at a time** — a partial unique index makes a concurrent cron tick
   and "Run now" impossible to double-execute.
+- **Signals and thresholds** — a workflow can declare a few named values
+  (numbers, strings, or booleans) it expects the agent to report each run,
+  and gate delivery on an alert condition over them (`open_incidents > 5`).
+  Below the threshold, the digest is recorded but not sent.
+- **Chaining** — a workflow can run as a step after another, optionally gated
+  on the parent's reported signals, so "check for incidents" can trigger
+  "page on-call" only when the count crosses zero. Depth and fan-out are
+  both bounded.
+- **History search** — every past digest is full-text searchable, from a
+  `/runs` search box and from the agent's own `history` tool, so a run can
+  tell a one-off from a trend without spending its step budget re-fetching.
+- **Cost caps** — an optional monthly USD ceiling per workflow. Once crossed,
+  the workflow pauses itself rather than keep spending.
+- **Delivery outcomes** — a digest that partly or fully failed to reach its
+  targets (an expired Slack token, a dead webhook) is flagged as such rather
+  than looking like a normal, quiet run.
 
 ## Running locally with Docker
 
@@ -72,7 +89,7 @@ database layer picks its driver from the URL — Neon's HTTP driver for
 ## Checks
 
 ```bash
-pnpm test        # unit tests (schedule, tool filter, cost)
+pnpm test        # unit tests (schedule, tool filter, cost, chaining, outcome routing)
 pnpm exec tsc --noEmit
 pnpm lint
 pnpm build
@@ -91,19 +108,22 @@ drizzle-kit issues.
 
 ## Environment
 
-| Variable                                         | Purpose                                         |
-| ------------------------------------------------ | ----------------------------------------------- |
-| `DATABASE_URL` / `DATABASE_URL_UNPOOLED`         | app traffic / migrations                        |
-| `COMPOSIO_API_KEY`                               | tool calls                                      |
-| `AI_GATEWAY_API_KEY`                             | model routing and live pricing                  |
-| `ANTHROPIC_API_KEY`                              | only if Settings → provider is set to Anthropic |
-| `OPENAI_API_KEY`                                 | only if Settings → provider is set to OpenAI    |
-| `CRON_SECRET`                                    | bearer token for `/api/cron/tick`               |
-| `OWNER_EMAIL`                                    | the single account allowed in                   |
-| `NEON_AUTH_BASE_URL` / `NEON_AUTH_COOKIE_SECRET` | hosted auth (not needed with the local bypass)  |
-| `APP_URL` / `COMPOSIO_WEBHOOK_SECRET`            | event triggers                                  |
-| `RUN_RETENTION_DAYS`                             | how long run history is kept (default 30)       |
-| `LOCAL_AUTH_BYPASS`                              | development only — see above                    |
+| Variable                                         | Purpose                                                     |
+| ------------------------------------------------ | ----------------------------------------------------------- |
+| `DATABASE_URL` / `DATABASE_URL_UNPOOLED`         | app traffic / migrations                                    |
+| `COMPOSIO_API_KEY`                               | tool calls                                                  |
+| `AI_GATEWAY_API_KEY`                             | model routing and live pricing                              |
+| `ANTHROPIC_API_KEY`                              | only if Settings → provider is set to Anthropic             |
+| `OPENAI_API_KEY`                                 | only if Settings → provider is set to OpenAI                |
+| `CRON_SECRET`                                    | bearer token for `/api/cron/tick`                           |
+| `OWNER_EMAIL`                                    | the single account allowed in                               |
+| `NEON_AUTH_BASE_URL` / `NEON_AUTH_COOKIE_SECRET` | hosted auth (not needed with the local bypass)              |
+| `APP_URL` / `COMPOSIO_WEBHOOK_SECRET`            | event triggers                                              |
+| `RUN_RETENTION_DAYS`                             | how long run history is kept (default 30)                   |
+| `MAX_CHAIN_DEPTH`                                | how many workflows deep a chain may run (default 3)         |
+| `MAX_CHILDREN_PER_WORKFLOW`                      | how many chained children one workflow may have (default 3) |
+| `MAX_SIGNALS_PER_WORKFLOW`                       | signals one workflow may declare (default 10)               |
+| `LOCAL_AUTH_BYPASS`                              | development only — see above                                |
 
 `APP_URL` and `NEON_AUTH_BASE_URL` fall back to the deployment's own domain via
 `VERCEL_PROJECT_PRODUCTION_URL`, so on Vercel they're only needed for a custom
