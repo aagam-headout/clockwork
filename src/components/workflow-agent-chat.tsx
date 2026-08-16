@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { buttonClass, iconButtonClass } from "@/components/ui";
 import { ModelPicker } from "@/components/model-picker";
+import { TOOLKIT_ICONS } from "@/lib/toolkit-labels";
 import type { ToolkitOption } from "@/components/workflow-form";
 import type { ModelInfo } from "@/lib/model-tiers";
 import { defaultBuilderModel, isBuilderModel } from "@/lib/builder-models";
@@ -641,6 +642,7 @@ function ConnectorPicker({
                 ) : (
                   visible.map((toolkit) => {
                     const on = selected.has(toolkit.slug);
+                    const Fallback = TOOLKIT_ICONS[toolkit.slug] ?? Puzzle;
                     return (
                       <button
                         key={toolkit.slug}
@@ -661,7 +663,7 @@ function ConnectorPicker({
                             className="h-4 w-4 shrink-0 rounded-[3px] object-contain"
                           />
                         ) : (
-                          <Puzzle className="text-subtle h-4 w-4 shrink-0" />
+                          <Fallback className="text-subtle h-4 w-4 shrink-0" />
                         )}
                         <span className="text-foreground min-w-0 flex-1 truncate text-[13px]">
                           {toolkit.name}

@@ -8,6 +8,8 @@ Built with [Next.js](https://nextjs.org), the AI SDK, Composio, and Neon.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Faagam-headout%2Fclockwork&project-name=clockwork&repository-name=clockwork&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22neon%22%2C%22productSlug%22%3A%22neon%22%2C%22protocol%22%3A%22storage%22%7D%5D&env=ENCRYPTION_KEY%2CNEON_AUTH_COOKIE_SECRET%2CCRON_SECRET%2CCOMPOSIO_API_KEY&envDescription=Two+random+secrets+you+generate%2C+a+cron+secret%2C+and+your+Composio+API+key.+Instructions+in+the+link.&envLink=https%3A%2F%2Fgithub.com%2Faagam-headout%2Fclockwork%2Fblob%2Fmain%2FSELF-HOSTING.md%23environment-variables)
 
+Badge image slow to load? [Deploy directly](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Faagam-headout%2Fclockwork&project-name=clockwork&repository-name=clockwork&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22neon%22%2C%22productSlug%22%3A%22neon%22%2C%22protocol%22%3A%22storage%22%7D%5D&env=ENCRYPTION_KEY%2CNEON_AUTH_COOKIE_SECRET%2CCRON_SECRET%2CCOMPOSIO_API_KEY&envDescription=Two+random+secrets+you+generate%2C+a+cron+secret%2C+and+your+Composio+API+key.+Instructions+in+the+link.&envLink=https%3A%2F%2Fgithub.com%2Faagam-headout%2Fclockwork%2Fblob%2Fmain%2FSELF-HOSTING.md%23environment-variables) — same link, no image wait.
+
 Runs entirely on your own Vercel, Neon, and Composio accounts. The button
 provisions the database and prompts for four secrets; two short manual steps
 follow. Full walkthrough in [SELF-HOSTING.md](./SELF-HOSTING.md).

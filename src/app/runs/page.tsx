@@ -79,22 +79,41 @@ const FILTERS = [
   { value: "truncated", label: "Truncated" },
 ] as const;
 
-const PAGE_SIZE = 100;
+const DEFAULT_LIMIT = 20;
+const LOAD_MORE_STEP = 20;
+const MAX_LIMIT = 500;
 
 export default async function RunsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ notice?: string; status?: string; q?: string }>;
+  searchParams: Promise<{
+    notice?: string;
+    status?: string;
+    q?: string;
+    limit?: string;
+  }>;
 }) {
   const user = await requireUser();
 
   // Set when "Run now" hit a workflow already running — surfaced here so
   // the redirect isn't unexplained.
-  const { notice, status: statusFilter, q } = await searchParams;
+  const {
+    notice,
+    status: statusFilter,
+    q,
+    limit: limitParam,
+  } = await searchParams;
   const query = q?.trim() ?? "";
   const active = FILTERS.some((f) => f.value === statusFilter)
     ? (statusFilter as string)
     : "";
+  // "Load more" bumps this via the URL — no client state, same pattern as
+  // the status filter links below.
+  const parsedLimit = Number(limitParam);
+  const limit =
+    Number.isFinite(parsedLimit) && parsedLimit > 0
+      ? Math.min(Math.floor(parsedLimit), MAX_LIMIT)
+      : DEFAULT_LIMIT;
 
   const rows = await db
     .select({
@@ -126,9 +145,9 @@ export default async function RunsPage({
         : eq(workflows.userId, user.id),
     )
     .orderBy(desc(runs.createdAt))
-    // One page deep; the filter above handles anything past this, and the
-    // footer says so.
-    .limit(PAGE_SIZE);
+    // "Load more" re-requests with a bigger limit rather than an offset —
+    // simplest thing that works while the list is a single ordered page.
+    .limit(limit);
 
   /*
    * A query searches digests, not run rows — different answer shape, so
@@ -189,13 +208,10 @@ export default async function RunsPage({
 
       <div className="rise mt-6 flex flex-wrap items-center gap-3">
         <DigestSearch initialQuery={query} />
+        {!query && <StatusFilter active={active} />}
       </div>
 
-      {query ? (
-        <DigestResults hits={hits} query={query} />
-      ) : (
-        <StatusFilter active={active} />
-      )}
+      {query && <DigestResults hits={hits} query={query} />}
 
       {query ? null : rows.length === 0 ? (
         <div className="mt-6">
@@ -314,11 +330,18 @@ export default async function RunsPage({
             </section>
           ))}
 
-          {rows.length === PAGE_SIZE && (
-            <p className="text-subtle text-center text-xs">
-              Showing the {PAGE_SIZE} most recent runs. Narrow it with the
-              filter above.
-            </p>
+          {rows.length === limit && (
+            <div className="flex justify-center">
+              <Link
+                href={`/runs?${new URLSearchParams({
+                  ...(active ? { status: active } : {}),
+                  limit: String(limit + LOAD_MORE_STEP),
+                }).toString()}`}
+                className="rounded-control border-border text-muted hover:border-border-strong hover:text-foreground flex h-8 items-center border px-3 text-[13px] font-medium transition-colors"
+              >
+                Load more
+              </Link>
+            </div>
           )}
         </div>
       )}
@@ -410,7 +433,7 @@ function DigestResults({
 /** The filter row: one chip per status, the active one inverted. */
 function StatusFilter({ active }: { active: string }) {
   return (
-    <div className="rise mt-6 flex flex-wrap items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       {FILTERS.map((filter) => {
         const on = filter.value === active;
         return (

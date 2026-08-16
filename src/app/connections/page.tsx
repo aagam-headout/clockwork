@@ -1,5 +1,9 @@
 import { after } from "next/server";
-import { searchToolkits, type ToolkitSummary } from "@/lib/composio";
+import {
+  getToolkitCatalog,
+  searchToolkits,
+  type ToolkitSummary,
+} from "@/lib/composio";
 import { requireUser } from "@/lib/auth/user";
 import {
   CONNECTION_STATUS_LABEL,
@@ -79,7 +83,7 @@ export default async function ConnectionsPage({
    * Composio is unreachable — only the catalog (names, logos, browse grid)
    * needs the API, and a failure there is cosmetic.
    */
-  const [rows, dependents, catalogResult] = await Promise.all([
+  const [rows, dependents, catalogResult, fullCatalog] = await Promise.all([
     getUserConnections(user.id),
     dependentCountsByToolkit(user.id),
     // Only this one can fail in a way worth reporting; the other two are
@@ -91,6 +95,10 @@ export default async function ConnectionsPage({
         error: err instanceof Error ? err.message : String(err),
       }),
     ),
+    // Full catalog, not the top-12 slice above — a connected app ranked
+    // past #12 by usage still needs its real name/logo below, not a
+    // fallback to the raw slug and a generic icon.
+    getToolkitCatalog().catch(() => [] as ToolkitSummary[]),
   ]);
 
   const catalog = catalogResult.items;
@@ -109,7 +117,7 @@ export default async function ConnectionsPage({
 
   // Composio metadata is the source of truth for names/logos; fall back to the
   // slug so an unknown connector still renders sensibly.
-  const catalogBySlug = new Map(catalog.map((t) => [t.slug, t]));
+  const catalogBySlug = new Map(fullCatalog.map((t) => [t.slug, t]));
 
   const connected: ConnectedRow[] = rows
     .filter((row) => row.status !== "disconnected")
