@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import { Mono } from "@/components/ui";
 
 /**
@@ -55,9 +56,7 @@ export function ErrorState({
         {shown.length > 0 && (
           <details className="group mt-8 text-left">
             <summary className="text-subtle hover:text-foreground inline-flex cursor-pointer list-none items-center gap-1.5 text-xs transition-colors">
-              <span className="transition-transform group-open:rotate-90">
-                ›
-              </span>
+              <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
               Technical details
             </summary>
             <dl className="rounded-container border-border bg-bg-subtle mt-2.5 divide-y divide-[var(--border)] border">

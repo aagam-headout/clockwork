@@ -25,6 +25,8 @@ import type { ToolkitOption } from "@/components/workflow-form";
 import type { ModelInfo } from "@/lib/model-tiers";
 import { defaultBuilderModel, isBuilderModel } from "@/lib/builder-models";
 import { fetchJson } from "@/lib/fetch-json";
+import { Markdown } from "@/components/markdown";
+import { useAutosize } from "@/components/markdown-editor";
 
 /** Module-level so the picker's `include` prop keeps a stable identity. */
 const isBuilderModelInfo = (model: ModelInfo) => isBuilderModel(model.id);
@@ -116,6 +118,9 @@ export function WorkflowAgentChat({
     () => initialSpec?.readOnly === false,
   );
   const scrollRef = useRef<HTMLDivElement>(null);
+  // 160px — the same ceiling the old `max-h-40` set, now a floor-to-ceiling
+  // range rather than a fixed three rows.
+  const composerRef = useAutosize(draft, 160);
 
   const connectors = [WEB_SEARCH, ...availableToolkits];
 
@@ -301,9 +306,13 @@ export function WorkflowAgentChat({
                   </div>
                 ) : (
                   <div key={i} className="flex flex-col gap-2">
-                    <p className="rounded-container border-border bg-bg-subtle text-foreground max-w-[92%] border px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap">
-                      {message.content}
-                    </p>
+                    {/* The builder answers in markdown — lists of what it
+                        picked, `code` for tool slugs, the occasional table.
+                        Pre-wrapped text showed all of that as source. User
+                        turns stay verbatim: you typed them, you see them. */}
+                    <div className="rounded-container border-border bg-bg-subtle text-foreground max-w-[92%] border px-3 py-2">
+                      <Markdown size="sm">{message.content}</Markdown>
+                    </div>
                     {(message.usedTools?.length ?? 0) > 0 && (
                       <p className="text-subtle flex items-start gap-1.5 text-[11px]">
                         <Search className="mt-px h-3.5 w-3.5 shrink-0" />
@@ -339,6 +348,9 @@ export function WorkflowAgentChat({
       >
         <div className="rounded-container border-border bg-bg focus-within:border-border-strong mx-auto flex w-full max-w-[680px] flex-col gap-1.5 border p-1.5 transition-colors">
           <textarea
+            // Grows with the message instead of sitting at three rows whether
+            // the draft is a sentence or a spec.
+            ref={composerRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -349,7 +361,7 @@ export function WorkflowAgentChat({
                 void send(draft);
               }
             }}
-            rows={3}
+            rows={2}
             placeholder={
               empty
                 ? "Every weekday morning, check my calendar…"
@@ -359,7 +371,7 @@ export function WorkflowAgentChat({
             }
             disabled={loading}
             aria-label="Describe the workflow"
-            className="text-foreground placeholder:text-subtle max-h-40 min-h-0 w-full resize-none bg-transparent px-1.5 py-1 text-[13px] leading-relaxed outline-none disabled:opacity-60"
+            className="text-foreground placeholder:text-subtle min-h-0 w-full resize-none bg-transparent px-1.5 py-1 text-[13px] leading-relaxed outline-none disabled:opacity-60"
           />
 
           {/*

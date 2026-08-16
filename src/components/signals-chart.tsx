@@ -38,7 +38,10 @@ function Sparkline({ values }: { values: number[] }) {
     <svg
       viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
       preserveAspectRatio="none"
-      className="text-accent h-10 w-full"
+      // `accent-text` rather than `accent`: the raw brand blue sits at ~3:1 on
+      // the dark surface, which is the floor for a graphic. The text variant is
+      // tuned per theme and clears it comfortably in both.
+      className="text-accent-text h-10 w-full"
       aria-hidden
     >
       <polyline

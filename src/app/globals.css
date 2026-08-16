@@ -786,13 +786,15 @@ body {
 .markdown h1,
 .markdown h2,
 .markdown h3,
-.markdown h4 {
+.markdown h4,
+.markdown h5,
+.markdown h6 {
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.3;
 }
 
-.markdown > * + :is(h1, h2, h3, h4) {
+.markdown > * + :is(h1, h2, h3, h4, h5, h6) {
   margin-top: 1.5rem;
 }
 
@@ -802,9 +804,17 @@ body {
 .markdown h2 {
   font-size: 1rem;
 }
+/* h3 down all sit at body size — a digest that reaches h5 is using depth,
+   not scale, and shrinking below the paragraph it labels reads as a caption. */
 .markdown h3,
-.markdown h4 {
+.markdown h4,
+.markdown h5,
+.markdown h6 {
   font-size: 0.875rem;
+}
+
+.markdown :is(h5, h6) {
+  color: var(--fg-muted);
 }
 
 .markdown ul,
@@ -894,4 +904,133 @@ body {
 .markdown img {
   max-width: 100%;
   border-radius: var(--radius-control);
+}
+
+/*
+ * A model writes URLs and identifiers no line break would ever fall inside, and
+ * a digest is read in a dialog and in a 320px-wide card. Breaking mid-token is
+ * ugly; a horizontal scrollbar on the whole panel is worse.
+ */
+.markdown :is(p, li, td, th, a, blockquote) {
+  overflow-wrap: anywhere;
+}
+
+/*
+ * A tool that dumps 400 lines of JSON into its answer shouldn't own the page.
+ * The block keeps its own scroll instead — the same bargain the trace makes
+ * with its payloads.
+ */
+.markdown pre {
+  max-height: 24rem;
+  overflow: auto;
+}
+
+/*
+ * GFM task lists. `remark-gfm` emits a real disabled checkbox inside the item,
+ * which against a disc marker reads as two bullets on one line.
+ */
+.markdown li:has(> input[type="checkbox"]) {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-left: -1.25rem;
+  list-style: none;
+}
+
+.markdown input[type="checkbox"] {
+  margin-top: 0.3rem;
+  accent-color: var(--accent);
+}
+
+/* Zebra rows: a wide table is read across, and the eye needs the rail. */
+.markdown tbody tr:nth-child(even) {
+  background: var(--bg-subtle);
+}
+
+/*
+ * A list item with a blank line in it is a *loose* item, and remark wraps each
+ * of its children in a <p>. Those aren't direct children of `.markdown`, so the
+ * one-rule rhythm above never reached them and a multi-paragraph bullet ran
+ * together as a wall. Same for anything nested inside an item — a code block
+ * under a step, a table under a heading in a blockquote.
+ */
+.markdown li > * + * {
+  margin-top: 0.5rem;
+}
+
+/*
+ * Nested lists: indented from their parent item and marked differently, so
+ * three levels of an agent's outline stay distinguishable.
+ */
+.markdown li > :is(ul, ol) {
+  margin-top: 0.25rem;
+}
+
+.markdown ul ul {
+  list-style: circle;
+}
+
+.markdown ul ul ul {
+  list-style: square;
+}
+
+/* GFM strikethrough. Struck text is struck *because* it no longer counts, so
+   it steps back in color rather than sitting at full contrast. */
+.markdown del {
+  color: var(--fg-subtle);
+}
+
+/*
+ * GFM footnotes. The reference is a superscript link; the notes themselves are
+ * a titled section at the end, which without this arrives at body size looking
+ * like one more paragraph of the digest.
+ */
+.markdown sup a {
+  text-decoration: none;
+  font-size: 0.75rem;
+}
+
+.markdown .footnotes {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--fg-muted);
+}
+
+.markdown .footnotes h2 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-subtle);
+}
+
+/*
+ * The compact size, for markdown inside something already dense — a chat
+ * bubble, a preview pane. Same contract, one step down in type and rhythm, so
+ * the two never disagree about what a heading or a code chip looks like.
+ */
+.markdown-sm {
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.markdown-sm > * + * {
+  margin-top: 0.5rem;
+}
+
+.markdown-sm > * + :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: 1rem;
+}
+
+.markdown-sm :is(h1, h2) {
+  font-size: 0.875rem;
+}
+
+.markdown-sm :is(h3, h4, h5, h6) {
+  font-size: 0.8125rem;
+}
+
+.markdown-sm :is(code, table) {
+  font-size: 0.75rem;
 }

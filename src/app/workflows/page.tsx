@@ -237,7 +237,7 @@ export default async function WorkflowsPage({
                      */}
                     {wf.pausedReason === "cost_cap" && (
                       <p className="text-warn-text mt-2 text-xs">
-                        This month&apos;s budget is spent.{" "}
+                        Budget spent for this month.{" "}
                         <Link
                           href={`/workflows/${wf.id}`}
                           className="underline underline-offset-2"
@@ -250,7 +250,7 @@ export default async function WorkflowsPage({
 
                     {wf.pausedReason === "parent_deleted" && (
                       <p className="text-warn-text mt-2 text-xs">
-                        The workflow that triggered this one was deleted.{" "}
+                        Its trigger workflow was deleted.{" "}
                         <Link
                           href={`/workflows/${wf.id}`}
                           className="underline underline-offset-2"

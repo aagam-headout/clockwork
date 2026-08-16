@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import Link from "next/link";
 import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
 import { and, asc, eq } from "drizzle-orm";
@@ -36,9 +35,10 @@ import {
   SquarePen,
   Gauge,
   GitBranch,
+  ChevronRight,
 } from "lucide-react";
 import { LiveRun } from "@/components/live-run";
-import { TraceToggleAll, CopyButton } from "@/components/trace-tools";
+import { TraceToggleAll, PayloadView } from "@/components/trace-tools";
 import { Markdown } from "@/components/markdown";
 import { DigestCard } from "@/components/digest-card";
 import { LocalTime } from "@/components/local-time";
@@ -157,9 +157,9 @@ export default async function RunDetailPage({
   const reason = output?.suppressedReason ?? null;
   const conditionNote =
     reason === "condition_indeterminate"
-      ? "The run did not report a signal the condition needs, so the digest was sent rather than withheld."
+      ? "A signal the condition needs was not reported, so the digest was sent."
       : reason?.startsWith("condition_error")
-        ? `${reason.replace(/^condition_error: /, "")} — the digest was sent rather than withheld.`
+        ? `${reason.replace(/^condition_error: /, "")} — the digest was sent.`
         : null;
 
   return (
@@ -373,12 +373,8 @@ export default async function RunDetailPage({
               indistinguishable from the agent finding nothing. */}
           {output.suppressed && (
             <div className="mb-3">
-              <Alert
-                tone="neutral"
-                title="Withheld — did not meet the alert condition"
-              >
-                {output.suppressedReason ??
-                  "The alert condition evaluated false."}
+              <Alert tone="neutral" title="Withheld — alert condition not met">
+                {output.suppressedReason ?? "The condition evaluated false."}
               </Alert>
             </div>
           )}
@@ -468,18 +464,15 @@ export default async function RunDetailPage({
              * as "this run did nothing".
              */}
             {tracePruned
-              ? "The step-by-step trace for this run has been pruned. Its digest is kept."
+              ? "Trace pruned. The digest is kept."
               : "No steps recorded for this run."}
           </p>
         ) : (
           /*
            * Modeled on the GitHub Actions job log: a bordered list of steps,
            * each a single summary line — status glyph, name, duration — that
-           * expands into a dark terminal panel. The panel stays dark in both
-           * site themes, same as GH's log viewer, so pasted JSON and reasoning
-           * text read like console output rather than another themed card.
-           * Failed steps open themselves, since that's what anyone opening a
-           * trace came for.
+           * expands into a recessed monospace panel. Failed steps open
+           * themselves, since that's what anyone opening a trace came for.
            */
           <ListBox as="ol" id="trace">
             {steps.map((step, i) => {
@@ -548,19 +541,18 @@ export default async function RunDetailPage({
                           {formatStepDuration(step.durationMs)}
                         </span>
                       )}
-                      <span className="text-subtle shrink-0 text-xs transition-transform group-open:rotate-90">
-                        ›
-                      </span>
+                      <ChevronRight className="text-subtle h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90" />
                     </summary>
 
-                    {/* Dark terminal panel, fixed colors rather than theme
-                        tokens — pinned to the app's own dark palette (Geist
-                        black surfaces, not GH's) so it reads as this app's log,
-                        not a borrowed one, regardless of site theme. */}
-                    <div className="space-y-2 border-t border-[#2e2e2e] bg-black px-3 py-2.5 pl-[38px] font-mono text-[11px] leading-relaxed">
+                    {/* Theme tokens, not a pinned-dark terminal: a log panel
+                        that stays black in a light app is a second theme on one
+                        page, and the payloads below are the part people read
+                        longest. The monospace type and the recessed surface
+                        carry the "this is a log" reading on their own. */}
+                    <div className="border-border bg-bg-subtle space-y-2 border-t px-3 py-2.5 pl-[38px] font-mono text-[11px] leading-relaxed">
                       {step.error && (
-                        <p className="text-[#ff6166]">
-                          <span className="text-[#888888]">##[error] </span>
+                        <p className="text-danger-text">
+                          <span className="text-subtle">##[error] </span>
                           {step.error}
                         </p>
                       )}
@@ -569,35 +561,17 @@ export default async function RunDetailPage({
                         // "what did it send" and "what came back" are separate
                         // questions, and the answers are wanted one at a time.
                         <div className="space-y-2">
-                          <Payload
-                            label="args"
-                            value={JSON.stringify(step.argsJson, null, 2)}
-                          />
-                          <Payload
-                            label="result"
-                            value={JSON.stringify(step.resultJson, null, 2)}
-                          />
+                          <Payload label="args" data={step.argsJson} />
+                          <Payload label="result" data={step.resultJson} />
                         </div>
                       ) : (
-                        // The model's intermediate reasoning is markdown too.
-                        // `.markdown` in globals.css is built on theme CSS
-                        // vars, so it's pinned dark here the same way the
-                        // panel itself is — by overriding those vars locally
-                        // with the app's own dark palette rather than
-                        // fighting the site theme downstream.
-                        <div
-                          style={
-                            {
-                              "--fg": "#eaeaea",
-                              "--fg-muted": "#888888",
-                              "--fg-subtle": "#666666",
-                              "--accent-text": "#52a8ff",
-                              "--border": "#2e2e2e",
-                              "--surface-2": "rgba(255,255,255,0.08)",
-                              "--bg-subtle": "rgba(255,255,255,0.05)",
-                            } as CSSProperties
-                          }
-                        >
+                        // `.markdown` in globals.css is built on the same theme
+                        // vars as everything else, so reasoning text needs no
+                        // local overrides now that the panel follows the theme.
+                        // Capped like a payload: a long chain of thought is one
+                        // step among many, and letting it run the full page
+                        // height buries every step after it.
+                        <div className="max-h-84 overflow-auto">
                           <Markdown>{text}</Markdown>
                         </div>
                       )}
@@ -614,21 +588,43 @@ export default async function RunDetailPage({
 }
 
 /**
- * One labelled block inside the log panel. Its own scroll box, so a 2,000-line
- * result can't push the next step off the screen, and its own copy button —
- * the payload is the thing you paste into an issue.
+ * The plain-text reading of a payload, when it has one.
+ *
+ * A tool that returns prose returns it as `{ text: "…" }`, and JSON escapes
+ * every newline in it — so the JSON view of a long answer is one unreadable
+ * line of `\n`s. That text is worth a view of its own; anything structured has
+ * nothing to show beyond its JSON and gets no second tab.
  */
-function Payload({ label, value }: { label: string; value: string }) {
+function plainText(data: unknown): string | null {
+  if (typeof data === "string") return data.trim() || null;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const text = (data as { text?: unknown }).text;
+    if (typeof text === "string" && text.trim()) return text;
+  }
+  return null;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * One labelled block inside the log panel — `args` or `result`.
+ *
+ * Serializing happens here, on the server: `PayloadView` below only lays out
+ * strings it is handed, so a 200KB tool result is stringified once rather than
+ * on every re-render of the row it sits in.
+ */
+function Payload({ label, data }: { label: string; data: unknown }) {
+  const json = JSON.stringify(data, null, 2) ?? "undefined";
   return (
-    <div>
-      <div className="mb-1 flex items-center gap-2">
-        <span className="text-[10px] tracking-wider text-[#888888] uppercase">
-          {label}
-        </span>
-        <span className="h-px flex-1 bg-[#2e2e2e]" />
-        <CopyButton text={value} label={`Copy ${label}`} />
-      </div>
-      <pre className="max-h-72 overflow-auto text-[#eaeaea]">{value}</pre>
-    </div>
+    <PayloadView
+      label={label}
+      json={json}
+      text={plainText(data)}
+      size={formatBytes(Buffer.byteLength(json))}
+    />
   );
 }

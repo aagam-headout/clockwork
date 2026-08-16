@@ -308,9 +308,7 @@ export default async function EditWorkflowPage({
                   </span>{" "}
                   of {formatUsd(cap.cap ?? 0)}
                 </span>
-                {cap.state === "warn" && (
-                  <Badge tone="warn">approaching the budget</Badge>
-                )}
+                {cap.state === "warn" && <Badge tone="warn">near budget</Badge>}
                 {cap.state === "over" && (
                   <Badge tone="danger">budget spent</Badge>
                 )}
@@ -333,8 +331,7 @@ export default async function EditWorkflowPage({
               </div>
               {hasUnpricedRun && (
                 <p className="text-subtle mt-2 text-xs">
-                  Some runs this month have no recorded price, so this is a
-                  lower bound.
+                  Some runs have no recorded price — this is a lower bound.
                 </p>
               )}
             </Card>

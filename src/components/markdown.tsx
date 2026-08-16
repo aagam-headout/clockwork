@@ -18,13 +18,22 @@ import remarkGfm from "remark-gfm";
  */
 export function Markdown({
   children,
+  size = "base",
   className = "",
 }: {
   children: string;
+  /**
+   * `sm` for markdown inside something already dense — a chat bubble, a preview
+   * pane. It's a variant class rather than a set of overrides here, so the two
+   * sizes can't drift apart on what a heading or a code chip looks like.
+   */
+  size?: "base" | "sm";
   className?: string;
 }) {
   return (
-    <div className={`markdown ${className}`}>
+    <div
+      className={`markdown ${size === "sm" ? "markdown-sm" : ""} ${className}`}
+    >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -39,6 +48,21 @@ export function Markdown({
             <a href={href} target="_blank" rel="noopener noreferrer">
               {label}
             </a>
+          ),
+          // A digest can carry a chart or a screenshot the agent linked to.
+          // Lazy, and async-decoded, so a long one doesn't block the panel it
+          // opens in on images below the fold.
+          img: ({ src, alt }) => (
+            // The src is model output — an arbitrary remote URL that
+            // next/image can neither whitelist nor optimize, so this is a
+            // plain <img> on purpose.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={typeof src === "string" ? src : undefined}
+              alt={alt ?? ""}
+              loading="lazy"
+              decoding="async"
+            />
           ),
         }}
       >

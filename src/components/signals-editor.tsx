@@ -60,9 +60,8 @@ export function SignalsEditor({
 
         {signals.length === 0 ? (
           <p className="text-subtle text-xs leading-relaxed">
-            Optional. Add one when the run measures something countable — a
-            count, a percentage, an age in days — and you want to compare it
-            against a threshold.
+            Optional. Add one for a value you want to compare against a
+            threshold — a count, a percentage, an age in days.
           </p>
         ) : (
           <div className="flex flex-col gap-2">
@@ -139,19 +138,19 @@ export function SignalsEditor({
         />
         <p className="text-subtle text-xs leading-relaxed">
           {signals.length === 0 ? (
-            "Leave empty to receive every digest."
+            "Empty delivers every digest."
           ) : (
             <>
-              Comparisons and <code className="font-mono">{"&&"}</code>{" "}
-              <code className="font-mono">||</code>{" "}
-              <code className="font-mono">!</code> only. Available:{" "}
+              Comparisons, <code className="font-mono">{"&&"}</code>,{" "}
+              <code className="font-mono">||</code>,{" "}
+              <code className="font-mono">!</code> only. Empty delivers every
+              digest. Available:{" "}
               <span className="font-mono">
                 {signals
                   .map((s) => s.key)
                   .filter(Boolean)
                   .join(", ") || "name your signals above"}
               </span>
-              . Empty means every digest is delivered.
             </>
           )}
         </p>

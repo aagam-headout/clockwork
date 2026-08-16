@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { ChevronRight, Expand, X } from "lucide-react";
@@ -154,8 +154,14 @@ function DigestDialog({
   viewRunHref,
   rendered,
 }: DigestProps & { open: boolean; onClose: () => void }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!open) return;
+    // Focus the panel itself on open. Without it the focus ring stays on the
+    // row behind the dialog, so Page Down scrolls the page under the overlay
+    // instead of the digest someone just opened to read.
+    panelRef.current?.focus();
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     // Body scroll fights the dialog's own scroll otherwise — a long digest
@@ -182,10 +188,12 @@ function DigestDialog({
       />
 
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={`${title} digest`}
-        className="rise rounded-container border-border bg-surface shadow-pop relative flex w-full max-w-4xl flex-col overflow-hidden border"
+        tabIndex={-1}
+        className="rise rounded-container border-border bg-surface shadow-pop relative flex w-full max-w-4xl flex-col overflow-hidden border outline-none"
       >
         <div className="border-border bg-bg-subtle flex shrink-0 items-start justify-between gap-3 border-b px-5 py-4">
           <div className="min-w-0">

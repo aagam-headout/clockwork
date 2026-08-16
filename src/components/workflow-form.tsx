@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { CronBuilder, describeCron } from "@/components/cron-builder";
 import { SignalsEditor } from "@/components/signals-editor";
+import { MarkdownEditor } from "@/components/markdown-editor";
 import type { SignalDecl } from "@/lib/outcome/condition";
 
 /*
@@ -393,22 +394,17 @@ export function WorkflowForm({
           </Field>
 
           <div className="flex min-w-0 flex-col gap-1.5">
-            <div className="flex items-baseline justify-between gap-2">
-              <label className="text-foreground text-[13px] font-medium">
-                Goal
-              </label>
-              <span className="text-subtle text-xs tabular-nums">
-                ~{goalTokens.toLocaleString()} tokens
-              </span>
-            </div>
-            <textarea
+            <label className="text-foreground text-[13px] font-medium">
+              Goal
+            </label>
+            {/* The goal is a prompt, and prompts are written in markdown — the
+                preview tab is where you check that before a run renders it. */}
+            <MarkdownEditor
               name="goal"
-              required
-              rows={5}
               value={goal}
-              onChange={(e) => setGoal(e.target.value)}
+              onChange={setGoal}
               placeholder="Check today's calendar and my GitHub issues. Short digest, flag conflicts."
-              className="input font-mono text-[13px]"
+              meta={`~${goalTokens.toLocaleString()} tokens`}
             />
           </div>
         </Section>
@@ -522,11 +518,7 @@ export function WorkflowForm({
           )}
         </Section>
 
-        <Section
-          title="Signals & alerts"
-          icon={Gauge}
-          description="What this run measures, and when it is worth telling you."
-        >
+        <Section title="Signals & alerts" icon={Gauge}>
           <SignalsEditor
             defaultSignals={defaultValues?.signalSchema ?? []}
             defaultCondition={defaultValues?.alertCondition ?? ""}
@@ -660,7 +652,7 @@ export function WorkflowForm({
 
             <Field
               label="Monthly budget (USD)"
-              hint="Blank for no limit. The workflow pauses once this month's runs reach it — the run that crosses the line still finishes, so the overshoot is one run."
+              hint="Blank for no limit. Pauses the workflow once this month's spend reaches it; the run that crosses still finishes."
             >
               <input
                 name="monthlyCostCapUsd"
@@ -801,8 +793,7 @@ function ParentTriggerPicker({
   if (options.length === 0) {
     return (
       <p className="text-subtle text-xs leading-relaxed">
-        You have no other workflows yet. Create one first, then come back and
-        chain this one behind it.
+        No other workflows yet. Create one to chain this behind it.
       </p>
     );
   }
@@ -811,7 +802,7 @@ function ParentTriggerPicker({
     <>
       <Field
         label="Runs after"
-        hint="This workflow starts when that one finishes, and is handed its digest and signals."
+        hint="Starts when that one finishes, handed its digest and signals."
       >
         <select
           name="parentWorkflowId"
@@ -835,13 +826,12 @@ function ParentTriggerPicker({
           !parent ? (
             "Pick a workflow above first."
           ) : names.length === 0 ? (
-            "That workflow reports no signals, so there is nothing to test. Leave empty to run every time it finishes."
+            "That workflow reports no signals — nothing to test. Runs every time it finishes."
           ) : (
             <>
-              Written against <span className="font-mono">{parent.name}</span>
-              &apos;s signals:{" "}
-              <span className="font-mono">{names.join(", ")}</span>. Empty runs
-              every time it finishes.
+              Empty runs every time. Against{" "}
+              <span className="font-mono">{parent.name}</span>&apos;s signals:{" "}
+              <span className="font-mono">{names.join(", ")}</span>
             </>
           )
         }
@@ -909,7 +899,7 @@ function EventTriggerPicker({
             return (
               <label
                 key={option.slug}
-                className={`border-border has-[:focus-visible]:outline-foreground flex cursor-pointer items-start gap-2.5 border-b px-3 py-2.5 transition-colors last:border-b-0 has-[:focus-visible]:outline-2 has-[:focus-visible]:-outline-offset-2 ${
+                className={`border-border has-[:focus-visible]:outline-foreground relative flex cursor-pointer items-start gap-2.5 border-b px-3 py-2.5 transition-colors last:border-b-0 has-[:focus-visible]:outline-2 has-[:focus-visible]:-outline-offset-2 ${
                   on ? "bg-surface-2" : "hover:bg-surface-hover"
                 }`}
               >
@@ -1314,8 +1304,13 @@ function Checkbox({
   const [on, setOn] = useState(Boolean(checked ?? defaultChecked));
 
   return (
+    // `relative` is load-bearing: the real input is `sr-only`, which is
+    // `position: absolute`, so without a positioned ancestor it lands wherever
+    // the nearest one is — and clicking the row scrolled the form's scroll port
+    // up to that point as the browser brought the newly focused input into
+    // view. The toolkit tiles have always carried it; these rows had not.
     <label
-      className={`rounded-control border-border has-[:focus-visible]:outline-foreground flex items-start gap-2.5 border px-3 py-2.5 transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 ${
+      className={`rounded-control border-border has-[:focus-visible]:outline-foreground relative flex items-start gap-2.5 border px-3 py-2.5 transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 ${
         disabled
           ? "cursor-not-allowed opacity-70"
           : "hover:border-border-strong cursor-pointer"
