@@ -32,8 +32,8 @@ describe("isReadOnlyToolSlug", () => {
   });
 
   it("treats a mixed read/write slug as a write", () => {
-    // The whole point of the deny-wins ordering: a read verb somewhere in the
-    // name used to be enough to let these through.
+    // The whole point of deny-wins: a read verb anywhere in the name used to
+    // be enough to let these through.
     expect(isReadOnlyToolSlug("GITHUB_GET_OR_CREATE_LABEL")).toBe(false);
     expect(isReadOnlyToolSlug("NOTION_SEARCH_AND_UPDATE_PAGE")).toBe(false);
   });
@@ -115,7 +115,7 @@ describe("buildToolFilter", () => {
       false,
     );
     expect(allowed("SLACK_DELETE_MESSAGE")).toBe(true);
-    // Swept in by the wildcard, but never named — a broad grant is not consent
+    // Swept in by the wildcard, but never named — a broad grant isn't consent
     // to an unattended delete.
     expect(allowed("SLACK_REMOVE_REACTION")).toBe(false);
     expect(allowed("SLACK_SEND_MESSAGE")).toBe(true);

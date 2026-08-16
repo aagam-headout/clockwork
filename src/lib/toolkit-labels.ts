@@ -1,6 +1,6 @@
 // Display metadata for toolkits. Kept client-safe (no SDK imports) and in one
-// place so the connections page, the workflow form, and workflow cards all show
-// the same label and glyph for a given toolkit slug.
+// place so the connections page, workflow form, and workflow cards all show
+// the same label and glyph for a toolkit slug.
 // lucide dropped brand glyphs in v1, so Slack/GitHub fall back to the closest
 // generic marks (channel hash, git branch).
 import {

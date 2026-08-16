@@ -17,11 +17,11 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  // The sidebar's account block needs a name/email; it's a client component, so
-  // the session is read here (deduped per request by the auth client) instead of
-  // re-fetching it in the browser. connection() opts every route out of
-  // prerendering first — otherwise the cookie read below throws mid-build for
-  // the two pages that would otherwise be static (/_not-found, /auth/forbidden).
+  // Sidebar's account block needs name/email, but it's a client component, so
+  // the session is read here (deduped per request by the auth client). connection()
+  // opts every route out of prerendering first — otherwise the cookie read below
+  // throws mid-build for the two pages that would otherwise be static
+  // (/_not-found, /auth/forbidden).
   await connection();
   const user = LOCAL_AUTH_BYPASS
     ? { name: null, email: LOCAL_OWNER_EMAIL, image: null }
@@ -43,10 +43,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       className={`${GeistSans.variable} ${GeistMono.variable} h-full antialiased`}
     >
       <body className="bg-bg min-h-full">
-        {/* First thing in <body>, not in <head>: this Next version drops a raw
-            <script> placed inside a layout's <head>, which silently killed both
-            pre-paint scripts (the theme flashed, the rail snapped). Running here
-            still beats first paint. */}
+        {/* In <body>, not <head>: this Next version drops a raw <script> in a
+            layout's <head>, which silently killed both pre-paint scripts (theme
+            flashed, rail snapped). Still beats first paint here. */}
         <script
           dangerouslySetInnerHTML={{ __html: THEME_SCRIPT + SIDEBAR_SCRIPT }}
         />

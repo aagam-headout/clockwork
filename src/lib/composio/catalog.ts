@@ -18,16 +18,16 @@ export type ToolkitSummary = {
  * search would re-fetch it.
  *
  * Shared across all users on purpose: this is app-wide toolkit metadata —
- * names, logos, whether a toolkit needs auth at all — and contains nothing
- * about who has connected what. That per-user question is answered from
- * Postgres (`src/lib/data/connections.ts`), which is also why connecting or
+ * names, logos, whether a toolkit needs auth at all — with nothing about who
+ * has connected what. That per-user question is answered from Postgres
+ * (`src/lib/data/connections.ts`), which is also why connecting or
  * disconnecting an account does *not* need to invalidate this.
  *
- * `toolkits.get(query)` (the SDK's list overload) returns the matched
- * toolkits as a plain array capped at `limit` — there is no `{items,
- * nextCursor}` wrapper and no cursor in the response to page through, so a
- * single request with the server's max limit is the only way to get the
- * full catalog (server caps `limit` at 1000, which comfortably covers it).
+ * `toolkits.get(query)` (the SDK's list overload) returns matched toolkits as
+ * a plain array capped at `limit` — no `{items, nextCursor}` wrapper and no
+ * cursor to page through, so a single request at the server's max limit is
+ * the only way to get the full catalog (capped at 1000, which comfortably
+ * covers it).
  */
 type ToolkitListItem = {
   slug: string;
@@ -55,7 +55,7 @@ export async function getToolkitCatalog(): Promise<ToolkitSummary[]> {
   }
 
   // `toolkits.get` is overloaded (slug → one toolkit, query → a list); the
-  // list shape is asserted here because TS resolves to the slug overload.
+  // list shape is asserted here since TS resolves to the slug overload.
   const res = (await composio.toolkits.get({
     limit: 1000,
     sortBy: "usage",
@@ -77,9 +77,8 @@ export async function getToolkitCatalog(): Promise<ToolkitSummary[]> {
 
 /**
  * Case-insensitive match on slug, name, and description, paged with
- * `offset`/`limit` — the full catalog can run past a thousand toolkits, and
- * without paging the browser could only ever reach whichever `limit` came
- * first.
+ * `offset`/`limit` — the catalog can run past a thousand toolkits, and
+ * without paging the browser could only reach whichever `limit` came first.
  */
 export async function searchToolkits(
   query: string,
@@ -110,7 +109,7 @@ export async function searchToolkits(
 /**
  * True for toolkits Composio serves without a connected account (its own
  * `composio` toolkit, most public APIs). Creating an auth config for one is a
- * hard 400 — `Auth_Config_NoAuthApp` — so the connect flow has to check first.
+ * hard 400 — `Auth_Config_NoAuthApp` — so the connect flow must check first.
  */
 export async function toolkitIsNoAuth(slug: string): Promise<boolean> {
   const catalog = await getToolkitCatalog();
@@ -120,11 +119,11 @@ export async function toolkitIsNoAuth(slug: string): Promise<boolean> {
 /**
  * Slugs that never need a connected account.
  *
- * Falls back to the one toolkit we know is no-auth rather than to an empty
- * set: if the catalog can't be reached, treating every toolkit as requiring a
- * connection would block runs that were previously fine, and treating none as
- * requiring one would skip the preflight entirely. `composio_search` is the
- * built-in web search every workflow can use, and it is always no-auth.
+ * Falls back to the one toolkit known to be no-auth rather than an empty set:
+ * if the catalog can't be reached, treating every toolkit as needing a
+ * connection would block runs that were previously fine, while treating none
+ * as needing one would skip the preflight entirely. `composio_search` is the
+ * built-in web search every workflow can use, and is always no-auth.
  */
 export async function noAuthToolkitSlugs(): Promise<Set<string>> {
   try {

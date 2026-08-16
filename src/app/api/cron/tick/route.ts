@@ -1,23 +1,23 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { runDueWorkflows } from "@/lib/dispatcher";
-import { pruneOldRuns, reapStuckRuns } from "@/lib/retention";
+import { pruneOldRunSteps, pruneOldRuns, reapStuckRuns } from "@/lib/retention";
 import { reconcileStaleConnections } from "@/lib/reconcile";
 import { pruneRateLimits } from "@/lib/rate-limit";
 
-// Two schedulers can drive this endpoint, and both ship because neither covers
-// every self-host:
+// Two schedulers drive this endpoint; both ship because neither covers every
+// self-host:
 //
-//   - Vercel Cron (GET) — one vendor, no repo secrets, but Hobby is capped at
-//     one run per day; per-minute cadence needs Pro. See vercel.json.
-//   - GH Actions (POST) every 5 minutes — free at any frequency, so it's what a
-//     Hobby-plan deploy uses. See .github/workflows/cron-tick.yml.
+//   - Vercel Cron (GET) — no repo secrets, but Hobby caps at one run/day;
+//     per-minute needs Pro. See vercel.json.
+//   - GH Actions (POST) every 5 minutes — free at any frequency, so it's what
+//     Hobby deploys use. See .github/workflows/cron-tick.yml.
 //
-// Vercel Cron attaches `Authorization: Bearer $CRON_SECRET` itself, the same
-// header the workflow sends, so one auth check serves both. The tick is
-// idempotent — the one-active-run index makes a double fire a no-op — so
-// running both schedulers at once is safe. POST also covers driving the tick by
-// hand: the local compose ticker (`pnpm docker:tick`) and curl.
+// Vercel Cron sends `Authorization: Bearer $CRON_SECRET`, same header the
+// workflow sends, so one auth check serves both. The tick is idempotent (the
+// one-active-run index makes a double fire a no-op), so running both at once
+// is safe. POST also covers manual ticks: the local compose ticker
+// (`pnpm docker:tick`) and curl.
 export const maxDuration = 300;
 
 /** Constant-time compare, so a wrong secret leaks nothing through timing. */
@@ -59,15 +59,15 @@ async function tick(req: NextRequest) {
   }
 
   // Before dispatching: free any workflow whose previous run died without
-  // reporting back, or it would stay blocked by the one-active-run index.
-  // Housekeeping is best-effort — neither reaping nor pruning failing is a
-  // reason to skip the dispatch this tick exists for.
+  // reporting back, or it stays blocked by the one-active-run index.
+  // Housekeeping is best-effort — a reap or prune failure shouldn't skip the
+  // dispatch this tick exists for.
   const reaped = await settle("reap", reapStuckRuns);
 
   /*
-   * Reconcile *before* dispatching, so a token that was revoked overnight is
-   * reflected in the connection gate on this same tick rather than costing a
-   * round of failed runs first. Bounded per tick — see `reconcileStale`.
+   * Reconcile *before* dispatching, so a token revoked overnight is reflected
+   * in the connection gate this same tick, rather than costing a round of
+   * failed runs first. Bounded per tick — see `reconcileStale`.
    */
   const reconciled = await settle("reconcile", () =>
     reconcileStaleConnections(),
@@ -75,7 +75,10 @@ async function tick(req: NextRequest) {
 
   const results = await runDueWorkflows();
 
+  // Two sweeps, two windows: traces prune monthly, digests keep a year so
+  // history search has something to search.
   const pruned = await settle("prune", pruneOldRuns);
+  const prunedSteps = await settle("prune-steps", pruneOldRunSteps);
   const prunedLimits = await settle("prune-limits", pruneRateLimits);
 
   return NextResponse.json({
@@ -83,6 +86,7 @@ async function tick(req: NextRequest) {
     reaped,
     reconciled,
     pruned,
+    prunedSteps,
     prunedLimits,
     results,
   });

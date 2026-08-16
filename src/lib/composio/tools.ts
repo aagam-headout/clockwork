@@ -5,22 +5,20 @@ import { composioUserId } from "./identity";
 /*
  * Tool schemas, cached across users.
  *
- * `tools.get(userId, query)` is two things: an HTTP fetch of the tool schemas
- * for a toolkit set, and a local wrap that binds each tool's `execute` to a
- * Composio user id. Only the second half is user-specific — the fetch
- * (`getRawComposioTools`) takes no user id at all — so the schemas can safely
- * be shared, and the fetch is what costs a round trip on every single run and
- * every builder research turn.
+ * `tools.get(userId, query)` does two things: an HTTP fetch of the tool
+ * schemas for a toolkit set, and a local wrap binding each tool's `execute`
+ * to a Composio user id. Only the wrap is user-specific — `getRawComposioTools`
+ * takes no user id — so schemas can be shared, and the fetch is what costs a
+ * round trip on every run and builder research turn.
  *
- * Two invariants this must keep:
+ * Two invariants:
  *
- *  1. Only the *raw* schemas are cached. The wrapped ToolSet closes over a
- *     user id, so a cross-user cache hit on that would execute one user's tool
- *     call against another user's credentials. `wrapToolsForProvider` is cheap
- *     and synchronous, so re-running it per call costs nothing worth saving.
- *  2. Bounded. Tool schema sets run to hundreds of kilobytes; the LRU cap is
- *     what keeps a long-lived instance from accumulating every toolkit
- *     combination any user has ever asked for.
+ *  1. Only *raw* schemas are cached. The wrapped ToolSet closes over a user
+ *     id, so a cross-user cache hit would run one user's tool call against
+ *     another's credentials. `wrapToolsForProvider` is cheap and synchronous,
+ *     so redoing it per call costs nothing.
+ *  2. Bounded. Tool schema sets run to hundreds of KB; the LRU cap stops a
+ *     long-lived instance accumulating every toolkit combo ever requested.
  */
 type Tool = Awaited<
   ReturnType<typeof composio.tools.getRawComposioTools>

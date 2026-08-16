@@ -2,19 +2,18 @@ import Link from "next/link";
 import { ArrowLeft, X } from "lucide-react";
 
 /*
- * Shared presentational primitives, in the Geist idiom: flat surfaces defined
- * by 1px borders, a black/white primary action, 6px control radius and 12px
- * container radius. Server-safe (no hooks, no "use client") so pages compose
- * them directly; the interactive variants live alongside in submit-button.tsx
- * and theme-toggle.tsx.
+ * Shared presentational primitives, in the Geist idiom: flat surfaces with
+ * 1px borders, a black/white primary action, 6px control radius, 12px
+ * container radius. Server-safe (no hooks/"use client") so pages compose them
+ * directly; interactive variants live in submit-button.tsx and theme-toggle.tsx.
  */
 
 type Tone = "neutral" | "accent" | "success" | "danger" | "warn";
 
 /*
- * The soft wash colours sit close to the page background, so a border painted
- * in the same hue disappears entirely — a status chip or an alert needs the
- * `-line` tokens for an edge that actually reads against `bg`/`surface`.
+ * Soft wash colours sit close to the page background, so a border in the same
+ * hue disappears — status chips/alerts need the `-line` tokens for an edge
+ * that reads against `bg`/`surface`.
  */
 const TONE_SOFT: Record<Tone, string> = {
   neutral: "bg-surface-2 text-muted border-border",
@@ -49,8 +48,8 @@ export function Badge({
   className?: string;
 }) {
   return (
-    // 22px tall, not 20: at 20 an 11px cap-height sits visually high against
-    // the 32px controls it shares a row with.
+    // 22px tall, not 20: at 20 an 11px cap-height sits high against the
+    // 32px controls it shares a row with.
     <span
       className={`rounded-chip inline-flex h-[22px] shrink-0 items-center gap-1.5 border px-2 text-[11px] leading-none font-medium ${
         TONE_SOFT[tone]
@@ -121,12 +120,11 @@ export const BUTTON_SIZES = {
 } as const;
 
 /*
- * Icon-only buttons are their own size, not a text size with the padding
- * cancelled. Appending `px-0` to `buttonClass(…, "sm")` looks like it works and
- * doesn't: `px-0` and `px-3` have equal specificity, so the winner is whichever
- * Tailwind emits last — and it emits `px-3` last. The padding survived, the
- * 32px box had ~6px of content left, and the 16px glyph inside got squeezed to
- * 6–8px wide. These strings carry no horizontal padding to begin with.
+ * Icon-only buttons are their own size, not a text size with padding
+ * cancelled. Appending `px-0` to `buttonClass(…, "sm")` looks like it works
+ * but doesn't: `px-0`/`px-3` have equal specificity and Tailwind emits `px-3`
+ * last, so the padding survives and the 16px glyph gets squeezed. These
+ * strings carry no horizontal padding to begin with.
  */
 export const ICON_BUTTON_SIZES = {
   xs: "h-6 w-6",
@@ -179,8 +177,8 @@ export function ButtonLink({
 }) {
   return (
     <Link href={href} className={buttonClass(variant, size, className)}>
-      {/* The small control is 32px tall with 13px text; a 16px glyph next to it
-          reads as oversized, so the icon tracks the button's size. */}
+      {/* Icon tracks the button size: at 32px/13px text, a 16px glyph reads
+          oversized. */}
       {Icon && <Icon className={size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4"} />}
       {children}
     </Link>
@@ -188,11 +186,10 @@ export function ButtonLink({
 }
 
 /**
- * The one content shell every page uses — same max width, same gutters, same
- * top offset, so switching tabs doesn't shift the header or the left edge.
- * `fill` is for screens that own the viewport instead of scrolling as a
- * document (the workflow builder): the shell becomes a full-height flex column
- * whose children manage their own scrolling.
+ * The one content shell every page uses — same max width, gutters, and top
+ * offset, so switching tabs doesn't shift the header or left edge. `fill` is
+ * for screens that own the viewport instead of scrolling as a document (the
+ * workflow builder): a full-height flex column whose children scroll themselves.
  */
 export function PageShell({
   children,
@@ -202,19 +199,17 @@ export function PageShell({
   fill?: boolean;
 }) {
   return (
-    // Gutters step up with the viewport (20 → 32 → 48 → 64px). The rail already
-    // eats the left edge, so content needs real air on both sides of it rather
-    // than the flat 16px it had.
+    // Gutters step up with the viewport (20 → 32 → 48 → 64px): the rail eats
+    // the left edge, so content needs real air on both sides, not a flat 16px.
     <main
       className={`mx-auto flex w-full max-w-7xl flex-col px-5 py-6 md:px-8 lg:px-12 xl:px-16 ${
-        // The fill variant keeps the same top offset so page titles line up
-        // across tabs, but a tighter bottom so the panes get the height.
+        // Fill keeps the top offset so titles line up across tabs, but a
+        // tighter bottom so panes get the height.
         fill
           ? // `clip`, not `hidden`: `hidden` still makes the shell a scroll
-            // container, so focusing anything inside a pane (the sr-only
-            // checkbox inputs) let the browser scroll-into-view push the whole
-            // shell off screen with no scrollbar to bring it back — the page
-            // just went blank. `clip` cannot be scrolled at all.
+            // container, so focusing an sr-only checkbox let scroll-into-view
+            // push the whole shell off screen with no scrollbar back — a blank
+            // page. `clip` can't be scrolled at all.
             "lg:h-screen lg:overflow-clip lg:pt-10 lg:pb-6"
           : "md:py-8 lg:py-10"
       }`}
@@ -251,8 +246,8 @@ export function PageHeader({
         </Link>
       )}
       {/* `items-start`, not `items-center`: a two-line subtitle used to drag
-          the action buttons down to the block's midpoint. They now stay on the
-          title's line, which is where the eye looks for them. */}
+          the action buttons down to the block's midpoint; now they stay on
+          the title's line, where the eye looks for them. */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="min-w-0 flex-1">
           <h1 className="heading-24 text-foreground truncate">{title}</h1>
@@ -312,9 +307,8 @@ export function Stat({
   icon?: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    // Tiles in a row rarely all carry a hint; `justify-between` on a flex
-    // column with a fixed floor keeps their numbers on one baseline instead of
-    // letting each tile shrink to its own content.
+    // Tiles in a row rarely all carry a hint; `justify-between` on a fixed
+    // floor keeps their numbers on one baseline instead of shrinking per tile.
     <div className="rounded-container border-border bg-surface flex min-h-[92px] flex-col justify-between border px-4 py-3.5">
       <div className="flex items-center gap-1.5">
         {Icon ? (
@@ -346,8 +340,8 @@ export function SectionLabel({
   headingClassName?: string;
 }) {
   return (
-    // The row is 32px tall whether or not it carries an action, so a section
-    // with a trailing button doesn't sit lower than the ones without.
+    // Row is 32px tall whether or not it carries an action, so a section with
+    // a trailing button doesn't sit lower than ones without.
     <div className="mb-3 flex min-h-8 items-center gap-2">
       {Icon && <Icon className="text-subtle h-4 w-4 shrink-0" />}
       <h2 className={`${headingClassName} text-foreground`}>{children}</h2>
@@ -370,8 +364,8 @@ export function Mono({
   className?: string;
 }) {
   return (
-    // Same 22px box as Badge: these two sit side by side in every header and
-    // card row, and `py-0.5` on an inline <code> made them disagree by 2px.
+    // Same 22px box as Badge: they sit side by side in every header/card row,
+    // and `py-0.5` on an inline <code> made them disagree by 2px.
     <code
       className={`rounded-chip border-border bg-surface-2 text-muted inline-flex h-[22px] shrink-0 items-center border px-1.5 font-mono text-[11px] leading-none tracking-tight ${className}`}
     >

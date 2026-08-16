@@ -234,8 +234,7 @@ describe("runQuery", () => {
 
 /*
  * `in` walks the prototype chain, so before this a path of "constructor"
- * resolved to a function and the agent got JS internals back as if they were
- * fetched data.
+ * resolved to a function, and the agent got JS internals back as data.
  */
 describe("prototype keys are not data", () => {
   it("refuses a path onto the prototype chain", () => {

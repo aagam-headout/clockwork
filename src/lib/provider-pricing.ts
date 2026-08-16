@@ -2,9 +2,9 @@
 //
 // The Vercel AI Gateway publishes live pricing with its catalog; Anthropic's
 // and OpenAI's own /v1/models endpoints publish none. So when a direct
-// provider is active, the model *list* is still live and only the prices come
-// from here — a model this table doesn't cover shows up in the picker with no
-// cost, which reads honestly as "unknown" rather than "free".
+// provider is active, the model *list* is still live and only the prices
+// come from here — a model this table doesn't cover shows up with no cost,
+// reading honestly as "unknown" rather than "free".
 //
 // Longest prefix wins, so a family entry ("claude-sonnet") can sit under a
 // specific one ("claude-sonnet-4-5") without shadowing it.
@@ -15,10 +15,8 @@ export type Price = {
   cachedInputPerM?: number;
 };
 
-/*
- * Anthropic bills cache *reads* at 0.1x input across the current lineup, so the
- * cached rate is derived rather than repeated on every row.
- */
+// Anthropic bills cache *reads* at 0.1x input across the current lineup, so
+// the cached rate is derived rather than repeated on every row.
 const claude = (input: number, output: number): Price => ({
   inputPerM: input,
   outputPerM: output,

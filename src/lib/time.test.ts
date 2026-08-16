@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { APP_TIMEZONE, dayKey, daysBetween, startOfDay } from "./time";
 
-// The suite runs with APP_TIMEZONE unset, i.e. on the Asia/Kolkata default —
-// UTC+05:30, no DST. That's the offset the assertions below encode.
+// The suite runs with APP_TIMEZONE unset — the Asia/Kolkata default,
+// UTC+05:30, no DST — the offset the assertions below encode.
 describe(`day bucketing in ${APP_TIMEZONE}`, () => {
   it("puts the boundary at IST midnight, not UTC midnight", () => {
     const morning = new Date("2026-08-11T03:00:00Z"); // 08:30 IST

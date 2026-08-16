@@ -3,8 +3,8 @@
  * with the components that write them.
  *
  * They live in a plain module on purpose: exporting them from a "use client"
- * file turns them into client references when the server layout imports them,
- * so nothing was emitted into the HTML at all — the theme flashed and the
+ * file turns them into client references when the server layout imports
+ * them, so nothing was emitted into the HTML — the theme flashed and the
  * sidebar rail snapped from expanded to collapsed on every load.
  */
 
@@ -14,9 +14,9 @@ export const SIDEBAR_KEY = "mw-sidebar";
 /**
  * next-themes' storage key. auth-ui mounts its own ThemeProvider (attribute
  * "class", enableSystem), which owns the `.dark` class and the inline
- * color-scheme on <html> — an inline style our `[data-theme]` rule can't win
- * against. So the pin is written to both keys and both DOM markers, keeping the
- * auth screens on the same palette as the page they sit in.
+ * color-scheme on <html> — a style our `[data-theme]` rule can't win against.
+ * So the pin is written to both keys and both DOM markers, keeping the auth
+ * screens on the same palette as the page they sit in.
  */
 export const NEXT_THEMES_KEY = "theme";
 

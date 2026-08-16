@@ -3,9 +3,9 @@ import { describeShape, previewRows, sampleOf } from "./shape";
 /*
  * Payloads for one run, kept out of the model's context.
  *
- * Deliberately in memory and deliberately per-run: the payload is already
- * being fetched fresh every run, so persisting it would buy nothing and cost a
- * retention policy. The store dies when the run's promise settles.
+ * Deliberately in memory and per-run: the payload is fetched fresh every run,
+ * so persisting it would buy nothing and cost a retention policy. The store
+ * dies when the run's promise settles.
  *
  * The ceiling exists because Fluid Compute reuses an instance across
  * concurrent requests — three runs each holding thirty payloads is real
@@ -13,11 +13,11 @@ import { describeShape, previewRows, sampleOf } from "./shape";
  */
 
 /**
- * The ceiling, counted in UTF-16 characters of each payload's JSON — not in
- * heap bytes. The parsed objects behind those strings are several times
- * larger, so this bounds the *volume of data* a run may hold, not its true
- * memory footprint. It is a proportional brake, deliberately cheap: measuring
- * real retained size would mean walking every payload on every put.
+ * The ceiling, counted in UTF-16 characters of each payload's JSON, not heap
+ * bytes — the parsed objects are several times larger, so this bounds the
+ * *volume of data* a run may hold, not its true memory footprint. A cheap
+ * proportional brake: measuring real retained size would mean walking every
+ * payload on every put.
  */
 export const MAX_STORE_BYTES = 20_000_000;
 
@@ -59,8 +59,8 @@ export function isDescriptor(value: unknown): value is Descriptor {
 }
 
 export function createResultStore(maxBytes = MAX_STORE_BYTES): ResultStore {
-  // Map preserves insertion order, so deleting and re-inserting on access is
-  // all the recency tracking an LRU needs here.
+  // Map preserves insertion order, so delete-then-reinsert on access is all
+  // the LRU recency tracking needed here.
   const entries = new Map<string, { payload: unknown; bytes: number }>();
   const evicted = new Set<string>();
   let nextHandle = 1;
@@ -127,8 +127,8 @@ export function createResultStore(maxBytes = MAX_STORE_BYTES): ResultStore {
 
 /**
  * Keeps a descriptor under its ceiling, shedding the least load-bearing part
- * first: the preview is an optimisation, the sample is illustrative, the shape
- * is how the agent finds field names at all. A pathological payload — hundreds
+ * first: the preview is an optimisation, the sample illustrative, the shape
+ * how the agent finds field names at all. A pathological payload — hundreds
  * of top-level keys — would otherwise produce a "small" stand-in as expensive
  * as the thing it replaced.
  *

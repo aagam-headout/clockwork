@@ -15,11 +15,11 @@ function isTab(value: string | undefined): value is Tab {
   return !!value && (TABS as readonly string[]).includes(value);
 }
 
-// Neon Auth's UserButton menu links to `${account.basePath}/${SETTINGS}` —
-// i.e. /account/settings, and /account/security from AccountView's own nav.
-// `model-provider` is our own tab, not one Auth-UI knows about — see AccountNav.
-// Without this catch-all those links 404. Bare /account, or any path Auth-UI
-// and we don't recognise, has no view of its own, so it redirects to settings.
+// Neon Auth's UserButton links to `${account.basePath}/${SETTINGS}` (i.e.
+// /account/settings) and /account/security via AccountView's own nav.
+// `model-provider` is our own tab, unknown to Auth-UI — see AccountNav.
+// Without this catch-all those links 404; bare /account or any unrecognised
+// path redirects to settings.
 export default async function AccountPage({
   params,
   searchParams,
@@ -62,11 +62,10 @@ export default async function AccountPage({
           {tab === "model-provider" ? (
             <ModelProviderTab />
           ) : (
-            // `auth-surface` re-points the two shadcn token names that mean
-            // something else in our scale — see the Neon Auth bridge in
-            // globals.css. `hideNav`: AccountNav above is this section's only
-            // nav now, so Auth-UI's own (which can't include our extra tab)
-            // stays off.
+            // `auth-surface` remaps two shadcn token names that mean something
+            // else in our scale — see the Neon Auth bridge in globals.css.
+            // `hideNav`: AccountNav is this section's only nav now, so
+            // Auth-UI's own (which can't include our extra tab) stays off.
             <div className="auth-surface rise">
               <AccountView
                 hideNav

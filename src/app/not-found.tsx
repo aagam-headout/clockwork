@@ -3,9 +3,9 @@ import { ErrorState } from "@/components/error-state";
 import { ButtonLink } from "@/components/ui";
 
 /**
- * Reached by an unknown URL and by every `notFound()` call — most often a
- * workflow or run id that was deleted, which is why the copy names that case
- * rather than saying "page not found" and stopping there.
+ * Reached by an unknown URL and by every `notFound()` call — usually a
+ * deleted workflow or run id, which is why the copy names that case instead
+ * of just saying "page not found".
  */
 export default function NotFound() {
   return (

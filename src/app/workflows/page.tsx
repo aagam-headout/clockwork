@@ -36,8 +36,8 @@ import { TOOLKIT_ICONS, TOOLKIT_LABELS } from "@/lib/toolkit-labels";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Workflows" };
 
-// The "Run now" action finishes its work in `after()`; that work is bounded
-// by this segment's duration limit.
+// "Run now" finishes its work in `after()`, bounded by this segment's
+// duration limit.
 export const maxDuration = 300;
 
 function nextRunAt(cron: string, timezone: string): string | null {
@@ -64,12 +64,11 @@ export default async function WorkflowsPage({
 }) {
   const user = await requireUser();
 
-  // `triggerError`: the save succeeded but Composio wouldn't register its event
-  // triggers — the workflow exists and just never fires until that's fixed.
+  // `triggerError`: save succeeded but Composio wouldn't register event
+  // triggers — workflow exists but never fires until fixed.
   // `error`: a row action (pause, delete, run now) failed outright.
-  // `done`: a save, pause or delete that worked. Every one of these actions
-  // ends in a redirect, and one that changes nothing on screen reads as a
-  // no-op — so the successful paths say so too, not just the failing ones.
+  // `done`: a save, pause or delete that worked. All these actions redirect,
+  // so success needs its own message too, not just failure.
   const { triggerError, error, done } = await searchParams;
 
   const rows = await db
@@ -79,12 +78,9 @@ export default async function WorkflowsPage({
     .orderBy(desc(workflows.createdAt));
 
   /*
-   * Latest run per workflow.
-   *
-   * `DISTINCT ON` rather than "take 300 recent runs and reduce in JS": that
-   * shortcut was already wrong for a busy account — 300 rows need not reach
-   * every workflow's most recent run — and with more than one account it
-   * would be reading across all of them to get there.
+   * Latest run per workflow, via `DISTINCT ON` rather than "take 300 recent
+   * runs and reduce in JS": 300 rows can miss a busy account's most recent
+   * run per workflow, and would also scan across every other account.
    */
   const latestRuns = await db
     .selectDistinctOn([runs.workflowId], {
@@ -116,8 +112,7 @@ export default async function WorkflowsPage({
               <Badge tone={enabledCount > 0 ? "success" : "neutral"} dot>
                 {rows.length} total · {enabledCount} active
               </Badge>
-              {/* Creating one was only reachable from the empty state and the
-                  sidebar; the list itself is where you are when you want it. */}
+              {/* Was only reachable from the empty state and the sidebar. */}
               <ButtonLink
                 href="/workflows/new"
                 variant="primary"
@@ -181,7 +176,7 @@ export default async function WorkflowsPage({
           {rows.map((wf) => {
             const latestStatus = latestStatusByWorkflow.get(wf.id);
             const next =
-              wf.enabled && wf.triggerType !== "event"
+              wf.enabled && wf.triggerType === "cron"
                 ? nextRunAt(wf.cron, wf.timezone)
                 : null;
             return (
@@ -209,13 +204,19 @@ export default async function WorkflowsPage({
                       <Mono>
                         {wf.triggerType === "event"
                           ? `${wf.eventTriggers.length} event${wf.eventTriggers.length === 1 ? "" : "s"}`
-                          : wf.cron}
+                          : wf.triggerType === "workflow"
+                            ? "after another workflow"
+                            : wf.cron}
                       </Mono>
                       {!wf.enabled && (
                         <Badge tone="warn">
                           {wf.pausedReason === "needs_reconnect"
                             ? "paused · needs reconnect"
-                            : "paused"}
+                            : wf.pausedReason === "cost_cap"
+                              ? "paused · budget spent"
+                              : wf.pausedReason === "parent_deleted"
+                                ? "paused · trigger deleted"
+                                : "paused"}
                         </Badge>
                       )}
                     </div>
@@ -224,11 +225,34 @@ export default async function WorkflowsPage({
                       {wf.goal}
                     </p>
 
-                    {/*
-                     * A connection problem is the one failure the user can
-                     * actually fix from here, so it gets a line and a link
-                     * rather than being folded into the status dot.
-                     */}
+                    {/* The one failure fixable from here, so it gets a line
+                        and link instead of just the status dot. */}
+                    {wf.pausedReason === "cost_cap" && (
+                      <p className="text-warn-text mt-2 text-xs">
+                        Budget spent for this month.{" "}
+                        <Link
+                          href={`/workflows/${wf.id}`}
+                          className="underline underline-offset-2"
+                        >
+                          Raise it
+                        </Link>{" "}
+                        to resume, or wait for next month.
+                      </p>
+                    )}
+
+                    {wf.pausedReason === "parent_deleted" && (
+                      <p className="text-warn-text mt-2 text-xs">
+                        Its trigger workflow was deleted.{" "}
+                        <Link
+                          href={`/workflows/${wf.id}`}
+                          className="underline underline-offset-2"
+                        >
+                          Pick a new trigger
+                        </Link>{" "}
+                        to re-enable it.
+                      </p>
+                    )}
+
                     {(() => {
                       const latest = latestByWorkflow.get(wf.id);
                       const blocked =
@@ -254,8 +278,7 @@ export default async function WorkflowsPage({
                       );
                     })()}
 
-                    {/* Each toolkit carries its own glyph, so the row reads as
-                        apps rather than as a wall of gray words. */}
+                    {/* Per-toolkit glyphs so the row reads as apps, not gray words. */}
                     <div className="mt-3 flex flex-wrap items-center gap-1.5">
                       {wf.toolkits.map((tk) => (
                         <Badge key={tk} tone="neutral" icon={TOOLKIT_ICONS[tk]}>
@@ -264,8 +287,7 @@ export default async function WorkflowsPage({
                       ))}
                     </div>
 
-                    {/* One icon per fact, all on the same 12px line — the
-                        schedule, the last result, the zone. */}
+                    {/* One icon per fact on a 12px line: schedule, last result, zone. */}
                     <div className="text-subtle mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
                       <span className="inline-flex items-center gap-1.5">
                         <Clock className="h-3.5 w-3.5 shrink-0" />
@@ -273,9 +295,11 @@ export default async function WorkflowsPage({
                           ? "Paused"
                           : wf.triggerType === "event"
                             ? `Runs on ${wf.eventTriggers.join(", ") || "no events yet"}`
-                            : next
-                              ? `Next ${next}`
-                              : "Invalid cron expression"}
+                            : wf.triggerType === "workflow"
+                              ? "Runs after another workflow"
+                              : next
+                                ? `Next ${next}`
+                                : "Invalid cron expression"}
                       </span>
                       {wf.lastRunAt && (
                         <span className="inline-flex items-center gap-1.5">
@@ -294,9 +318,8 @@ export default async function WorkflowsPage({
                     </div>
                   </div>
 
-                  {/* Primary action first, then the icon-only trio it is
-                      separated from by a hairline — so "Run now" doesn't read
-                      as one of four equal buttons. */}
+                  {/* Primary action, then a hairline, then the icon-only trio —
+                      so "Run now" isn't just one of four equal buttons. */}
                   <div className="flex shrink-0 items-center gap-1">
                     <form
                       action={async () => {
@@ -315,9 +338,8 @@ export default async function WorkflowsPage({
 
                     <span className="bg-border mx-1 h-5 w-px" aria-hidden />
 
-                    {/* The card title links to the same place, but a title is
-                        not where anyone looks for "change this" — the edit
-                        affordance belongs in the action row with the rest. */}
+                    {/* Card title links here too, but "change this" belongs
+                        in the action row, not the title. */}
                     <Link
                       href={`/workflows/${wf.id}`}
                       title="Edit workflow"
@@ -358,9 +380,8 @@ export default async function WorkflowsPage({
                         await deleteWorkflow(wf.id);
                       }}
                     >
-                      {/* Arms first: this takes the workflow and its whole run
-                          history, and it used to be one click on a 32px
-                          glyph sitting next to Pause. */}
+                      {/* Confirms first: deletes the workflow and its whole run
+                          history; used to be one click on a 32px glyph next to Pause. */}
                       <ConfirmSubmitButton
                         pendingLabel="Deleting…"
                         confirmLabel="Delete workflow?"

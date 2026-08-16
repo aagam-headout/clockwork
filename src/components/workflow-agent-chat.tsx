@@ -25,6 +25,8 @@ import type { ToolkitOption } from "@/components/workflow-form";
 import type { ModelInfo } from "@/lib/model-tiers";
 import { defaultBuilderModel, isBuilderModel } from "@/lib/builder-models";
 import { fetchJson } from "@/lib/fetch-json";
+import { Markdown } from "@/components/markdown";
+import { useAutosize } from "@/components/markdown-editor";
 
 /** Module-level so the picker's `include` prop keeps a stable identity. */
 const isBuilderModelInfo = (model: ModelInfo) => isBuilderModel(model.id);
@@ -37,8 +39,8 @@ type Proposal = Partial<WorkflowFormValues> & {
 };
 
 /**
- * The assistant clarifies before it commits, so a turn is a chat reply that may
- * or may not carry a spec — `spec: null` means it asked a question instead.
+ * A turn is a chat reply that may or may not carry a spec — `spec: null`
+ * means it asked a clarifying question instead of committing.
  */
 type ProposeResponse = {
   reply: string;
@@ -69,10 +71,10 @@ const EXAMPLES = [
 ];
 
 /**
- * The left pane of the new-workflow screen: a conversation that writes the form
- * on the right. It keeps the whole turn history plus the spec it last proposed
- * and sends both to /api/workflows/propose, so a follow-up like "make it
- * hourly" edits that spec instead of starting from nothing.
+ * The left pane of the new-workflow screen: a conversation that writes the
+ * form on the right. Keeps the turn history plus the last proposed spec and
+ * sends both to /api/workflows/propose, so "make it hourly" edits that spec
+ * instead of starting fresh.
  */
 export function WorkflowAgentChat({
   onPropose,
@@ -87,10 +89,8 @@ export function WorkflowAgentChat({
   availableToolkits?: ToolkitOption[];
   /**
    * The workflow being edited, if any. Seeds `current` so the first message
-   * refines this spec instead of drafting from nothing — the form on the
-   * right already shows these values, and a bare "make it hourly" would
-   * otherwise read as a request to build a brand-new workflow around just
-   * that one field.
+   * refines this spec instead of drafting from nothing — otherwise a bare
+   * "make it hourly" would read as building a new workflow around one field.
    */
   initialSpec?: Partial<WorkflowFormValues> | null;
 }) {
@@ -102,20 +102,22 @@ export function WorkflowAgentChat({
   const [builderModel, setBuilderModel] = useState(() =>
     defaultBuilderModel(models),
   );
-  // Apps the assistant may read from while it drafts. Empty by default: a
-  // lookup costs a round trip to someone's real inbox, so it's opted into.
-  // Editing an existing workflow preselects the apps it already uses.
+  // Apps the assistant may read from while drafting. Empty by default since a
+  // lookup costs a round trip to a real inbox. Editing preselects apps
+  // already used.
   const [readToolkits, setReadToolkits] = useState<Set<string>>(
     () => new Set(initialSpec?.toolkits ?? []),
   );
-  // Whether the workflow it drafts is allowed to call write tools at runtime.
-  // Off by default — same default as the form's own permission checkbox, which
-  // this writes into via the proposed spec's `readOnly`. Editing an existing
-  // workflow starts from its saved permission instead.
+  // Whether the drafted workflow may call write tools at runtime. Off by
+  // default, matching the form's checkbox (writes here via the proposed
+  // spec's `readOnly`); editing starts from the saved permission instead.
   const [allowWrites, setAllowWrites] = useState(
     () => initialSpec?.readOnly === false,
   );
   const scrollRef = useRef<HTMLDivElement>(null);
+  // 160px — same ceiling as the old `max-h-40`, now a range instead of a
+  // fixed three rows.
+  const composerRef = useAutosize(draft, 160);
 
   const connectors = [WEB_SEARCH, ...availableToolkits];
 
@@ -127,8 +129,8 @@ export function WorkflowAgentChat({
     });
   }
 
-  // Pin to the newest turn — including the pending bubble, so the user sees
-  // that their message landed.
+  // Pin to the newest turn (including the pending bubble) so the user sees
+  // their message landed.
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
@@ -147,9 +149,8 @@ export function WorkflowAgentChat({
     setError(null);
 
     try {
-      // fetchJson, not `res.json()` then `res.ok`: a proposal request that hits
-      // an auth redirect or a platform error answers with HTML, and parsing
-      // that first turned every such failure into "Unexpected token '<'".
+      // fetchJson, not `res.json()`/`res.ok`: an auth redirect or platform
+      // error answers with HTML, which used to surface as "Unexpected token '<'".
       const data = await fetchJson<ProposeResponse>("/api/workflows/propose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -162,15 +163,15 @@ export function WorkflowAgentChat({
         }),
       });
 
-      // A clarifying turn leaves the form alone — only a committed spec writes
-      // into it, so half-answered questions can't half-fill the workflow.
+      // A clarifying turn leaves the form alone — only a committed spec
+      // writes into it, so half-answered questions can't half-fill the workflow.
       const spec: Proposal | undefined = data.spec
         ? { ...data.spec, usedTools: data.usedTools }
         : undefined;
       if (spec) {
         onPropose(spec);
-        // Without usedTools: `current` is echoed back to the model as the spec
-        // it's refining, and research trivia isn't part of the spec.
+        // Without usedTools: `current` gets echoed back to the model as the
+        // spec it's refining, and research trivia isn't part of the spec.
         setCurrent(data.spec);
       }
       setMessages((prev) => [
@@ -191,8 +192,8 @@ export function WorkflowAgentChat({
 
   function reset() {
     setMessages([]);
-    // Back to the saved workflow, not a blank slate — "Reset" clears the
-    // chat, not the thing being edited.
+    // Back to the saved workflow, not blank — "Reset" clears the chat, not
+    // the thing being edited.
     setCurrent(initialSpec);
     setError(null);
     setDraft("");
@@ -202,30 +203,26 @@ export function WorkflowAgentChat({
 
   return (
     <div className="rounded-container border-border bg-surface flex h-full min-h-0 flex-col overflow-hidden border">
-      {/* px-4 matches the message column and the composer below it, so the
-          card has one left edge from top to bottom. */}
+      {/* px-4 matches the message column and composer below it, giving the
+          card one left edge top to bottom. */}
       <div className="border-border flex h-12 shrink-0 items-center justify-between gap-2 border-b px-4">
         <div className="flex shrink-0 items-center gap-2">
           <span className="rounded-control border-border bg-bg-subtle text-foreground flex h-7 w-7 items-center justify-center border">
             <Sparkles className="h-4 w-4" />
           </span>
-          {/* "Builder", not "Assistant": the pane's whole job is to build the
-              workflow in the form beside it, and the page is already called
-              New workflow. The controls to the right need the room on a narrow
-              pane, so the word goes screen-reader-only there. */}
+          {/* "Builder", not "Assistant": the pane's job is to build the
+              workflow beside it. Goes screen-reader-only on narrow panes,
+              where the controls need the room. */}
           <span className="heading-14 text-foreground max-sm:sr-only">
             Workflow Builder
           </span>
         </div>
         {/*
-         * Two controls here, not four. The old bar carried all four as
-         * `shrink-0` on one line, so they ran over each other and past the
-         * card's edge as soon as the pane narrowed.
-         *
-         * What's left is what belongs to the *session*: which apps the builder
-         * may read from, and Reset. The two that belong to the *message* —
-         * what the workflow may do, which model drafts it — moved down onto
-         * the composer.
+         * Two controls here, not four: the old bar had all four `shrink-0` on
+         * one line and they collided once the pane narrowed. What's left
+         * belongs to the *session* (which apps the builder reads, Reset); the
+         * two that belong to the *message* (write permission, drafting model)
+         * moved onto the composer.
          */}
         <div className="flex min-w-0 items-center gap-1.5">
           {connectors.length > 0 && (
@@ -267,9 +264,8 @@ export function WorkflowAgentChat({
         >
           {empty ? (
             <div className="flex flex-col">
-              {/* "on the right" is only true from `lg` up — below it the form
-                  is stacked underneath this pane, and the sentence was sending
-                  phone users looking for a column that isn't there. */}
+              {/* "on the right" is only true from `lg` up — below that the
+                  form stacks under this pane, with no column to point to. */}
               <p className="text-muted text-sm leading-relaxed">
                 Say what should happen, and when. I&apos;ll fill in the
                 schedule, apps and prompt{" "}
@@ -301,9 +297,12 @@ export function WorkflowAgentChat({
                   </div>
                 ) : (
                   <div key={i} className="flex flex-col gap-2">
-                    <p className="rounded-container border-border bg-bg-subtle text-foreground max-w-[92%] border px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap">
-                      {message.content}
-                    </p>
+                    {/* Builder answers in markdown (lists, `code` for tool
+                        slugs, tables); pre-wrapped text showed it as source.
+                        User turns stay verbatim. */}
+                    <div className="rounded-container border-border bg-bg-subtle text-foreground max-w-[92%] border px-3 py-2">
+                      <Markdown size="sm">{message.content}</Markdown>
+                    </div>
                     {(message.usedTools?.length ?? 0) > 0 && (
                       <p className="text-subtle flex items-start gap-1.5 text-[11px]">
                         <Search className="mt-px h-3.5 w-3.5 shrink-0" />
@@ -339,17 +338,18 @@ export function WorkflowAgentChat({
       >
         <div className="rounded-container border-border bg-bg focus-within:border-border-strong mx-auto flex w-full max-w-[680px] flex-col gap-1.5 border p-1.5 transition-colors">
           <textarea
+            // Grows with the message instead of a fixed three rows.
+            ref={composerRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              // Enter sends, Shift+Enter breaks the line — the convention every
-              // chat composer uses.
+              // Enter sends, Shift+Enter breaks the line — standard chat convention.
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 void send(draft);
               }
             }}
-            rows={3}
+            rows={2}
             placeholder={
               empty
                 ? "Every weekday morning, check my calendar…"
@@ -359,27 +359,23 @@ export function WorkflowAgentChat({
             }
             disabled={loading}
             aria-label="Describe the workflow"
-            className="text-foreground placeholder:text-subtle max-h-40 min-h-0 w-full resize-none bg-transparent px-1.5 py-1 text-[13px] leading-relaxed outline-none disabled:opacity-60"
+            className="text-foreground placeholder:text-subtle min-h-0 w-full resize-none bg-transparent px-1.5 py-1 text-[13px] leading-relaxed outline-none disabled:opacity-60"
           />
 
           {/*
-           * The composer's toolbar: both controls sit hard against Send, as
-           * one right-hand cluster, because both of them describe the message
-           * about to be sent. `justify-end` + `flex-wrap` — on a narrow pane
-           * they drop to their own line rather than colliding, which is
-           * exactly what the fixed header row couldn't do.
+           * Composer toolbar: both controls sit against Send as one cluster
+           * since both describe the message being sent. `justify-end` +
+           * `flex-wrap` lets them drop to their own line on a narrow pane
+           * instead of colliding.
            *
-           * The chip carries its subject as a muted prefix ("Workflow"), the
-           * same way the header's does ("Builder"). Without it, "read-only"
-           * doesn't say read-only *for whom*: the builder in front of you, or
-           * the workflow you're configuring. The prefix drops below `sm`,
-           * where the value alone has to carry it.
+           * The chip carries a muted prefix ("Workflow"), like the header's
+           * ("Builder") — otherwise "read-only" doesn't say for whom. Prefix
+           * drops below `sm`, where the value alone carries it.
            */}
           <div className="flex flex-wrap items-center justify-end gap-1.5">
-            {/* What the *saved workflow* may do on every run. It rides along
-                to the API so the spec is written for an agent that can act,
-                and lands in the form as the same flag the form's own checkbox
-                sets — which is why both places use these exact words. */}
+            {/* What the *saved workflow* may do on every run; rides to the API
+                so the spec is written for an agent that can act, and lands in
+                the form as the same flag its own checkbox sets. */}
             <button
               type="button"
               onClick={() => setAllowWrites((v) => !v)}
@@ -402,10 +398,9 @@ export function WorkflowAgentChat({
               <span>{allowWrites ? "write tools allowed" : "read-only"}</span>
             </button>
 
-            {/* Which model does the *building* — not the model it picks for
-                the workflow, which the form on the right owns. Same dialog,
-                but a narrowed catalog: only models that can hold the
-                conversation and still emit a valid spec. */}
+            {/* Which model does the *building*, not the model it picks for
+                the workflow (the form owns that). Same dialog, narrowed to
+                models that can hold the conversation and emit a valid spec. */}
             <ModelPicker
               name={null}
               variant="compact"
@@ -431,12 +426,11 @@ export function WorkflowAgentChat({
 }
 
 /*
- * Phases, with the second they start at. /api/workflows/propose answers in one
- * shot — there is no progress to report — so these are honest about being a
- * clock, not a trace: each line only claims the thing the request is *known* to
- * be doing by then, and the last one admits it's still waiting rather than
- * inventing a fifth step. Reading from connected apps adds a real round trip to
- * someone's inbox, so that path gets its own, slower script.
+ * Phases, with the second they start at. The API answers in one shot — no
+ * real progress to report — so these are a clock, not a trace: each line only
+ * claims what's *known* to be happening by then, and the last admits it's
+ * still waiting rather than inventing a fifth step. Reading from connected
+ * apps adds a real round trip, so that path gets its own, slower script.
  */
 const PHASES_LOCAL: Array<[number, string]> = [
   [0, "Reading your request…"],
@@ -453,12 +447,10 @@ const PHASES_READING: Array<[number, string]> = [
 ];
 
 /**
- * The assistant's turn while it's in flight. Shaped like the bubble that will
- * replace it — same border, wash and radius — so the reply lands in place
- * instead of the column jumping when a plain one-line spinner is swapped for a
- * paragraph. The elapsed counter appears only once the wait is long enough to
- * feel like a hang (6s), which is the point where a reader starts wondering
- * whether anything is happening at all.
+ * The assistant's turn while in flight. Shaped like the bubble that will
+ * replace it (same border, wash, radius) so the reply lands in place instead
+ * of the column jumping. Elapsed counter appears only past 6s, once the wait
+ * starts feeling like a hang.
  */
 function PendingTurn({ reading }: { reading: boolean }) {
   const [elapsed, setElapsed] = useState(0);
@@ -480,9 +472,9 @@ function PendingTurn({ reading }: { reading: boolean }) {
 
   return (
     <div
-      // `w-fit`, not a full-width row: the reply that replaces it is a bubble
-      // that hugs its text, and a pending bar stretched across the column read
-      // as a different kind of object entirely.
+      // `w-fit`, not full-width: the reply that replaces it is a bubble
+      // hugging its text, and a stretched pending bar read as a different
+      // kind of object.
       className="rounded-container border-border bg-bg-subtle flex w-fit max-w-[92%] items-center gap-2.5 border px-3 py-2"
       role="status"
       aria-live="polite"
@@ -490,8 +482,8 @@ function PendingTurn({ reading }: { reading: boolean }) {
       <span className="text-subtle relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
         <Sparkles className="h-3.5 w-3.5" />
       </span>
-      {/* `key` on the label so a phase change re-runs the rise, which is the
-          only signal that the wait moved on. */}
+      {/* `key` on the label so a phase change re-runs the rise — the only
+          signal the wait moved on. */}
       <span
         key={label}
         className="rise text-shimmer min-w-0 truncate text-[13px]"
@@ -508,10 +500,9 @@ function PendingTurn({ reading }: { reading: boolean }) {
 }
 
 /**
- * The apps the assistant may read from while drafting. A dropdown rather than a
- * row of chips: the connector catalog is open-ended — every Composio app the
- * user ever links shows up here — so this has to stay one control wide no
- * matter how long the list gets, and be searchable once it's past a handful.
+ * Apps the assistant may read from while drafting. A dropdown, not chips: the
+ * catalog is open-ended (every linked Composio app shows up), so it must stay
+ * one control wide and be searchable past a handful.
  */
 function ConnectorPicker({
   connectors,
@@ -532,8 +523,8 @@ function ConnectorPicker({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    // The panel is anchored to the trigger's viewport box, so it has to follow
-    // it — the chat pane and the page both scroll under it.
+    // The panel is anchored to the trigger's viewport box, so it must follow —
+    // both the chat pane and the page scroll under it.
     const reposition = () =>
       setRect(triggerRef.current?.getBoundingClientRect() ?? null);
     window.addEventListener("keydown", onKey);
@@ -581,8 +572,8 @@ function ConnectorPicker({
         <ChevronsUpDown className="text-subtle h-3.5 w-3.5 shrink-0" />
       </button>
 
-      {/* Portalled for the same reason the model picker is: the chat card
-          clips its overflow, and the form column is a `@container`. */}
+      {/* Portalled like the model picker: the chat card clips overflow, and
+          the form column is a `@container`. */}
       {open &&
         rect &&
         typeof document !== "undefined" &&
@@ -599,11 +590,10 @@ function ConnectorPicker({
               aria-label="Apps the builder may read while drafting"
               className="rounded-container border-border bg-surface shadow-pop fixed z-50 flex w-[260px] flex-col overflow-hidden border"
               style={{
-                // The trigger sits on the composer, at the bottom of the pane,
-                // so a panel that always dropped downward would open off the
-                // bottom of the window. It flips above the trigger when that's
-                // the taller side, and takes its height from whatever room is
-                // actually there rather than a fixed 380.
+                // Trigger sits at the bottom of the pane, so a panel that
+                // always dropped down would open off the window. Flips above
+                // when that side is taller, and sizes to whatever room's
+                // there rather than a fixed 380.
                 ...(() => {
                   const GAP = 6;
                   const EDGE = 8;
@@ -623,7 +613,7 @@ function ConnectorPicker({
                   };
                 })(),
                 // Right-aligned to the trigger, clamped so a narrow viewport
-                // can't push the panel off-screen.
+                // can't push it off-screen.
                 left: Math.round(
                   Math.max(
                     8,
@@ -686,8 +676,8 @@ function ConnectorPicker({
               </div>
 
               <div className="border-border bg-bg-subtle flex items-center justify-between gap-2 border-t px-3 py-2">
-                {/* The one thing worth saying in a picker full of app names:
-                    ticking one hands over read access to a real account. */}
+                {/* Worth saying once: ticking an app hands over read access
+                    to a real account. */}
                 <span className="text-subtle text-[11px]">
                   Looks, never touches
                 </span>

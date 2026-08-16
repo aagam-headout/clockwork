@@ -82,9 +82,9 @@ export function runQuery(root: unknown, spec: QuerySpec): QueryOutcome {
     };
   }
 
-  // `total`/`truncated` mirror what the string path already reports, so a
-  // large array can be paged the same way a long text can: re-call with the
-  // next `offset` while `truncated` is true.
+  // `total`/`truncated` mirror the string path's reporting, so a large array
+  // can be paged the same way: re-call with the next `offset` while
+  // `truncated` is true.
   let total: number | undefined;
   let truncated: boolean | undefined;
 
@@ -124,9 +124,8 @@ function walk(root: unknown, path?: string): QueryOutcome {
       };
     }
     const container = current as Row;
-    // Own keys only: `in` walks the prototype chain, so a path of
-    // "constructor" or "toString" would resolve to a function the agent then
-    // tries to read as data.
+    // Own keys only: `in` walks the prototype chain, so "constructor" or
+    // "toString" would resolve to a function read back as data.
     if (!Object.hasOwn(container, segment)) {
       return {
         ok: false,
@@ -158,8 +157,7 @@ function matches(row: Row, where: WhereSpec): boolean {
     }
   }
 
-  // A missing or null field must never satisfy after/before — if the field is
-  // absent or null, these comparisons cannot reliably succeed.
+  // A missing or null field must never satisfy after/before.
   if (
     (where.after !== undefined || where.before !== undefined) &&
     value == null
@@ -167,8 +165,8 @@ function matches(row: Row, where: WhereSpec): boolean {
     return false;
   }
 
-  // Lexicographic on strings, which is what ISO timestamps are designed for,
-  // and numeric on numbers — covering both an ISO `date` and a unix `ts`.
+  // Lexicographic on strings (ISO timestamps sort correctly that way) and
+  // numeric on numbers — covers both an ISO `date` and a unix `ts`.
   if (where.after !== undefined && compare(value, where.after) <= 0) {
     return false;
   }
@@ -182,9 +180,8 @@ function matches(row: Row, where: WhereSpec): boolean {
 function compare(a: unknown, b: unknown): number {
   if (typeof a === "number" && typeof b === "number") return a - b;
   // A number against a numeric-looking string (mixed data from an external
-  // tool) must still compare numerically — otherwise 9 sorts after 10 as
-  // strings while the all-number rows around it sort correctly, giving an
-  // order that's inconsistent depending on which rows happen to be adjacent.
+  // tool) must still compare numerically — otherwise "9" sorts after "10"
+  // as strings, giving an order inconsistent with the all-number rows.
   const numA = typeof a === "number" ? a : coerceNumber(a);
   const numB = typeof b === "number" ? b : coerceNumber(b);
   if (numA !== null && numB !== null) return numA - numB;

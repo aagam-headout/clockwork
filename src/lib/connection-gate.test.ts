@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-// The gate's pure helpers are what these cover. `requiredToolkits` and
-// `checkConnections` reach the catalog and the database respectively; the
-// classification logic below is where the interesting mistakes live.
+// Covers the gate's pure helpers. `requiredToolkits` and `checkConnections`
+// reach the catalog and database respectively; the classification logic
+// below is where the interesting mistakes live.
 vi.mock("@/lib/composio", () => ({
   noAuthToolkitSlugs: async () => new Set(["composio_search"]),
 }));

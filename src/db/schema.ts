@@ -4,6 +4,7 @@ import {
   uniqueIndex,
   index,
   primaryKey,
+  foreignKey,
   uuid,
   text,
   boolean,
@@ -11,37 +12,45 @@ import {
   jsonb,
   timestamp,
   numeric,
+  customType,
 } from "drizzle-orm/pg-core";
 
 /*
- * One row per person who has signed in. `id` is the app's own identity and the
- * only thing anything else keys off — including Composio, whose per-user
- * namespace is derived from it (see `src/lib/composio/identity.ts`).
+ * Postgres full-text vector.
  *
- * The join key from a session is `authUserId`, not email: Neon Auth is
- * better-auth underneath and hands back a stable `user.id`, so a user changing
- * their email address is a one-column UPDATE here rather than a rewrite of
- * every owned row in every table.
+ * Modelled here, not as a hand-written migration, because drizzle-kit diffs
+ * against this file: a column it can't see is one it proposes to drop on the
+ * next `db:generate`.
+ */
+const tsvector = customType<{ data: string; driverData: string }>({
+  dataType: () => "tsvector",
+});
+
+/*
+ * One row per person who has signed in. `id` is the app's own identity and
+ * the only thing anything else keys off — including Composio, whose per-user
+ * namespace derives from it (see `src/lib/composio/identity.ts`).
+ *
+ * The join key from a session is `authUserId`, not email: Neon Auth (better-
+ * auth underneath) hands back a stable `user.id`, so an email change is a
+ * one-column UPDATE here instead of rewriting every owned row everywhere.
  */
 export const users = pgTable(
   "users",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     /*
-     * Neon Auth's user id. Nullable because two kinds of row exist before any
-     * Neon Auth id is known — the OWNER_EMAIL row seeded by the multi-user
-     * backfill, and the LOCAL_AUTH_BYPASS row the Docker stack runs as. Both
-     * are adopted by the first matching sign-in (see `ensureUser`).
+     * Neon Auth's user id. Nullable because two rows exist before any Neon
+     * Auth id is known — the OWNER_EMAIL row from the multi-user backfill,
+     * and the LOCAL_AUTH_BYPASS row the Docker stack runs as. Both are
+     * adopted by the first matching sign-in (see `ensureUser`).
      */
     authUserId: text("auth_user_id").unique(),
     /** Lowercased. Display and backfill only — never the identity. */
     email: text("email").notNull(),
     name: text("name"),
     imageUrl: text("image_url"),
-    /**
-     * active | suspended. Signup is open, so this is the lever for shutting
-     * off an abusive account; flip it with psql, there is no admin UI.
-     */
+    /** active | suspended. Signup is open; flip via psql to cut off abuse — no admin UI. */
     status: text("status").notNull().default("active"),
     /** Per-user override of the default workflow cap; null = use the default. */
     workflowLimit: integer("workflow_limit"),
@@ -54,21 +63,21 @@ export const users = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   },
   (table) => [
-    // Functional index, so `Foo@x.com` and `foo@x.com` can never both exist
-    // even if some future caller forgets to lowercase.
+    // Functional index so `Foo@x.com`/`foo@x.com` can't both exist, even if
+    // a future caller forgets to lowercase.
     uniqueIndex("users_email_unique").on(sql`lower(${table.email})`),
   ],
 );
 
 /*
- * Bring-your-own-key: each user's model-provider credential, encrypted at rest
- * with AES-256-GCM (see `src/lib/crypto/secrets.ts`).
+ * Bring-your-own-key: each user's model-provider credential, encrypted at
+ * rest with AES-256-GCM (see `src/lib/crypto/secrets.ts`).
  *
- * Deliberately its own table rather than columns on `user_settings`. A user
- * holds up to three of these at once, and — more importantly — `user_settings`
- * gets selected wholesale into server components. Key material living in a
- * separate narrow table means putting ciphertext into an RSC payload takes a
- * deliberate query against a table nothing else touches.
+ * Its own table rather than columns on `user_settings` — a user holds up to
+ * three, and `user_settings` gets selected wholesale into server components.
+ * Keeping key material in a separate narrow table means putting ciphertext
+ * into an RSC payload takes a deliberate query against a table nothing else
+ * touches.
  */
 export const userProviderKeys = pgTable(
   "user_provider_keys",
@@ -109,50 +118,79 @@ export const workflows = pgTable(
     /** Unique per owner, not globally — see the index at the bottom of this table. */
     slug: text("slug").notNull(),
     /*
-     * Who owns this workflow. Load-bearing twice over: it scopes every read and
-     * mutation (a cron tick and a webhook have no session, so the row itself is
-     * the only statement of ownership), and it selects whose provider key and
-     * whose Composio connections the run goes through.
-     *
+     * Who owns this workflow. Load-bearing twice over: it scopes every read
+     * and mutation (a cron tick or webhook has no session, so the row itself
+     * is the only statement of ownership), and it selects whose provider key
+     * and Composio connections the run goes through.
      */
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     goal: text("goal").notNull(), // the natural-language prompt
-    // "cron" runs on `cron`/`timezone`; "event" runs when one of
-    // `eventTriggers` fires as a Composio webhook.
+    // "cron" runs on `cron`/`timezone`; "event" fires via a Composio webhook
+    // in `eventTriggers`; "workflow" runs when `parentWorkflowId` finishes
+    // and `parentCondition` holds.
     triggerType: text("trigger_type").notNull().default("cron"),
     cron: text("cron").notNull(), // "0 8 * * 1-5" — "" for event workflows
     timezone: text("timezone").notNull().default("Asia/Kolkata"),
     eventTriggers: text("event_triggers").array().notNull().default([]),
+    /*
+     * Chaining. The link lives on the child, matching every other trigger in
+     * this table: the trigger always belongs to the workflow that fires. A
+     * children-list on the parent would make a child's own `triggerType` a
+     * lie, and leave dangling ids with no key to catch them on deletion.
+     *
+     * SET NULL rather than cascade — deleting a parent must not delete a
+     * child's run history. The orphan is paused with `pausedReason`
+     * 'parent_deleted' instead, reusing the existing re-enable path.
+     */
+    parentWorkflowId: uuid("parent_workflow_id"),
+    /** Expression over the PARENT's signals; null fires the child always. */
+    parentCondition: text("parent_condition"),
+    /** Expression over THIS workflow's own signals; null always delivers. */
+    alertCondition: text("alert_condition"),
+    /** [{key, type, description}] — what the `report` tool may fill. */
+    signalSchema: jsonb("signal_schema").notNull().default([]),
     toolkits: text("toolkits").array().notNull().default([]),
     allowTools: text("allow_tools").array().notNull().default([]),
     denyTools: text("deny_tools").array().notNull().default([]),
     deliver: jsonb("deliver").notNull().default([]), // [{type:"slack_dm"},{type:"dashboard"}]
     model: text("model").notNull().default("anthropic/claude-sonnet-5"),
     maxSteps: integer("max_steps").notNull().default(15),
+    /*
+     * Monthly ceiling on this workflow's model spend, in USD. Null is
+     * uncapped — every row that existed before this shipped.
+     *
+     * Enforced retroactively: a run's cost is only known once it finishes,
+     * so the cap blocks the next run, not the one that crossed it. Overshoot
+     * is thus bounded by a single run's cost — the honest guarantee here.
+     */
+    monthlyCostCapUsd: numeric("monthly_cost_cap_usd", {
+      precision: 10,
+      scale: 2,
+    }),
     readOnly: boolean("read_only").notNull().default(true),
     enabled: boolean("enabled").notNull().default(true),
     /**
      * Consecutive runs blocked by a missing/expired connection. Reset to 0 by
-     * any successful run and by a reconnect; at the limit the workflow is paused
-     * rather than left to fail on every tick forever.
+     * a successful run or a reconnect; at the limit the workflow is paused
+     * instead of failing on every tick forever.
      */
     connectionFailures: integer("connection_failures").notNull().default(0),
     /**
-     * Why `enabled` is false, when the app turned it off rather than the user.
-     * "needs_reconnect" is the only value today — it is also the marker that
-     * lets a reconnect re-enable exactly the workflows it paused, and nothing
-     * the user paused by hand.
+     * Why `enabled` is false, when the app (not the user) turned it off.
+     * "needs_reconnect" is the only value today, and doubles as the marker
+     * that lets a reconnect re-enable exactly the workflows it paused —
+     * never ones the user paused by hand.
      */
     pausedReason: text("paused_reason"),
     /** Last *successful* run — what the UI means by "last ran". */
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),
     /**
      * Last time a run was *claimed* for this workflow, success or not. The
-     * scheduler dues off this one so a failing workflow doesn't stay due and
-     * re-fire on every tick.
+     * scheduler dues off this so a failing workflow doesn't stay due and
+     * re-fire every tick.
      */
     lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -165,9 +203,8 @@ export const workflows = pgTable(
   (table) => [
     /*
      * Per-owner slug uniqueness. Globally unique was both a collision — one
-     * account naming a workflow "digest" pushed the next account's to "digest-2"
-     * — and an oracle: the suffix you got back told you whether a stranger
-     * already owned that name.
+     * account's "digest" pushed the next account's to "digest-2" — and an
+     * oracle: the suffix told you whether a stranger already owned that name.
      */
     uniqueIndex("workflows_user_slug_unique").on(table.userId, table.slug),
     index("workflows_user_created_idx").on(table.userId, table.createdAt),
@@ -178,6 +215,15 @@ export const workflows = pgTable(
       table.triggerType,
       table.enabled,
     ),
+    // Declared here, not via `references()` on the column: drizzle can't
+    // reference a table from inside its own definition.
+    foreignKey({
+      columns: [table.parentWorkflowId],
+      foreignColumns: [table.id],
+      name: "workflows_parent_fk",
+    }).onDelete("set null"),
+    // Every finished run asks "who are this workflow's children?".
+    index("workflows_parent_idx").on(table.parentWorkflowId),
   ],
 );
 
@@ -188,7 +234,7 @@ export const runs = pgTable(
     workflowId: uuid("workflow_id")
       .notNull()
       .references(() => workflows.id, { onDelete: "cascade" }),
-    trigger: text("trigger").notNull(), // "cron" | "manual" | "event"
+    trigger: text("trigger").notNull(), // "cron" | "manual" | "event" | "workflow"
     // queued | running | ok | truncated | error
     status: text("status").notNull().default("queued"),
     /** Why the model stopped — "stop", "tool-calls", "length"… */
@@ -196,6 +242,8 @@ export const runs = pgTable(
     /** Composio trigger event id, for event-triggered runs (dedupe key). */
     triggerRef: text("trigger_ref"),
     triggerPayload: jsonb("trigger_payload"),
+    /** The run that chained into this one, for provenance on the run page. */
+    parentRunId: uuid("parent_run_id"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     durationMs: integer("duration_ms"),
@@ -204,13 +252,13 @@ export const runs = pgTable(
     costUsd: numeric("cost_usd", { precision: 10, scale: 6 }),
     error: text("error"),
     /*
-     * Machine-readable companion to `error`. The status stays "error" — adding
-     * a fourth terminal status would touch the one-active-run index predicate,
-     * the previous-failure lookup, retention, and every stat tile, for nothing
+     * Machine-readable companion to `error`. Status stays "error" — a fourth
+     * terminal status would touch the one-active-run index predicate, the
+     * previous-failure lookup, retention, and every stat tile, for nothing
      * this field doesn't already give.
      *
-     * "needs_reconnect" — a required toolkit had no working connection, either
-     * caught by the preflight or by an auth rejection mid-run.
+     * "needs_reconnect" — a required toolkit had no working connection,
+     * caught by preflight or an auth rejection mid-run.
      */
     errorCode: text("error_code"),
     /** Which toolkits the error is about, so the UI can offer "Reconnect X". */
@@ -222,8 +270,8 @@ export const runs = pgTable(
   (table) => [
     /*
      * At most one in-flight run per workflow, enforced by the database —
-     * a cron tick and a "Run now" click racing each other is otherwise a
-     * double execution (and a doubled bill).
+     * otherwise a cron tick racing a "Run now" click is a double execution
+     * (and a doubled bill).
      */
     uniqueIndex("runs_one_active_per_workflow")
       .on(table.workflowId)
@@ -233,36 +281,75 @@ export const runs = pgTable(
       .on(table.triggerRef)
       .where(sql`trigger_ref is not null`),
     index("runs_workflow_created_idx").on(table.workflowId, table.createdAt),
+    foreignKey({
+      columns: [table.parentRunId],
+      foreignColumns: [table.id],
+      name: "runs_parent_run_fk",
+    }).onDelete("set null"),
+    /*
+     * The tick's drain pass takes the oldest queued chained run each
+     * iteration. A partial index keeps that a single-row lookup instead of
+     * scanning every run ever recorded.
+     */
+    index("runs_queued_chained_idx")
+      .on(table.createdAt)
+      .where(sql`status = 'queued' and trigger = 'workflow'`),
+    /*
+     * Child side of `runs_parent_run_fk`. Postgres doesn't index FKs, and
+     * `ON DELETE SET NULL` makes retention scan `runs` per deleted row without it.
+     */
+    index("runs_parent_run_idx")
+      .on(table.parentRunId)
+      .where(sql`parent_run_id is not null`),
+    /*
+     * Retention sweeps select finished runs by age across all workflows —
+     * `runs_workflow_created_idx` can't serve that (leading column is workflow).
+     * Excludes the two statuses neither sweep may touch.
+     */
+    index("runs_prune_idx")
+      .on(table.createdAt)
+      .where(sql`status not in ('running', 'queued')`),
   ],
 );
 
-export const runSteps = pgTable("run_steps", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  runId: uuid("run_id")
-    .notNull()
-    .references(() => runs.id, { onDelete: "cascade" }),
-  idx: integer("idx").notNull(),
-  type: text("type").notNull(), // "tool" | "text"
-  toolSlug: text("tool_slug"),
-  argsJson: jsonb("args_json"),
-  resultJson: jsonb("result_json"),
-  durationMs: integer("duration_ms"),
-  error: text("error"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const runSteps = pgTable(
+  "run_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    idx: integer("idx").notNull(),
+    type: text("type").notNull(), // "tool" | "text"
+    toolSlug: text("tool_slug"),
+    argsJson: jsonb("args_json"),
+    resultJson: jsonb("result_json"),
+    durationMs: integer("duration_ms"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    /*
+     * A run's trace and the rows the monthly prune deletes both query by
+     * `run_id` on the bulkiest table in the schema. Never indexed before;
+     * prune scanned it every tick without one.
+     */
+    index("run_steps_run_idx").on(table.runId),
+  ],
+);
 
 /*
  * What each tool call returned last time, as a hash.
  *
- * Only hashes — never payloads. A matching hash lets the executor tell the
+ * Only hashes, never payloads. A matching hash lets the executor tell the
  * model "this source is byte-identical to last run" in one line instead of
- * re-sending the payload, and because the tool still ran, that statement is
- * about live data rather than a cached read.
+ * re-sending the payload — and since the tool still ran, that statement is
+ * about live data, not a cached read.
  *
  * One row per distinct call shape per workflow, overwritten each run, so it
- * cannot grow beyond a workflow's own variety of calls and needs no retention
+ * can't grow beyond a workflow's own variety of calls and needs no retention
  * sweep.
  */
 export const runToolHashes = pgTable(
@@ -284,22 +371,82 @@ export const runToolHashes = pgTable(
   ],
 );
 
-export const outputs = pgTable("outputs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  runId: uuid("run_id")
-    .notNull()
-    .references(() => runs.id, { onDelete: "cascade" }),
-  format: text("format").notNull().default("markdown"),
-  body: text("body").notNull(),
-  deliveredTo: text("delivered_to").array().notNull().default([]),
-  /** Per-target outcome: [{type, ok, error?}] — a failed send is recorded. */
-  deliveryLog: jsonb("delivery_log").notNull().default([]),
-  /** The agent found nothing new since the previous digest. */
-  unchanged: boolean("unchanged").notNull().default(false),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const outputs = pgTable(
+  "outputs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    format: text("format").notNull().default("markdown"),
+    body: text("body").notNull(),
+    deliveredTo: text("delivered_to").array().notNull().default([]),
+    /** Per-target outcome: [{type, ok, error?}] — a failed send is recorded. */
+    deliveryLog: jsonb("delivery_log").notNull().default([]),
+    /*
+     * pending | delivered | partial | failed | skipped
+     *
+     * `deliveryLog` always held the per-target outcome but nothing read it,
+     * so a Slack token that quietly expired produced a wall of green runs
+     * and no digests — the worst failure mode a monitoring tool can have,
+     * since it looks like it's working.
+     *
+     * Lives on the output, not `runs.status`: the agent did its job, and
+     * delivery is a property of what it produced. See the note at
+     * `runs.errorCode` for why a fourth run status isn't worth its cost.
+     *
+     * `skipped` covers the unchanged and suppressed cases, where not sending
+     * is correct, not a failure. The default backfills every existing row to
+     * the status it was already implicitly claiming.
+     */
+    deliveryStatus: text("delivery_status").notNull().default("delivered"),
+    deliveryAttempts: integer("delivery_attempts").notNull().default(0),
+    /** The agent found nothing new since the previous digest. */
+    unchanged: boolean("unchanged").notNull().default(false),
+    /** The envelope's measured values, as reported by the `report` tool. */
+    signals: jsonb("signals"),
+    /** info | warn | critical — the agent's own read of urgency. */
+    severity: text("severity"),
+    /*
+     * The digest was withheld because `alertCondition` evaluated false.
+     *
+     * Not `unchanged`: that means nothing new was found, while this means
+     * something new didn't clear the bar. Collapsing the two would make a
+     * working threshold indistinguishable from a quiet week — the failure
+     * this column exists to prevent.
+     *
+     * Also carries the two "delivered anyway" notes — condition_indeterminate
+     * and condition_error — which sit alongside a delivered digest, so the
+     * run page can say the threshold didn't actually gate that delivery.
+     */
+    suppressed: boolean("suppressed").notNull().default(false),
+    suppressedReason: text("suppressed_reason"),
+    /*
+     * Full-text search over the digest corpus.
+     *
+     * Generated, not maintained: the write path in `deliverOutput` doesn't
+     * change at all, there's no trigger that can drift from `body`, and the
+     * index covers every digest already in the table with no backfill.
+     * Postgres 12+, no extension needed — keeps plain-Postgres self-hosting
+     * working as-is.
+     */
+    searchVector: tsvector("search_vector").generatedAlwaysAs(
+      sql`to_tsvector('english', body)`,
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("outputs_search_idx").using("gin", table.searchVector),
+    // Every history query joins on this, and there was no index on it.
+    index("outputs_run_idx").on(table.runId),
+    // The retry sweep looks only at rows that still owe a delivery.
+    index("outputs_delivery_retry_idx")
+      .on(table.createdAt)
+      .where(sql`delivery_status in ('pending', 'partial', 'failed')`),
+  ],
+);
 
 // v2 — table created now, unused until write-mode ships
 export const pendingActions = pgTable("pending_actions", {
@@ -320,15 +467,15 @@ export const pendingActions = pgTable("pending_actions", {
  * Composio connection state, one row per (user, toolkit).
  *
  * Postgres is the read path: every page, the workflow builder, the run
- * preflight and the dispatcher ask "is this toolkit usable for this user?",
- * and answering that from Composio meant an API round trip on every render —
- * plus a `Promise.allSettled` fallback that silently emptied the builder's
- * toolkit list whenever Composio was down. Composio remains the source of
- * truth; the reconcile job pulls it back in.
+ * preflight, and the dispatcher ask "is this toolkit usable for this user?" —
+ * answering that from Composio meant an API round trip per render, plus a
+ * `Promise.allSettled` fallback that silently emptied the builder's toolkit
+ * list whenever Composio was down. Composio stays the source of truth; the
+ * reconcile job pulls it back in.
  *
- * Keyed per toolkit rather than per connected account because that is the
- * question the whole app asks. Multiple Composio accounts for one toolkit do
- * exist transiently during a reconnect — they live in `pendingAccountId` and
+ * Keyed per toolkit, not per connected account, because that's the question
+ * the app asks. Multiple Composio accounts for one toolkit do exist
+ * transiently during a reconnect — they live in `pendingAccountId` and
  * `staleAccountIds` until the flow settles.
  */
 export const connections = pgTable(
@@ -378,10 +525,10 @@ export const connections = pgTable(
 /*
  * Composio trigger instances we created, so we can delete them again.
  *
- * This table is not a cache — it is the only record that exists. The SDK's
- * `triggers.listActive` has no user filter and its items carry no user id, so
- * without persisting the returned trigger id here, a trigger created for a
- * workflow can never be found and deregistered once that workflow changes.
+ * Not a cache — the only record that exists. The SDK's `triggers.listActive`
+ * has no user filter and its items carry no user id, so without persisting
+ * the returned trigger id here, a trigger created for a workflow could never
+ * be found and deregistered once that workflow changes.
  */
 export const triggerInstances = pgTable(
   "trigger_instances",
@@ -413,11 +560,11 @@ export const triggerInstances = pgTable(
 /*
  * Fixed-window rate limit counters.
  *
- * In Postgres rather than in memory because the app runs on Vercel: a module
- * counter lives in one lambda instance, so it neither shares a limit across
- * concurrent instances nor survives a cold start. There is no Redis in this
- * stack, and the request volume this guards is low enough that a single
- * upsert per call is cheap.
+ * In Postgres, not memory, because the app runs on Vercel: a module counter
+ * lives in one lambda instance, so it neither shares a limit across
+ * concurrent instances nor survives a cold start. There's no Redis in this
+ * stack, and the guarded volume is low enough that a single upsert per call
+ * is cheap.
  */
 export const rateLimits = pgTable(
   "rate_limits",
@@ -438,8 +585,9 @@ export const rateLimits = pgTable(
  * Per-account settings, one row per user.
  *
  * `email` was the original key, from when the app gated on a single
- * OWNER_EMAIL. `userId` supersedes it and becomes the primary key in migration
- * 0006; until then both are carried so a mid-rollout instance can read either.
+ * OWNER_EMAIL. `userId` supersedes it and becomes the primary key in a later
+ * migration; both are carried until then so a mid-rollout instance can read
+ * either.
  */
 export const userSettings = pgTable("user_settings", {
   email: text("email").primaryKey(),

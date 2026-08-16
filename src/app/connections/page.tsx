@@ -53,8 +53,8 @@ function since(value?: Date | string | null) {
   if (days === 1) return "yesterday";
   if (days < 30) return `${days}d ago`;
   return then.toLocaleDateString("en-US", {
-    // The host is UTC in production; the app's day is the one the rest of the
-    // UI counts in.
+    // The host is UTC in production; app's day is what the rest of the UI
+    // counts in.
     timeZone: APP_TIMEZONE,
     month: "short",
     day: "numeric",
@@ -68,22 +68,22 @@ export default async function ConnectionsPage({
 }) {
   const user = await requireUser();
 
-  // `error` is set by `disconnectToolkit` when Composio refuses the delete;
-  // `notice` by the connect route when a toolkit needs no auth at all.
-  // `done` is the confirmation a completed disconnect leaves behind — the card
-  // simply vanishing looked the same as a click that did nothing.
+  // `error`: set by `disconnectToolkit` when Composio refuses the delete.
+  // `notice`: set by the connect route when a toolkit needs no auth.
+  // `done`: confirms a completed disconnect — the card just vanishing looked
+  // the same as a click that did nothing.
   const { error: actionError, notice, done } = await searchParams;
 
   /*
    * Connection state comes from Postgres, so this page renders even when
-   * Composio is unreachable — the catalog (names, logos, the browse grid) is
-   * the only part that needs the API, and a failure there is cosmetic.
+   * Composio is unreachable — only the catalog (names, logos, browse grid)
+   * needs the API, and a failure there is cosmetic.
    */
   const [rows, dependents, catalogResult] = await Promise.all([
     getUserConnections(user.id),
     dependentCountsByToolkit(user.id),
-    // Only this one can fail in a way worth reporting; the other two are local
-    // reads, and a genuine database failure belongs on the error boundary.
+    // Only this one can fail in a way worth reporting; the other two are
+    // local reads — a real database failure belongs on the error boundary.
     searchToolkits("", 12).then(
       (items) => ({ items, error: null as string | null }),
       (err: unknown) => ({
@@ -97,9 +97,9 @@ export default async function ConnectionsPage({
   const loadError = catalogResult.error;
 
   /*
-   * Self-healing, after the response has gone out: anything not checked
-   * against Composio recently gets refreshed for the next render, so a visit
-   * never pays for a Composio round trip to show state we already have.
+   * Self-healing, after the response goes out: anything not checked against
+   * Composio recently gets refreshed for the next render, so a visit never
+   * pays for a round trip to show state we already have.
    */
   after(() =>
     reconcileUserIfStale(user.id).catch((err) =>
@@ -196,8 +196,8 @@ export default async function ConnectionsPage({
         </div>
       )}
 
-      {/* No stat tiles here: the counts they carried are the same two numbers
-          the header badges already show, and each card states its own status. */}
+      {/* No stat tiles: the counts they'd carry are the same two numbers the
+          header badges already show, and each card states its own status. */}
       <section className="rise mt-8">
         <SectionLabel
           count={connected.length || undefined}
@@ -239,8 +239,8 @@ export default async function ConnectionsPage({
                       size="lg"
                       connected={active}
                     />
-                    {/* The slug used to sit under the name on its own line.
-                        Three text lines per card for two facts — it's the
+                    {/* The slug used to sit under the name on its own line —
+                        three text lines per card for two facts. That's the
                         tooltip's job, not the card's. */}
                     <div className="min-w-0 flex-1 self-center">
                       <div
@@ -276,10 +276,9 @@ export default async function ConnectionsPage({
                     <div className="flex-1" />
                     {/*
                      * Icon-only, but real buttons: 24px squares with a border,
-                     * always visible. The previous pass had them as 14px glyphs
-                     * in borderless controls that only faded in on hover, which
-                     * is what made them unreadable — the frame is doing the
-                     * work here, not the label.
+                     * always visible. The previous pass used 14px glyphs in
+                     * borderless controls that only faded in on hover —
+                     * unreadable. The frame does the work here, not the label.
                      */}
                     <div className="flex shrink-0 items-center gap-1.5">
                       <a
@@ -308,6 +307,7 @@ export default async function ConnectionsPage({
                         {/* Arms before it fires: this deletes the connected
                             account at Composio, and every workflow reading
                             that app stops working the moment it's gone. */}
+
                         <ConfirmSubmitButton
                           pendingLabel="Removing…"
                           confirmLabel={

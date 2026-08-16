@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth/user";
 import { PageShell } from "@/components/ui";
 import { getConnectedToolkitOptions } from "@/lib/connected-toolkits";
 import { getModelCatalogForUser } from "@/lib/models";
+import { chainParentOptions } from "@/lib/data/scope";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "New workflow" };
@@ -13,15 +14,16 @@ export const metadata = { title: "New workflow" };
 export default async function NewWorkflowPage() {
   const user = await requireUser();
 
-  const [availableToolkits, models] = await Promise.all([
+  const [availableToolkits, models, parentOptions] = await Promise.all([
     getConnectedToolkitOptions(user.id),
     getModelCatalogForUser(user.id),
+    chainParentOptions(user.id),
   ]);
 
   return (
-    // The builder is an app screen, not a document: on large viewports the page
-    // itself doesn't scroll — the chat and the form each scroll in their own
-    // pane, so the composer and the save bar are always reachable.
+    // An app screen, not a document: on large viewports the page itself
+    // doesn't scroll — chat and form scroll in their own panes, keeping the
+    // composer and save bar reachable.
     <PageShell fill>
       <Link
         href="/workflows"
@@ -38,6 +40,7 @@ export default async function NewWorkflowPage() {
           action={createWorkflow}
           availableToolkits={availableToolkits}
           models={models}
+          parentOptions={parentOptions}
         />
       </div>
     </PageShell>

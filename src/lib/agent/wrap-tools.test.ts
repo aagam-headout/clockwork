@@ -3,6 +3,16 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const readToolHash = vi.fn();
 const writeToolHash = vi.fn();
 
+/*
+ * `@/db` is stubbed even though nothing here queries.
+ *
+ * `vi.importActual` below pulls in the real `tool-hashes`, which imports the
+ * database module, which dereferences DATABASE_URL at import time. Without
+ * this the suite fails to load on any machine without one exported — it was
+ * passing only by accident of the developer's shell.
+ */
+vi.mock("@/db", () => ({ db: {} }));
+
 vi.mock("@/lib/data/tool-hashes", async () => {
   const actual = await vi.importActual<typeof import("@/lib/data/tool-hashes")>(
     "@/lib/data/tool-hashes",
@@ -55,6 +65,10 @@ function harnessFor(output: unknown) {
     workflowId: "w1",
     store,
     state,
+    signals: [],
+    setEnvelope: () => {},
+    ownerId: "u1",
+    historyBudgetSpent: () => null,
   });
   return { wrapped, store, state };
 }
@@ -127,28 +141,38 @@ describe("wrapToolsWithHandles", () => {
     expect(out.unchanged_since).toBeUndefined();
   });
 
-  it("is an identity function when disabled", async () => {
+  it("passes connector results straight through when disabled", async () => {
     process.env.HANDLES_ENABLED = "false";
     const { wrapped } = harnessFor(big);
 
-    expect(Object.keys(wrapped)).toEqual(["GMAIL_FETCH_EMAILS"]);
+    // Not an identity function any more. `report`/`history` have nothing to
+    // do with descriptors, so both survive the escape hatch, but what the
+    // hatch is actually about — replacing results with descriptors — is
+    // still off.
+    expect(Object.keys(wrapped).sort()).toEqual([
+      "GMAIL_FETCH_EMAILS",
+      "history",
+      "report",
+    ]);
     await expect(call(wrapped, "GMAIL_FETCH_EMAILS", {})).resolves.toEqual(big);
   });
 
-  it("adds query and inspect tools", () => {
+  it("adds every system tool when enabled", () => {
     const { wrapped } = harnessFor({});
     expect(Object.keys(wrapped).sort()).toEqual([
       "GMAIL_FETCH_EMAILS",
+      "history",
       "inspect",
       "query",
+      "report",
     ]);
   });
 });
 
 /*
- * The failure this guards: a hash written for a run that then died means the
- * next run sees identical bytes, is told `unchanged_since`, and reports
- * nothing — content that no digest ever carried is lost silently.
+ * Guards against: a hash written for a run that then died means the next run
+ * sees identical bytes, is told `unchanged_since`, and reports nothing —
+ * content no digest ever carried is silently lost.
  */
 describe("hash buffering", () => {
   it("writes no hash during the tool call itself", async () => {
@@ -212,6 +236,10 @@ describe("degraded reads", () => {
       workflowId: "w1",
       store,
       state,
+      signals: [],
+      setEnvelope: () => {},
+      ownerId: "u1",
+      historyBudgetSpent: () => null,
     });
     store.put("A", { a: 1 }, "x".repeat(20));
     store.put("B", { b: 2 }, "x".repeat(20));
@@ -464,9 +492,9 @@ describe("runLoopExhausted", () => {
 
   it("is true when local-only calls push total steps to the absolute bound, even under the external budget", () => {
     const maxSteps = 5;
-    // All local calls: countExternalSteps is 0, well under maxSteps, but the
-    // total step count has run past the absolute ceiling — a model looping
-    // on `query`/`inspect` past their own budget must still be stopped.
+    // All local calls: countExternalSteps is 0, well under maxSteps, but
+    // total steps has passed the absolute ceiling — a model looping on
+    // `query`/`inspect` past their own budget must still be stopped.
     const steps = Array.from(
       { length: maxSteps + MAX_QUERIES_PER_RUN + 2 },
       () => ({ toolCalls: [{ toolName: "query" }] }),

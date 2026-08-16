@@ -4,11 +4,11 @@ import { getTableName } from "drizzle-orm";
 /*
  * Executor tests with a fake `db` and a stub model.
  *
- * The thing under test here is not the agent loop — it is what the executor
- * writes down about a run, which is the only record anyone ever sees. The
- * cross-run hash is the sharpest case: committing one for a run that never
- * delivered a digest makes the *next* run report "unchanged" and drop real
- * items on the floor, silently, at 6am.
+ * The thing under test is not the agent loop — it's what the executor writes
+ * down about a run, the only record anyone ever sees. The cross-run hash is
+ * the sharpest case: committing one for a run that never delivered a digest
+ * makes the *next* run report "unchanged" and silently drop real items, at
+ * 6am.
  */
 
 type ChainState = {
@@ -112,19 +112,40 @@ vi.mock("@/lib/run-cost", () => ({
 }));
 
 const isAuthError = vi.fn(() => false);
-vi.mock("@/lib/connection-gate", () => ({
-  checkConnections: async () => ({ ok: true }),
-  requiredToolkits: async () => [],
-  isAuthError: (...args: unknown[]) => isAuthError(...(args as [])),
-  toolkitForSlug: () => "gmail",
-}));
+vi.mock("@/lib/connection-gate", async () => {
+  /*
+   * `isFailure` comes from the real module, not a stub.
+   *
+   * It decides whether a tool result counts as a failure — the thing these
+   * tests are about — so a hand-written stand-in would test the stub. It's
+   * also imported by `wrap-tools.ts`, so omitting it here makes it
+   * `undefined` at every call site and every run dies in the outer catch as
+   * a bare `error`, which is how this suite silently broke.
+   */
+  const actual = await vi.importActual<typeof import("@/lib/connection-gate")>(
+    "@/lib/connection-gate",
+  );
+  return {
+    checkConnections: async () => ({ ok: true }),
+    requiredToolkits: async () => [],
+    isAuthError: (...args: unknown[]) => isAuthError(...(args as [])),
+    toolkitForSlug: () => "gmail",
+    isFailure: actual.isFailure,
+  };
+});
 
 vi.mock("@/lib/data/connections", () => ({
   markConnectionStatus: async () => undefined,
 }));
 
-import { executeRun, NO_UPDATES } from "./executor";
-import { runs, runSteps, workflows } from "@/db/schema";
+import {
+  deliveryStatusFrom,
+  executeRun,
+  NO_UPDATES,
+  retryPendingDeliveries,
+} from "./executor";
+import { outputs, runs, runSteps, workflows } from "@/db/schema";
+import { LIMITS } from "@/lib/limits";
 import { MAX_QUERIES_PER_RUN } from "@/lib/agent/wrap-tools";
 
 /** Overrides the queued workflow row a test's `executeRun` will read back. */
@@ -207,9 +228,9 @@ async function driveDegraded(
 }
 
 /**
- * The per-run prompt, which travels as the user message. The system message
- * carries the static prefix and the cache breakpoint, so a test asking "what
- * was this run told" wants this one.
+ * The per-run prompt, sent as the user message. The system message carries
+ * the static prefix and cache breakpoint, so a test asking "what was this
+ * run told" wants this one.
  */
 function userMessageOf(options: Record<string, unknown>): string {
   const messages = options.messages as Array<{ role: string; content: string }>;
@@ -237,7 +258,7 @@ beforeEach(() => {
   delete process.env.HANDLES_ENABLED;
 
   // The claim update, then the workflow lookup. Everything else defaults to
-  // "no rows", which is what a first run looks like.
+  // "no rows" — a first run.
   queue(`update:${getTableName(runs)}`, [
     {
       id: RUN_ID,
@@ -250,15 +271,15 @@ beforeEach(() => {
   queue(`update:${getTableName(workflows)}`, [{ failures: 1 }]);
 });
 
-// A stub left behind by a failed assertion inside a test (before its own
-// cleanup line runs) must not leak into the next test's `fetch`.
+// A stub left behind by a failed assertion must not leak into the next
+// test's `fetch`.
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 /**
  * Runs the loop with a stub model that calls the fetch tool once (populating
- * the wrapper's buffered hash) and then finishes however the test says.
+ * the buffered hash), then finishes however the test says.
  */
 function stubModel(
   finish: { text?: string; finishReason?: string; steps?: unknown[] },
@@ -405,8 +426,8 @@ describe("degraded reads", () => {
 
     await executeRun(RUN_ID);
     expect(savedOutput()?.body).toContain("could not be read this run");
-    // The run itself is still honestly `ok`, with no error text — the run page
-    // renders any error on a non-truncated run as "Run failed".
+    // Still honestly `ok`, with no error text — the run page renders any
+    // error on a non-truncated run as "Run failed".
     expect(runVerdict().status).toBe("ok");
     expect(runVerdict().error).toBeNull();
   });
@@ -417,9 +438,8 @@ describe("degraded reads", () => {
     expect(savedOutput()?.body).toBe("## Digest\n- one thing");
   });
 
-  // R1: a degraded run that produced no digest used to record as an ordinary
-  // clean `ok` — the note only ever landed in a digest that, here, doesn't
-  // exist. It must come back honestly `truncated` instead.
+  // R1: a degraded run with no digest used to record as an ordinary clean
+  // `ok` — the note had nowhere to land. It must come back `truncated`.
   it("records a degraded run that emits NO_UPDATES as truncated, naming the degradation, and flushes nothing", async () => {
     stubModel({ text: NO_UPDATES }, async (tools) => {
       const descriptor = (await tools.GMAIL_FETCH_EMAILS.execute({}, {})) as {
@@ -440,9 +460,9 @@ describe("degraded reads", () => {
     expect(writeToolHash).not.toHaveBeenCalled();
   });
 
-  // R1 (companion case): a degraded run that DID produce a digest keeps the
-  // existing behaviour — the note lives in the body, the run stays an honest
-  // `ok`, and the hashes still don't flush.
+  // R1 (companion): a degraded run that DID produce a digest keeps the
+  // existing behaviour — note in the body, run stays `ok`, hashes still
+  // don't flush.
   it("keeps a degraded run that produced a digest as ok, with the note in the body, and still flushes nothing", async () => {
     stubModel({}, async (tools) => {
       const descriptor = (await tools.GMAIL_FETCH_EMAILS.execute({}, {})) as {
@@ -488,8 +508,8 @@ describe("delivery-gated flush", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    // NO_UPDATES makes the run "unchanged", so the webhook target is skipped
-    // rather than attempted — the design working, not a delivery failure.
+    // NO_UPDATES makes the run "unchanged", so the webhook is skipped rather
+    // than attempted — the design working, not a failure.
     stubModel({ text: NO_UPDATES });
     const result = await executeRun(RUN_ID);
 
@@ -504,10 +524,9 @@ describe("delivery-gated flush", () => {
     vi.unstubAllGlobals();
   });
 
-  // R3: `writeToolHash` already swallows its own errors internally, so this
-  // is defence in depth — but if it ever didn't, a throw here must not be
-  // able to fall through to the outer `catch` and overwrite an already
-  // successful, already delivered run as `error`.
+  // R3: `writeToolHash` already swallows its own errors — this is defence
+  // in depth, so a throw here must not fall through to the outer `catch`
+  // and overwrite an already successful, delivered run as `error`.
   it("keeps a run recorded as ok/delivered even when the flush itself throws", async () => {
     writeToolHash.mockRejectedValueOnce(new Error("hash table unavailable"));
     stubModel({});
@@ -820,11 +839,10 @@ describe("FINDING B: the degraded note lives in the digest, not runs.error, when
     expect(savedOutput()?.body).toBe(NO_UPDATES);
   });
 
-  // Mutant: a run that hits the total-steps bound AND is also blind (the
-  // model's own final word was NO_UPDATES) must keep BOTH the truncation
-  // reason and the degraded note in `runs.error` — collapsing this to just
-  // the truncation reason (dropping the note) is a silent regression, since
-  // there is no digest for the note to live in instead.
+  // Mutant: a run that hits the total-steps bound AND is blind (model's own
+  // final word was NO_UPDATES) must keep BOTH the truncation reason and the
+  // degraded note in `runs.error` — dropping the note is a silent
+  // regression, since there's no digest for it to live in instead.
   it("a run that is both total-steps-truncated and blind keeps both the truncation reason and the note in runs.error", async () => {
     stubModel(
       {
@@ -935,8 +953,8 @@ describe("prompt cache breakpoint", () => {
 
 describe("dynamic tool results reach the trace and the auth check", () => {
   /**
-   * Composio's tools arrive as *dynamic* tools, so the SDK files their results
-   * under `dynamicToolResults`. A step shaped the way the SDK really shapes it.
+   * Composio's tools arrive as *dynamic* tools, so the SDK files results
+   * under `dynamicToolResults`. Shaped the way the SDK really shapes it.
    */
   function dynamicStep(output: unknown) {
     return [
@@ -976,7 +994,7 @@ describe("dynamic tool results reach the trace and the auth check", () => {
   });
 
   // The dead-connection-looks-green bug: a rejected credential arrives as an
-  // ordinary value in the result body, and it arrives on the dynamic list.
+  // ordinary value, on the dynamic list.
   it("detects a credential rejection carried on a dynamic result", async () => {
     isAuthError.mockReturnValue(true);
     generateText.mockImplementation(
@@ -1001,5 +1019,625 @@ describe("dynamic tool results reach the trace and the auth check", () => {
 
     expect(result.status).toBe("error");
     expect(runVerdict().errorCode).toBe("needs_reconnect");
+  });
+});
+
+/*
+ * Outcome routing.
+ *
+ * These tests use `stubModel`'s `duringRun` hook, which hands over the very
+ * ToolSet the run was built with — so `tools.report.execute` here is the
+ * same call the model would make, validation and all.
+ */
+
+/** The full outputs row, including the envelope columns. */
+function outputRow() {
+  const insert = calls.find((c) => c.op === "insert" && c.table === "outputs");
+  return insert?.values as
+    | {
+        body: string;
+        unchanged: boolean;
+        signals: Record<string, unknown> | null;
+        severity: string | null;
+        suppressed: boolean;
+        suppressedReason: string | null;
+      }
+    | undefined;
+}
+
+/** Every run row inserted during the call — a chained child is one of these. */
+function insertedRuns() {
+  return calls
+    .filter((c) => c.op === "insert" && c.table === getTableName(runs))
+    .map((c) => c.values as Record<string, unknown>);
+}
+
+/** Queues the rows `enqueueChildRuns` reads back as this workflow's children. */
+function queueChildren(children: unknown[]) {
+  const key = `select:${getTableName(workflows)}`;
+  queued.set(key, [...(queued.get(key) ?? []), children]);
+}
+
+const NUMERIC_SIGNAL = [{ key: "n", type: "number" }];
+
+describe("outcome envelope", () => {
+  it("persists the reported signals and severity", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Digest", signals: { n: 9 }, severity: "warn" },
+        {},
+      );
+    });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+    expect(outputRow()?.signals).toEqual({ n: 9 });
+    expect(outputRow()?.severity).toBe("warn");
+    expect(outputRow()?.body).toBe("## Digest");
+  });
+
+  it("prefers the reported digest over the model's final text", async () => {
+    stubModel({ text: "stray thinking out loud" }, async (tools) => {
+      await tools.report.execute({ digest: "## The real digest" }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    expect(outputRow()?.body).toBe("## The real digest");
+  });
+
+  it("treats a reported no_updates as unchanged", async () => {
+    stubModel({ text: "" }, async (tools) => {
+      await tools.report.execute({ no_updates: true }, {});
+    });
+
+    const result = await executeRun(RUN_ID);
+
+    // Not an empty response: the agent looked, found nothing, and said so.
+    expect(result.status).toBe("ok");
+    expect(outputRow()?.unchanged).toBe(true);
+  });
+
+  it("keeps the last report when the model corrects itself", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    stubModel({}, async (tools) => {
+      const bad = (await tools.report.execute(
+        { digest: "d", signals: { n: "nine" } },
+        {},
+      )) as { error?: string };
+      expect(bad.error).toMatch(/must be a number/);
+      await tools.report.execute({ digest: "d", signals: { n: 9 } }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    expect(outputRow()?.signals).toEqual({ n: 9 });
+  });
+});
+
+describe("alert conditions", () => {
+  it("suppresses a digest that does not clear the threshold", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Digest", signals: { n: 1 } },
+        {},
+      );
+    });
+
+    const result = await executeRun(RUN_ID);
+
+    // The run itself succeeded — the agent did its job and the threshold said
+    // this was not worth anyone's morning.
+    expect(result.status).toBe("ok");
+    expect(outputRow()?.suppressed).toBe(true);
+    expect(outputRow()?.suppressedReason).toBe(
+      "alert condition not met: n > 3",
+    );
+    // The digest is still stored, so a human can see what was withheld.
+    expect(outputRow()?.body).toBe("## Digest");
+  });
+
+  it("delivers a digest that clears the threshold", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Digest", signals: { n: 9 } },
+        {},
+      );
+    });
+
+    await executeRun(RUN_ID);
+
+    expect(outputRow()?.suppressed).toBe(false);
+    expect(outputRow()?.suppressedReason).toBe(null);
+  });
+
+  it("delivers and flags when the threshold could not be evaluated", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
+    stubModel({}, async (tools) => {
+      await tools.report.execute({ digest: "## Digest" }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    // Silence on an unevaluable alert is the dangerous outcome.
+    expect(outputRow()?.suppressed).toBe(false);
+    expect(outputRow()?.suppressedReason).toBe("condition_indeterminate");
+  });
+
+  it("suppression does not mark the run unchanged", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Digest", signals: { n: 1 } },
+        {},
+      );
+    });
+
+    await executeRun(RUN_ID);
+
+    // "Found nothing" and "found something below the bar" must stay distinct.
+    expect(outputRow()?.unchanged).toBe(false);
+  });
+
+  it("flushes no hashes for a digest a threshold withheld", async () => {
+    // An empty delivery log isn't "everything succeeded" here — nobody read
+    // these bytes. Recording the hashes would tell the next run the payload
+    // was already reported, so a later value crossing the line arrives
+    // marked unchanged.
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Digest", signals: { n: 1 } },
+        {},
+      );
+    });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+    expect(outputRow()?.suppressed).toBe(true);
+    expect(writeToolHash).not.toHaveBeenCalled();
+  });
+
+  it("still flushes for a digest the threshold let through", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Digest", signals: { n: 9 } },
+        {},
+      );
+    });
+
+    await executeRun(RUN_ID);
+
+    expect(writeToolHash).toHaveBeenCalled();
+  });
+});
+
+describe("report fallback", () => {
+  it("falls back to the final text when nothing is configured", async () => {
+    stubModel({ text: "## Plain digest" });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+    expect(outputRow()?.body).toBe("## Plain digest");
+  });
+
+  it("still honours a NO_UPDATES text fallback", async () => {
+    stubModel({ text: NO_UPDATES });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+    expect(outputRow()?.unchanged).toBe(true);
+  });
+
+  it("errors when a workflow declaring signals gets no report", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    stubModel({ text: "## Digest with no signals" });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("error");
+    expect(runVerdict().errorCode).toBe("no_report");
+  });
+
+  it("errors when a workflow with an alert condition gets no report", async () => {
+    queueWorkflow({ alertCondition: "n > 3", signalSchema: NUMERIC_SIGNAL });
+    stubModel({ text: "## Digest" });
+
+    const result = await executeRun(RUN_ID);
+
+    // Delivering here would silently skip the threshold the user configured.
+    expect(result.status).toBe("error");
+    expect(runVerdict().errorCode).toBe("no_report");
+  });
+});
+
+describe("chained children", () => {
+  it("enqueues a child with the parent's digest and signals", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    queueChildren([{ id: "child-1", parentCondition: null }]);
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Parent", signals: { n: 9 } },
+        {},
+      );
+    });
+
+    await executeRun(RUN_ID);
+
+    const child = insertedRuns().find((r) => r.workflowId === "child-1");
+    expect(child).toBeDefined();
+    expect(child?.status).toBe("queued");
+    expect(child?.trigger).toBe("workflow");
+    expect(child?.parentRunId).toBe(RUN_ID);
+    expect(child?.triggerPayload).toMatchObject({
+      digest: "## Parent",
+      signals: { n: 9 },
+      parentSlug: "digest",
+    });
+  });
+
+  it("does not enqueue a child whose condition is not met", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    queueChildren([{ id: "child-1", parentCondition: "n > 3" }]);
+    stubModel({}, async (tools) => {
+      await tools.report.execute(
+        { digest: "## Parent", signals: { n: 1 } },
+        {},
+      );
+    });
+
+    await executeRun(RUN_ID);
+
+    expect(
+      insertedRuns().find((r) => r.workflowId === "child-1"),
+    ).toBeUndefined();
+  });
+
+  it("enqueues no children when the parent reported no updates", async () => {
+    queueChildren([{ id: "child-1", parentCondition: null }]);
+    stubModel({}, async (tools) => {
+      await tools.report.execute({ no_updates: true }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    expect(
+      insertedRuns().find((r) => r.workflowId === "child-1"),
+    ).toBeUndefined();
+  });
+
+  it("enqueues no children from a truncated run", async () => {
+    queueChildren([{ id: "child-1", parentCondition: null }]);
+    stubModel(
+      { finishReason: "tool-calls", steps: externalSteps(5) },
+      async (tools) => {
+        await tools.report.execute({ digest: "## Fragment" }, {});
+      },
+    );
+
+    const result = await executeRun(RUN_ID);
+
+    // A fragment is not a premise to spend a model call on downstream.
+    expect(result.status).toBe("truncated");
+    expect(
+      insertedRuns().find((r) => r.workflowId === "child-1"),
+    ).toBeUndefined();
+  });
+});
+
+describe("cost cap", () => {
+  /** Queues the month-to-date spend row `checkCostCap` reads back. */
+  function queueSpend(total: string) {
+    queue(`select:${getTableName(runs)}`, [{ total }]);
+  }
+
+  it("blocks the run and pauses the workflow when the cap is reached", async () => {
+    queueWorkflow({ monthlyCostCapUsd: "5.00", timezone: "UTC" });
+    queueSpend("5.20");
+    stubModel({});
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("error");
+    expect(runVerdict().errorCode).toBe("cost_cap");
+    // No model call at all — the point is to stop spending.
+    expect(generateText).not.toHaveBeenCalled();
+
+    const paused = calls.find(
+      (c) =>
+        c.op === "update" &&
+        c.table === getTableName(workflows) &&
+        (c.values as { pausedReason?: string })?.pausedReason === "cost_cap",
+    );
+    expect(paused).toBeDefined();
+    expect((paused?.values as { enabled?: boolean }).enabled).toBe(false);
+  });
+
+  it("runs normally below the cap", async () => {
+    queueWorkflow({ monthlyCostCapUsd: "5.00", timezone: "UTC" });
+    queueSpend("1.00");
+    stubModel({});
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+    expect(generateText).toHaveBeenCalled();
+  });
+
+  it("blocks at exactly the cap", async () => {
+    queueWorkflow({ monthlyCostCapUsd: "5.00", timezone: "UTC" });
+    queueSpend("5.00");
+    stubModel({});
+
+    expect((await executeRun(RUN_ID)).status).toBe("error");
+    expect(runVerdict().errorCode).toBe("cost_cap");
+  });
+
+  it("issues no spend query at all for an uncapped workflow", async () => {
+    // The fixture carries no cap. A pointless query here would run before
+    // every run of every uncapped workflow — nearly all of them.
+    stubModel({});
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+  });
+
+  it("treats a zero cap as uncapped rather than blocking forever", async () => {
+    queueWorkflow({ monthlyCostCapUsd: "0.00", timezone: "UTC" });
+    stubModel({});
+
+    expect((await executeRun(RUN_ID)).status).toBe("ok");
+  });
+});
+
+describe("deliveryStatusFrom", () => {
+  it("is skipped when nothing was attempted", () => {
+    expect(deliveryStatusFrom([], false)).toBe("skipped");
+  });
+
+  it("is skipped when every target was deliberately skipped", () => {
+    expect(
+      deliveryStatusFrom([{ type: "slack_dm", ok: true, skipped: true }], true),
+    ).toBe("skipped");
+  });
+
+  it("is delivered when every attempted target succeeded", () => {
+    expect(
+      deliveryStatusFrom(
+        [
+          { type: "slack_dm", ok: true },
+          { type: "dashboard", ok: true },
+        ],
+        true,
+      ),
+    ).toBe("delivered");
+  });
+
+  it("is partial when one of two failed", () => {
+    expect(
+      deliveryStatusFrom(
+        [
+          { type: "slack_dm", ok: false, error: "token expired" },
+          { type: "dashboard", ok: true },
+        ],
+        true,
+      ),
+    ).toBe("partial");
+  });
+
+  it("is failed when every attempted target failed", () => {
+    expect(
+      deliveryStatusFrom(
+        [{ type: "slack_dm", ok: false, error: "token expired" }],
+        true,
+      ),
+    ).toBe("failed");
+  });
+
+  it("does not count a skipped target as a failure", () => {
+    expect(
+      deliveryStatusFrom(
+        [
+          { type: "slack_dm", ok: true, skipped: true },
+          { type: "dashboard", ok: true },
+        ],
+        true,
+      ),
+    ).toBe("delivered");
+  });
+});
+
+describe("delivery status on the output row", () => {
+  it("records a suppressed run as skipped, having attempted nothing", async () => {
+    queueWorkflow({
+      signalSchema: [{ key: "n", type: "number" }],
+      alertCondition: "n > 3",
+    });
+    stubModel({}, async (tools) => {
+      await tools.report.execute({ digest: "## D", signals: { n: 1 } }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    const row = outputRow() as unknown as { deliveryStatus: string };
+    expect(row.deliveryStatus).toBe("skipped");
+  });
+
+  it("counts the first attempt on a delivered run", async () => {
+    stubModel({}, async (tools) => {
+      await tools.report.execute({ digest: "## D" }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    const row = outputRow() as unknown as { deliveryAttempts: number };
+    expect(row.deliveryAttempts).toBe(1);
+  });
+});
+
+describe("chained runs go through the quota path", () => {
+  it("enqueues a child the same way every other trigger does", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    queueChildren([{ id: "child-1", parentCondition: null }]);
+    stubModel({}, async (tools) => {
+      await tools.report.execute({ digest: "## P", signals: { n: 9 } }, {});
+    });
+
+    await executeRun(RUN_ID);
+
+    // `enqueueRun` stamps `lastAttemptAt` on the workflow it queues, and a
+    // bare insert doesn't — the observable difference between going through
+    // the quota checks and walking past them.
+    const stamped = calls.some(
+      (c) =>
+        c.op === "update" &&
+        c.table === getTableName(workflows) &&
+        (c.values as { lastAttemptAt?: Date })?.lastAttemptAt instanceof Date,
+    );
+    expect(stamped).toBe(true);
+  });
+});
+
+describe("delivery status on runs that never delivered", () => {
+  it("records an empty response as skipped, not delivered", async () => {
+    stubModel({ text: "" });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("error");
+    const row = outputRow() as unknown as { deliveryStatus: string };
+    expect(row.deliveryStatus).toBe("skipped");
+  });
+
+  it("records a no_report failure as skipped, not delivered", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
+    stubModel({ text: "## digest but no report call" });
+
+    await executeRun(RUN_ID);
+
+    const row = outputRow() as unknown as { deliveryStatus: string };
+    expect(row.deliveryStatus).toBe("skipped");
+  });
+});
+
+describe("what a chained child is told", () => {
+  it("presents the parent's digest as prose, not as an event payload", async () => {
+    queued.set(`update:${getTableName(runs)}`, [
+      [
+        {
+          id: RUN_ID,
+          workflowId: workflow.id,
+          trigger: "workflow",
+          triggerPayload: {
+            parentSlug: "morning-brief",
+            parentName: "Morning brief",
+            digest: "## Deploys\n- api v2.4 shipped",
+            signals: { failures: 2 },
+          },
+        },
+      ],
+    ]);
+    queue(`select:${getTableName(workflows)}`, [workflow]);
+    queue(`update:${getTableName(workflows)}`, [{ failures: 1 }]);
+    stubModel({});
+
+    await executeRun(RUN_ID);
+
+    const prompt = userMessageOf(generateText.mock.calls[0][0]);
+    // The digest is markdown a model wrote for a human. Sent through
+    // JSON.stringify it arrived escaped, cost tokens on the escapes, and
+    // could be cut mid-string into something that doesn't parse.
+    expect(prompt).toContain("## Deploys\n- api v2.4 shipped");
+    expect(prompt).toContain("Morning brief");
+    expect(prompt).toContain("failures: 2");
+    expect(prompt).not.toContain("started by an event");
+    expect(prompt).not.toContain("\\n- api v2.4");
+  });
+
+  it("still labels a real event payload as an event", async () => {
+    queued.set(`update:${getTableName(runs)}`, [
+      [
+        {
+          id: RUN_ID,
+          workflowId: workflow.id,
+          trigger: "event",
+          triggerPayload: { message: "hello", channel: "#general" },
+        },
+      ],
+    ]);
+    queue(`select:${getTableName(workflows)}`, [workflow]);
+    queue(`update:${getTableName(workflows)}`, [{ failures: 1 }]);
+    stubModel({});
+
+    await executeRun(RUN_ID);
+
+    const prompt = userMessageOf(generateText.mock.calls[0][0]);
+    expect(prompt).toContain("started by an event");
+  });
+});
+
+describe("a retry sweep that has nothing left to retry", () => {
+  /** A row the sweep will pick up, with `previous` as its delivery log. */
+  function queueRetryRow(previous: unknown[], deliver: unknown[]) {
+    queue(`select:${getTableName(outputs)}`, [
+      {
+        outputId: "output-1",
+        body: "## Digest",
+        log: previous,
+        attempts: 1,
+        workflow: { ...workflow, deliver },
+      },
+    ]);
+    // Second pass finds nothing, which ends the sweep.
+    queue(`select:${getTableName(outputs)}`, []);
+  }
+
+  /** The values written by the last `update(outputs)` call. */
+  function settled() {
+    const updates = calls.filter(
+      (c) => c.op === "update" && c.table === getTableName(outputs),
+    );
+    return updates.at(-1)?.values as {
+      deliveryStatus?: string;
+      deliveryAttempts?: number;
+    };
+  }
+
+  it("settles a part-delivered digest as partial, not failed", async () => {
+    // The webhook reached its endpoint; the Slack send didn't and can't be
+    // retried — `deliverOutput` only verifies tool-based targets, it doesn't
+    // perform them. Writing `failed` here would misreport a digest a reader
+    // did receive as one that never arrived.
+    queueRetryRow(
+      [
+        { type: "webhook", ok: true },
+        { type: "slack_dm", ok: false, error: "agent never called SLACK_DM" },
+      ],
+      [{ type: "slack_dm" }],
+    );
+
+    await retryPendingDeliveries(() => true);
+
+    expect(settled().deliveryStatus).toBe("partial");
+    expect(settled().deliveryAttempts).toBe(LIMITS.maxDeliveryAttempts);
+  });
+
+  it("still settles a wholly failed digest as failed", async () => {
+    queueRetryRow(
+      [{ type: "slack_dm", ok: false, error: "agent never called SLACK_DM" }],
+      [{ type: "slack_dm" }],
+    );
+
+    await retryPendingDeliveries(() => true);
+
+    expect(settled().deliveryStatus).toBe("failed");
   });
 });

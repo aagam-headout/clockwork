@@ -23,14 +23,18 @@ import {
   Filter,
   TriangleAlert,
   ChevronsUpDown,
+  Gauge,
 } from "lucide-react";
 import { CronBuilder, describeCron } from "@/components/cron-builder";
+import { SignalsEditor } from "@/components/signals-editor";
+import { MarkdownEditor } from "@/components/markdown-editor";
+import type { SignalDecl } from "@/lib/outcome/condition";
 
 /*
- * A fixed zone list rather than `Intl.supportedValuesOf("timeZone")`: that call
+ * A fixed zone list rather than `Intl.supportedValuesOf("timeZone")`: that
  * returns whatever ICU the runtime shipped with, so Node and the browser can
- * disagree and hydration mismatches. These cover every common offset; the saved
- * value is spliced in below if it isn't here.
+ * disagree and cause hydration mismatches. These cover every common offset;
+ * the saved value is spliced in below if missing.
  */
 const TIMEZONES = [
   "UTC",
@@ -88,10 +92,9 @@ export type ToolkitOption = {
   name: string;
   logo?: string;
   /**
-   * Connection state. A toolkit that isn't `usable` is still offered and still
-   * selectable — flagged, not hidden. Hiding it meant that editing an
-   * unrelated field on a workflow silently dropped the toolkit whose token
-   * happened to be expired at that moment.
+   * Connection state. A toolkit that isn't `usable` stays offered and
+   * selectable — flagged, not hidden. Hiding it meant editing an unrelated
+   * field silently dropped a toolkit whose token had expired.
    */
   status?: string;
   usable?: boolean;
@@ -104,10 +107,18 @@ export type TriggerTypeOption = {
   toolkit: string;
 };
 
+/** A workflow this one may be chained behind, for the parent picker. */
+export type ParentOption = {
+  id: string;
+  name: string;
+  /** The parent's signals — what a trigger condition may be written against. */
+  signals: SignalDecl[];
+};
+
 export type WorkflowFormValues = {
   name: string;
   goal: string;
-  triggerType: "cron" | "event";
+  triggerType: "cron" | "event" | "workflow";
   cron: string;
   timezone: string;
   eventTriggers: string[];
@@ -124,6 +135,11 @@ export type WorkflowFormValues = {
   emailTo: string;
   deliverWebhook: boolean;
   webhookUrl: string;
+  parentWorkflowId: string;
+  parentCondition: string;
+  alertCondition: string;
+  signalSchema: SignalDecl[];
+  monthlyCostCapUsd: string;
 };
 
 export function WorkflowForm({
@@ -132,14 +148,14 @@ export function WorkflowForm({
   submitLabel,
   availableToolkits = [],
   models = [],
+  parentOptions = [],
   fillHeight = false,
   title,
 }: {
   /**
-   * A `useActionState` action: it returns the failure instead of throwing, so
-   * a rejected save re-renders this form — with everything the user typed
-   * still in it — under an explanation, rather than swapping the page for the
-   * error boundary.
+   * A `useActionState` action: returns the failure instead of throwing, so a
+   * rejected save re-renders this form (with everything typed still in it)
+   * under an explanation, rather than swapping in the error boundary.
    */
   action: (
     state: WorkflowFormState,
@@ -148,9 +164,9 @@ export function WorkflowForm({
   defaultValues?: Partial<WorkflowFormValues>;
   submitLabel: string;
   /**
-   * Optional card header. Set it when the form sits beside another card (the
-   * builder) so both panes start on the same baseline; standalone pages already
-   * have a page header and don't need a second one.
+   * Optional card header, for when the form sits beside another card (the
+   * builder) so both panes share a baseline; standalone pages already have a
+   * page header.
    */
   title?: string;
   /** Connected toolkits, straight from Composio — not a hardcoded list. */
@@ -158,9 +174,15 @@ export function WorkflowForm({
   /** Model catalog from AI Gateway; the picker refreshes it on open. */
   models?: ModelInfo[];
   /**
-   * Pin the card to its container's height (lg+) and scroll the sections
-   * inside it, so the card frame and its footer stay put. Off by default:
-   * standalone pages let the whole page scroll instead.
+   * The owner's other workflows, for the chained trigger. Passed in rather
+   * than fetched here: this is a client component, and the list must be
+   * scoped to the owner server-side anyway.
+   */
+  parentOptions?: ParentOption[];
+  /**
+   * Pin the card to its container's height (lg+) and scroll sections inside
+   * it, so the frame and footer stay put. Off by default: standalone pages
+   * let the whole page scroll instead.
    */
   fillHeight?: boolean;
 }) {
@@ -170,15 +192,13 @@ export function WorkflowForm({
   );
 
   /*
-   * React resets an uncontrolled form once its action settles — including when
-   * the action came back with an error — so after a rejected save the DOM
-   * fields fall back to their `defaultValue`. Seeding those from what was just
-   * submitted is what makes "fix the one bad field and press Save again"
-   * possible instead of retyping the whole form.
+   * React resets an uncontrolled form once its action settles, even on error,
+   * so DOM fields fall back to their `defaultValue`. Seeding those from what
+   * was just submitted makes "fix the one bad field and Save again" possible
+   * instead of retyping everything.
    *
-   * Only the uncontrolled fields need this. Toolkits, trigger mode, cron,
-   * timezone and the delivery checkboxes are React state, and state survives
-   * the reset untouched.
+   * Only uncontrolled fields need this — toolkits, trigger mode, cron,
+   * timezone, and delivery checkboxes are React state and survive the reset.
    */
   const sent = state.values;
   const initial = {
@@ -198,20 +218,29 @@ export function WorkflowForm({
     denyTools: sent
       ? (sent.denyTools ?? "")
       : defaultValues?.denyTools?.join(", "),
+    monthlyCostCapUsd: sent
+      ? (sent.monthlyCostCapUsd ?? "")
+      : (defaultValues?.monthlyCostCapUsd ?? ""),
   };
 
   const [selectedToolkits, setSelectedToolkits] = useState<Set<string>>(
     new Set(defaultValues?.toolkits ?? ["composio_search"]),
   );
-  // Controlled only so the header can show a live count — everything else
-  // about the field (validation, submission) works the same as uncontrolled.
+  // Controlled only so the header can show a live count — validation and
+  // submission still work as if uncontrolled.
   const [goal, setGoal] = useState(initial.goal ?? "");
-  // No tokenizer on the client; ~4 chars/token is the standard rough estimate
-  // and is plenty for "am I anywhere near the limit" purposes.
+  // No tokenizer on the client; ~4 chars/token is the standard rough estimate,
+  // plenty for "am I near the limit".
   const goalTokens = goal.trim() ? Math.ceil(goal.trim().length / 4) : 0;
   const [cron, setCron] = useState(defaultValues?.cron || "0 8 * * 1-5");
-  const [triggerType, setTriggerType] = useState<"cron" | "event">(
+  const [triggerType, setTriggerType] = useState<"cron" | "event" | "workflow">(
     defaultValues?.triggerType ?? "cron",
+  );
+  const [parentWorkflowId, setParentWorkflowId] = useState(
+    defaultValues?.parentWorkflowId ?? "",
+  );
+  const [parentCondition, setParentCondition] = useState(
+    defaultValues?.parentCondition ?? "",
   );
   const [eventTriggers, setEventTriggers] = useState<Set<string>>(
     new Set(defaultValues?.eventTriggers ?? []),
@@ -222,14 +251,14 @@ export function WorkflowForm({
   const [timezone, setTimezone] = useState(
     defaultValues?.timezone ?? "Asia/Kolkata",
   );
-  // Mirrored in state so the footer can say what the run will actually be
-  // allowed to do.
+  // Mirrored in state so the footer can say what the run is actually allowed
+  // to do.
   const [allowWrites, setAllowWrites] = useState(
     defaultValues?.readOnly === false,
   );
 
-  // Same parser the dispatcher schedules with, so what the field says about an
-  // expression is what the ticker will actually do with it.
+  // Same parser the dispatcher schedules with, so the field's read of an
+  // expression matches what the ticker does with it.
   const cronPreview = useMemo(() => {
     if (!cron.trim()) return { next: undefined, error: undefined };
     try {
@@ -259,10 +288,9 @@ export function WorkflowForm({
       ? [saved, ...TIMEZONES].sort()
       : TIMEZONES;
 
-  // Every toolkit the user has a connection row for, plus web search. Broken
-  // ones are included and flagged rather than hidden. A toolkit with no row at
-  // all — disconnected entirely — still rides along as a hidden input so an
-  // unrelated edit doesn't silently drop it.
+  // Every toolkit with a connection row, plus web search. Broken ones are
+  // included and flagged, not hidden. A toolkit with no row at all still
+  // rides along as a hidden input so an unrelated edit doesn't drop it.
   const options: ToolkitOption[] = [WEB_SEARCH, ...availableToolkits];
   const offline = (defaultValues?.toolkits ?? []).filter(
     (slug) => !options.some((o) => o.slug === slug),
@@ -271,9 +299,8 @@ export function WorkflowForm({
   const toolkitKey = [...selectedToolkits].sort().join(",");
 
   /*
-   * Which events you can listen to depends on which apps the workflow uses,
-   * so the catalog is fetched per toolkit selection — and only in event mode,
-   * since a scheduled workflow never needs it.
+   * Which events you can listen to depends on the workflow's apps, so the
+   * catalog is fetched per toolkit selection, and only in event mode.
    */
   useEffect(() => {
     if (triggerType !== "event") return;
@@ -283,19 +310,18 @@ export function WorkflowForm({
       `/api/trigger-types?toolkits=${encodeURIComponent(toolkitKey)}`,
       { signal: controller.signal },
     )
-      // Cleared here rather than at the top of the effect: a synchronous
-      // setState in an effect body cascades a render for every toolkit toggle.
+      // Cleared here, not at the top of the effect: a synchronous setState in
+      // an effect body cascades a render per toolkit toggle.
       .then((data) => {
         setTriggerTypes(Array.isArray(data.items) ? data.items : []);
         setTriggerError(null);
       })
       .catch((err) => {
-        // Switching toolkits aborts the in-flight request; that isn't a
-        // failure worth reporting.
+        // Switching toolkits aborts the in-flight request — not a failure
+        // worth reporting.
         if (err instanceof DOMException && err.name === "AbortError") return;
         // Previously swallowed entirely, so an unreachable Composio looked
-        // exactly like "these apps have no events" — with no way to tell that
-        // picking an event was impossible rather than unnecessary.
+        // identical to "these apps have no events".
         setTriggerTypes([]);
         setTriggerError(err instanceof Error ? err.message : String(err));
       });
@@ -322,10 +348,10 @@ export function WorkflowForm({
   }
 
   return (
-    // `overflow-clip` rather than `hidden` in the page-scroll case: it still clips
-    // the section corners but doesn't become a scroll container, which would kill
-    // the sticky footer. In `fillHeight` mode the card itself is the fixed frame
-    // and `sections` below is the scroll port.
+    // `overflow-clip`, not `hidden`, in the page-scroll case: it still clips
+    // section corners without becoming a scroll container, which would kill
+    // the sticky footer. In `fillHeight` mode the card is the fixed frame and
+    // `sections` below is the scroll port.
     <form
       action={formAction}
       className={`rounded-container border-border bg-surface @container flex flex-col overflow-clip border ${
@@ -343,8 +369,8 @@ export function WorkflowForm({
 
       <div
         // Hairlines come from `divide-y`, not a gray backdrop showing through
-        // 1px gaps — that backdrop was also what the scroll port painted below
-        // the last section, so a short form ended in a slab of border gray.
+        // 1px gaps — that backdrop also painted below the last section,
+        // leaving a short form ending in a slab of border gray.
         className={`divide-border bg-surface flex flex-col divide-y ${
           fillHeight ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
         }`}
@@ -361,34 +387,40 @@ export function WorkflowForm({
           </Field>
 
           <div className="flex min-w-0 flex-col gap-1.5">
-            <div className="flex items-baseline justify-between gap-2">
-              <label className="text-foreground text-[13px] font-medium">
-                Goal
-              </label>
-              <span className="text-subtle text-xs tabular-nums">
-                ~{goalTokens.toLocaleString()} tokens
-              </span>
-            </div>
-            <textarea
+            <label className="text-foreground text-[13px] font-medium">
+              Goal
+            </label>
+            {/* The goal is a prompt written in markdown; the preview tab is
+                where you check it before a run renders it. */}
+            <MarkdownEditor
               name="goal"
-              required
-              rows={5}
               value={goal}
-              onChange={(e) => setGoal(e.target.value)}
+              onChange={setGoal}
               placeholder="Check today's calendar and my GitHub issues. Short digest, flag conflicts."
-              className="input font-mono text-[13px]"
+              meta={`~${goalTokens.toLocaleString()} tokens`}
             />
           </div>
         </Section>
 
         <Section title="Trigger" icon={CalendarClock}>
           <input type="hidden" name="triggerType" value={triggerType} />
+          {/*
+           * Timezone picker lives in the cron branch since a schedule is the
+           * obvious thing a zone applies to — but it's not the only thing:
+           * the monthly budget resets on the workflow's own midnight. Without
+           * this hidden field, saving an event or chained workflow silently
+           * reset the zone to the default.
+           */}
+          {triggerType !== "cron" && (
+            <input type="hidden" name="timezone" value={timezone} />
+          )}
 
           <div className="flex flex-wrap gap-1.5">
             {(
               [
                 { value: "cron", label: "On a schedule" },
                 { value: "event", label: "On an event" },
+                { value: "workflow", label: "After another workflow" },
               ] as const
             ).map((mode) => (
               <Pill
@@ -403,9 +435,9 @@ export function WorkflowForm({
 
           {triggerType === "cron" ? (
             <>
-              {/* Builder first: composing the schedule is the common path, and
-                  the cron field below it is the correction — not the other way
-                  round. Both edit the same string, so neither can go stale. */}
+              {/* Builder first — composing is the common path, the cron field
+                  below is the correction. Both edit the same string, so
+                  neither can go stale. */}
               <CronBuilder value={cron} onChange={setCron} />
 
               <div className="grid gap-4 @lg:grid-cols-2">
@@ -419,10 +451,9 @@ export function WorkflowForm({
                     ) : (
                       // What the expression *means*, not just when it next
                       // fires — "Next: Wed 8:00" reads the same for a weekday
-                      // schedule and a Wednesdays-only one. The next-run text
-                      // stays as the fallback for expressions too exotic to
-                      // describe; it's relative to "now", so server and client
-                      // disagree by design.
+                      // schedule and a Wednesdays-only one. Falls back to the
+                      // next-run text for exotic expressions; that's relative
+                      // to "now", so server/client disagree by design.
                       <span suppressHydrationWarning>
                         {describeCron(cron) ?? cronPreview.next}
                       </span>
@@ -460,14 +491,29 @@ export function WorkflowForm({
                 </Field>
               </div>
             </>
-          ) : (
+          ) : triggerType === "event" ? (
             <EventTriggerPicker
               options={triggerTypes}
               selected={eventTriggers}
               onToggle={toggleEventTrigger}
               error={triggerError}
             />
+          ) : (
+            <ParentTriggerPicker
+              options={parentOptions}
+              parentWorkflowId={parentWorkflowId}
+              onParentChange={setParentWorkflowId}
+              condition={parentCondition}
+              onConditionChange={setParentCondition}
+            />
           )}
+        </Section>
+
+        <Section title="Signals & alerts" icon={Gauge}>
+          <SignalsEditor
+            defaultSignals={defaultValues?.signalSchema ?? []}
+            defaultCondition={defaultValues?.alertCondition ?? ""}
+          />
         </Section>
 
         <Section title="Tools" icon={Wrench}>
@@ -483,8 +529,8 @@ export function WorkflowForm({
                       ? `${toolkit.name} needs reconnecting before this workflow can use it.`
                       : undefined
                   }
-                  // The real checkbox is sr-only, so the label carries the
-                  // focus ring — otherwise keyboard users see nothing move.
+                  // Real checkbox is sr-only, so the label carries the focus
+                  // ring — otherwise keyboard users see nothing move.
                   className={`rounded-control has-[:focus-visible]:outline-foreground relative flex h-11 cursor-pointer items-center gap-2 border px-2 text-[13px] font-medium transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 ${
                     broken
                       ? "border-warn-soft bg-warn-soft text-warn-text"
@@ -571,8 +617,8 @@ export function WorkflowForm({
         </Section>
 
         <Section title="Model" icon={Cpu}>
-          {/* Stacked, not side by side: model names are long enough that the
-              picker wants the full width, and the step count needs none of it. */}
+          {/* Stacked, not side by side: model names want the full width, and
+              step count needs none of it. */}
           <div className="flex flex-col gap-4">
             <Field label="Model">
               <ModelPicker
@@ -586,12 +632,27 @@ export function WorkflowForm({
                 name="allowWrites"
                 checked={allowWrites}
                 onChange={setAllowWrites}
-                // Names the workflow, not "it" — this is the same flag the
-                // builder's "Workflow · write tools allowed" chip sets, and
-                // the whole confusion there was which of the two agents on
-                // screen a permission belonged to.
+                // Names the workflow, not "it" — same flag as the builder's
+                // "Workflow · write tools allowed" chip, to avoid confusion
+                // over which agent a permission belongs to.
                 label="Allow this workflow write tools"
                 hint="Off, it only reads. On, it can post, send and update — never delete."
+              />
+            </Field>
+
+            <Field
+              label="Monthly budget (USD)"
+              hint="Blank for no limit. Pauses the workflow once this month's spend reaches it; the run that crosses still finishes."
+            >
+              <input
+                name="monthlyCostCapUsd"
+                type="number"
+                min="0.01"
+                step="0.01"
+                inputMode="decimal"
+                defaultValue={initial.monthlyCostCapUsd}
+                placeholder="No limit"
+                className="input font-mono tabular-nums"
               />
             </Field>
 
@@ -626,8 +687,8 @@ export function WorkflowForm({
         </Section>
 
         <Section title="Tool filters" icon={Filter}>
-          {/* Comma-separated tool globs need width; two columns only earn their
-              keep once the card is genuinely wide. */}
+          {/* Comma-separated tool globs need width; two columns only earn
+              their keep once the card is genuinely wide. */}
           <div className="grid gap-4 @2xl:grid-cols-2">
             <Field
               label="Allow only"
@@ -652,9 +713,8 @@ export function WorkflowForm({
         </Section>
       </div>
 
-      {/* Between the scroll port and the save bar: the one place that is on
-          screen in both layouts at the moment the user has just pressed Save
-          and is looking for what happened. */}
+      {/* Between the scroll port and save bar: on screen in both layouts
+          right when the user just pressed Save and is looking for feedback. */}
       {state.error && (
         <p
           role="alert"
@@ -665,21 +725,21 @@ export function WorkflowForm({
         </p>
       )}
 
-      {/* In fillHeight mode it sits outside the scroll port, so it's simply the
-          card's last row. Otherwise it sticks to the viewport bottom while the
-          form is taller than it, so the save action is never a scroll away. */}
+      {/* In fillHeight mode it sits outside the scroll port as the card's
+          last row. Otherwise it sticks to the viewport bottom so Save is
+          never a scroll away. */}
       <div
         className={`border-border bg-bg-subtle/90 flex items-center justify-between gap-3 border-t px-5 py-3 backdrop-blur-md ${
-          // Below lg the card is part of the page scroll even in fillHeight
-          // mode, so the save bar sticks there too and only becomes the card's
-          // last row once the pane owns its own height.
+          // Below lg the card is part of page scroll even in fillHeight mode,
+          // so it sticks there too, becoming the card's last row only once
+          // the pane owns its own height.
           fillHeight
             ? "sticky bottom-0 lg:static lg:shrink-0"
             : "sticky bottom-0"
         }`}
       >
-        {/* Hidden on a phone rather than truncated: at 390px this clipped to
-            "Read-only — the agent nev…", which is worse than absent. */}
+        {/* Hidden on phone rather than truncated: at 390px this clipped to
+            "Read-only — the agent nev…", worse than absent. */}
         <p className="text-subtle hidden min-w-0 truncate text-xs sm:block">
           {allowWrites
             ? "Write tools allowed — this workflow can change your apps."
@@ -696,6 +756,88 @@ export function WorkflowForm({
  * stays listed even when the catalog can't be reached, so an unreachable
  * Composio never silently drops a workflow's trigger on save.
  */
+/**
+ * The chained trigger: which workflow runs first, and the condition over
+ * that workflow's signals deciding whether this one fires.
+ *
+ * The condition reads the PARENT's signals, not this workflow's, so the
+ * available names change with the selection and the helper text follows.
+ */
+function ParentTriggerPicker({
+  options,
+  parentWorkflowId,
+  onParentChange,
+  condition,
+  onConditionChange,
+}: {
+  options: ParentOption[];
+  parentWorkflowId: string;
+  onParentChange: (id: string) => void;
+  condition: string;
+  onConditionChange: (value: string) => void;
+}) {
+  const parent = options.find((o) => o.id === parentWorkflowId);
+  const names = (parent?.signals ?? []).map((s) => s.key).filter(Boolean);
+
+  if (options.length === 0) {
+    return (
+      <p className="text-subtle text-xs leading-relaxed">
+        No other workflows yet. Create one to chain this behind it.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <Field
+        label="Runs after"
+        hint="Starts when that one finishes, handed its digest and signals."
+      >
+        <select
+          name="parentWorkflowId"
+          required
+          value={parentWorkflowId}
+          onChange={(e) => onParentChange(e.target.value)}
+          className="input"
+        >
+          <option value="">Pick a workflow…</option>
+          {options.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <Field
+        label="Only run when"
+        hint={
+          !parent ? (
+            "Pick a workflow above first."
+          ) : names.length === 0 ? (
+            "That workflow reports no signals — nothing to test. Runs every time it finishes."
+          ) : (
+            <>
+              Empty runs every time. Against{" "}
+              <span className="font-mono">{parent.name}</span>&apos;s signals:{" "}
+              <span className="font-mono">{names.join(", ")}</span>
+            </>
+          )
+        }
+      >
+        <input
+          name="parentCondition"
+          value={condition}
+          onChange={(e) => onConditionChange(e.target.value)}
+          disabled={!parent || names.length === 0}
+          placeholder={names.length ? `${names[0]} > 0` : "No signals to test"}
+          className="input font-mono text-[13px] disabled:cursor-not-allowed disabled:opacity-55"
+        />
+      </Field>
+    </>
+  );
+}
+
 function EventTriggerPicker({
   options,
   selected,
@@ -746,7 +888,7 @@ function EventTriggerPicker({
             return (
               <label
                 key={option.slug}
-                className={`border-border has-[:focus-visible]:outline-foreground flex cursor-pointer items-start gap-2.5 border-b px-3 py-2.5 transition-colors last:border-b-0 has-[:focus-visible]:outline-2 has-[:focus-visible]:-outline-offset-2 ${
+                className={`border-border has-[:focus-visible]:outline-foreground relative flex cursor-pointer items-start gap-2.5 border-b px-3 py-2.5 transition-colors last:border-b-0 has-[:focus-visible]:outline-2 has-[:focus-visible]:-outline-offset-2 ${
                   on ? "bg-surface-2" : "hover:bg-surface-hover"
                 }`}
               >
@@ -781,15 +923,14 @@ function EventTriggerPicker({
 }
 
 /**
- * The delivery targets, as one multi-select instead of a stack of four
- * checkboxes. Delivery is a short list you set once and rarely revisit, and as
- * cards it took more vertical space in the settings rail than the goal did.
- * Collapsed, it reads as a sentence — "Dashboard, Slack DM, Email".
+ * Delivery targets as one multi-select instead of four checkboxes. Delivery
+ * is a short list set once and rarely revisited, and as cards it took more
+ * vertical space than the goal did. Collapsed, it reads as a sentence —
+ * "Dashboard, Slack DM, Email".
  *
- * Only the *choosing* moved into the dropdown: a chosen target that needs a
- * destination still gets a real field underneath, because a channel or an
- * address typed inside a popover is a thing you can't see while you check your
- * work.
+ * Only *choosing* moved into the dropdown: a chosen target needing a
+ * destination still gets a real field underneath, since a channel or address
+ * typed inside a popover can't be checked while you work.
  */
 type TargetKey = "slack" | "slackChannel" | "email" | "webhook";
 
@@ -869,8 +1010,8 @@ function DeliveryPicker({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    // Click-away rather than a full-screen backdrop: this panel sits inside the
-    // form's own scroll port, so a fixed overlay would swallow the scroll.
+    // Click-away, not a full-screen backdrop: this panel sits inside the
+    // form's own scroll port, and a fixed overlay would swallow the scroll.
     const onDown = (e: MouseEvent) => {
       if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
     };
@@ -902,8 +1043,8 @@ function DeliveryPicker({
   return (
     <div className="flex flex-col gap-2">
       {/* The dropdown is a control, not a form field: the action reads these
-          hidden inputs, so the panel can open, close, or unmount without
-          affecting what gets submitted. */}
+          hidden inputs, so opening/closing/unmounting the panel doesn't
+          affect what's submitted. */}
       {chosen.map((t) => (
         <input key={t.name} type="hidden" name={t.name} value="on" />
       ))}
@@ -930,8 +1071,8 @@ function DeliveryPicker({
         </button>
 
         {open && (
-          // Absolute rather than portalled: it's full-width inside a card that
-          // scrolls with it, so it stays anchored with no measuring.
+          // Absolute, not portalled: full-width inside a card it scrolls
+          // with, so it stays anchored with no measuring.
           <div
             role="listbox"
             aria-multiselectable
@@ -1015,10 +1156,9 @@ function Row({
 
 /**
  * The box a checkbox actually shows. The native control paints a solid black
- * square through `accent-color`, which reads as a filled blob at 14px next to
- * everything else here — this is the same lucide `Check` the toolkit tiles use,
- * on a bordered chip. The real <input> stays in the DOM, sr-only, so form
- * submission and screen readers are unchanged.
+ * square via `accent-color`, which reads as a filled blob at 14px — this uses
+ * the same lucide `Check` as the toolkit tiles, on a bordered chip. The real
+ * <input> stays sr-only, so submission and screen readers are unchanged.
  */
 function CheckBox({
   on,
@@ -1036,7 +1176,7 @@ function CheckBox({
           : "border-border bg-bg text-transparent"
       } ${disabled ? "opacity-60" : ""}`}
     >
-      {/* Utility beats the base-layer 1.5 stroke — a check this small needs weight. */}
+      {/* Utility beats the base-layer 1.5 stroke — needs weight this small. */}
       <Check className="h-3 w-3 [stroke-width:2.75px]" />
     </span>
   );
@@ -1146,13 +1286,17 @@ function Checkbox({
   /** Pass with `checked` to drive the row from parent state. */
   onChange?: (checked: boolean) => void;
 }) {
-  // Uncontrolled rows still need the box to react to a click, so the visual
-  // state is mirrored locally and the input stays the source of truth.
+  // Uncontrolled rows still need the box to react to a click, so visual
+  // state is mirrored locally; the input stays the source of truth.
   const [on, setOn] = useState(Boolean(checked ?? defaultChecked));
 
   return (
+    // `relative` is load-bearing: the sr-only input is `position: absolute`,
+    // so without a positioned ancestor it lands at the nearest one — clicking
+    // the row scrolled the form's scroll port as the browser brought the
+    // newly focused input into view. Toolkit tiles already carried this.
     <label
-      className={`rounded-control border-border has-[:focus-visible]:outline-foreground flex items-start gap-2.5 border px-3 py-2.5 transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 ${
+      className={`rounded-control border-border has-[:focus-visible]:outline-foreground relative flex items-start gap-2.5 border px-3 py-2.5 transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 ${
         disabled
           ? "cursor-not-allowed opacity-70"
           : "hover:border-border-strong cursor-pointer"

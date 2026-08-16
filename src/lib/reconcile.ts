@@ -12,14 +12,14 @@ import { RECONCILE_BATCH, RECONCILE_TTL_MS } from "@/lib/limits";
 
 /*
  * Connection state lives in Postgres so pages don't have to call Composio to
- * render. Composio is still the source of truth, so something has to close the
- * gap — this is it.
+ * render. Composio is still the source of truth, so something has to close
+ * the gap — this is it.
  *
- * Three kinds of drift it catches, none of which produce an event we could
- * react to:
+ * Three kinds of drift it catches, none of which produce an event to react
+ * to:
  *
- *  - The user revoked the grant at the provider (Composio flips the account to
- *    EXPIRED/REVOKED and never tells us).
+ *  - User revoked the grant at the provider (Composio flips the account to
+ *    EXPIRED/REVOKED, never tells us).
  *  - An account was deleted in the Composio dashboard.
  *  - An OAuth flow was abandoned, leaving a row stuck in `initiated`.
  */
@@ -45,8 +45,8 @@ export async function reconcileUserConnections(userId: string): Promise<void> {
  * Retries the deletes that the connect callback couldn't confirm.
  *
  * A superseded account left behind at Composio isn't harmful, but it keeps
- * appearing in `list()` and would make the reconcile above see two accounts
- * for one toolkit.
+ * appearing in `list()`, making the reconcile above see two accounts for one
+ * toolkit.
  */
 async function retryStaleDeletes(userId: string): Promise<void> {
   const rows = await db
@@ -80,12 +80,12 @@ async function retryStaleDeletes(userId: string): Promise<void> {
 }
 
 /**
- * Reconciles one user, but only if their rows are actually stale.
+ * Reconciles one user, but only if their rows are stale.
  *
  * For the opportunistic refresh on /connections. The staleness decision lives
- * here rather than at the call site so the page renders from the database with
- * no clock reading of its own, and the check happens after the response has
- * already gone out.
+ * here, not at the call site, so the page renders from the database with no
+ * clock reading of its own — and the check happens after the response is
+ * already sent.
  */
 export async function reconcileUserIfStale(userId: string): Promise<boolean> {
   const cutoff = new Date(Date.now() - PAGE_REFRESH_AFTER_MS);
@@ -116,8 +116,8 @@ const PAGE_REFRESH_AFTER_MS = 10 * 60 * 1000;
  * The cron-tick sweep: reconciles only users with something worth re-reading.
  *
  * Bounded per tick so a growing user base can't eat the tick's time budget,
- * and ordered by `lastCheckedAt` so the bound behaves as round-robin rather
- * than starving the same users every time.
+ * ordered by `lastCheckedAt` so the bound behaves as round-robin rather than
+ * starving the same users.
  */
 export async function reconcileStaleConnections(
   limit = RECONCILE_BATCH,

@@ -1,11 +1,10 @@
 import { PageShell, Skeleton } from "@/components/ui";
 
 /*
- * The builder is two panes, and the app-wide skeleton is a header, a stat row
- * and a list — so the shared one promised a shape this route never renders and
- * then rearranged the screen on arrival. This mirrors what actually lands: a
- * chat card on the left, the settings rail on the right, at the same widths
- * new-workflow-client.tsx uses.
+ * The builder is two panes, but the app-wide skeleton is header/stat-row/list
+ * — a shape this route never renders, causing a rearrange on arrival. This
+ * mirrors the real layout: chat card left, settings rail right, at
+ * new-workflow-client.tsx's widths.
  */
 export default function Loading() {
   return (
@@ -16,8 +15,8 @@ export default function Loading() {
       <Skeleton className="mt-2 h-5 w-80" />
 
       <div className="mt-6 grid min-h-0 gap-5 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_344px] xl:grid-cols-[minmax(0,1fr)_380px] xl:gap-6">
-        {/* Chat pane: header strip, then the composer pinned to the bottom —
-            the two things that are in the same place on every visit. */}
+        {/* Chat pane: header strip, then composer pinned to the bottom —
+            the two constants across visits. */}
         <div className="rounded-container border-border flex h-[min(62vh,520px)] flex-col justify-between border p-4 lg:h-full">
           <div className="flex items-center gap-2">
             <Skeleton className="rounded-control h-7 w-7" />

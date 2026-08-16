@@ -2,11 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
  * The delete half of `syncEventTriggers` is the part that never existed, and
- * the case it has to get right is the one a refcount would get wrong: two
- * workflows listening to the same trigger, one of them removed.
+ * the case it must get right is the one a refcount would get wrong: two
+ * workflows listening to the same trigger, one removed.
  *
- * Everything below the function is stubbed — this is about the reconciliation
- * decision, not about Drizzle or Composio.
+ * Everything below the function is stubbed — this is about the
+ * reconciliation decision, not Drizzle or Composio.
  */
 
 type WorkflowRow = { slugs: string[] };

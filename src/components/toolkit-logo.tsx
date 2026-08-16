@@ -4,9 +4,9 @@ import { Puzzle } from "lucide-react";
 /**
  * Toolkit avatar. Composio ships a logo URL for most toolkits; since the
  * catalog is open-ended we can't bundle an icon per app, so the logo is used
- * when present and a lucide glyph (or the initial) stands in when it isn't.
- * Plain <img> on purpose — remote hosts vary, and next/image would need every
- * one allow-listed in next.config.
+ * when present and a lucide glyph (or initial) stands in otherwise. Plain
+ * <img> on purpose — remote hosts vary, and next/image would need every one
+ * allow-listed in next.config.
  */
 export function ToolkitLogo({
   slug,
@@ -22,9 +22,9 @@ export function ToolkitLogo({
   logo?: string;
   size?: "md" | "lg";
   connected?: boolean;
-  /** "neutral" just emphasizes the box (the /connections page already has a
-   *  status badge alongside it); "accent" is the catalog's own "shown here"
-   *  tint (the connector browser) and doesn't carry account-status meaning. */
+  /** "neutral" just emphasizes the box (/connections already shows a status
+   *  badge alongside it); "accent" is the catalog's "shown here" tint
+   *  (connector browser) and carries no account-status meaning. */
   connectedTone?: "accent" | "neutral";
   className?: string;
 }) {
@@ -39,9 +39,9 @@ export function ToolkitLogo({
         connected
           ? connectedTone === "accent"
             ? // Bare `accent` is special-cased in globals.css to a neutral
-              // hover-gray in dark mode (for better-auth-ui compatibility), so
-              // `border-accent/25` silently loses its color there — `-line`
-              // isn't touched by that override and stays blue in both themes.
+              // hover-gray in dark mode (better-auth-ui compat), so
+              // `border-accent/25` loses its color there — `-line` isn't
+              // touched by that override and stays blue in both themes.
               "border-accent-line bg-accent-soft text-accent-text"
             : "border-border-strong bg-surface-2 text-foreground"
           : "border-border bg-surface-2 text-subtle"

@@ -17,19 +17,19 @@ import {
 import { takeToken } from "@/lib/rate-limit";
 import { LIMITS } from "@/lib/limits";
 
-// GET so a plain <a href> / form-less button click can hit it directly and
-// follow the redirect — no client JS needed for the core flow.
+// GET so a plain <a href> click can hit it and follow the redirect directly
+// — no client JS needed for the core flow.
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ toolkit: string }> },
 ) {
-  // Redirects to sign-in rather than answering 403: this is reached by a link
-  // click, so a JSON error would dead-end the user.
+  // Redirects to sign-in rather than 403: reached by a link click, so a JSON
+  // error would dead-end the user.
   const user = await requireUser();
   const { toolkit } = await params;
 
-  // Any Composio toolkit is connectable, not just a curated few — so the slug
-  // is only shape-checked here and then verified against the live catalog.
+  // Any Composio toolkit is connectable, not a curated few — the slug is only
+  // shape-checked here, then verified against the live catalog.
   if (!/^[a-z0-9_]{2,64}$/.test(toolkit)) {
     return backWithError(req, `Malformed toolkit slug: ${toolkit}`);
   }
@@ -49,8 +49,8 @@ export async function GET(
   }
 
   // Nothing to connect: Composio answers these tools without a connected
-  // account, and asking it for an auth config is a 400. Say so on the page
-  // instead of dead-ending on a JSON error.
+  // account, and asking it for an auth config is a 400 — say so on the page
+  // instead of a JSON error.
   if (await toolkitIsNoAuth(toolkit)) {
     return NextResponse.redirect(
       new URL(
@@ -80,11 +80,10 @@ export async function GET(
    * Repair before replace.
    *
    * `link()` always mints a *new* connected account, so the old reconnect flow
-   * left an orphan behind every time — and Composio would then pick between
-   * them arbitrarily. `refresh()` renews the credentials on the account that
-   * already exists, which is both cheaper and leaves nothing to clean up. It
-   * only works where the provider issued a refresh token, so a failure here is
-   * expected and falls through to a full re-link.
+   * left an orphan every time, and Composio picked between them arbitrarily.
+   * `refresh()` renews the existing account's credentials instead — cheaper,
+   * nothing to clean up. It only works if the provider issued a refresh
+   * token, so a failure here is expected and falls through to a full re-link.
    */
   if (existing?.connectedAccountId && existing.status !== "disconnected") {
     try {
@@ -130,9 +129,9 @@ export async function GET(
       );
     }
 
-    // Recorded as *pending*: the live connection, if there is one, keeps
-    // working until the callback confirms its replacement. Abandoning the
-    // OAuth screen therefore costs nothing.
+    // Recorded as *pending*: any existing live connection keeps working
+    // until the callback confirms its replacement, so abandoning the OAuth
+    // screen costs nothing.
     await beginConnection({
       userId: user.id,
       toolkit,
@@ -148,9 +147,9 @@ export async function GET(
 }
 
 /*
- * This route is reached by a plain link click, so a JSON body would leave the
- * user staring at raw error text with no way back. Every failure lands on
- * /connections with the message rendered as an alert instead.
+ * Reached by a plain link click, so a JSON body would leave the user staring
+ * at raw error text with no way back — every failure lands on /connections
+ * as an alert instead.
  */
 function backWithError(req: NextRequest, message: string) {
   return NextResponse.redirect(

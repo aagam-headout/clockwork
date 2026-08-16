@@ -31,13 +31,13 @@ const CURRENT_VERSION = process.env.ENCRYPTION_KEY_VERSION || "v1";
  *
  * Each is 32 raw bytes, base64-encoded: `openssl rand -base64 32`.
  *
- * Rotation is therefore a deploy, not a migration: set the new key, bump
- * ENCRYPTION_KEY_VERSION, and existing rows keep decrypting under the old one
- * until something re-seals them.
+ * Rotation is a deploy, not a migration: set the new key, bump
+ * ENCRYPTION_KEY_VERSION, and existing rows keep decrypting under the old
+ * one until something re-seals them.
  *
- * Resolved on use rather than at import — same reasoning as the lazy Composio
- * client. A missing key should fail the one request that needs a secret, not
- * every page that transitively imports this module.
+ * Resolved on use, not at import — same reasoning as the lazy Composio
+ * client: a missing key should fail only the request that needs it, not
+ * every page that imports this module.
  */
 function keyForVersion(version: string): Buffer {
   const envVar =
@@ -66,9 +66,8 @@ function keyForVersion(version: string): Buffer {
  * `aad` binds the ciphertext to the row it belongs to — pass
  * `${userId}:${provider}`.
  *
- * Without it, a row copied from one user to another would decrypt perfectly
- * well and hand the second user the first user's key. With it, the copy fails
- * the authentication check instead.
+ * Without it, a row copied from one user to another would decrypt fine and
+ * hand over the first user's key. With it, the copy fails authentication.
  */
 export function encryptSecret(plaintext: string, aad: string): SealedSecret {
   const iv = randomBytes(12);
@@ -118,9 +117,9 @@ export function last4(secret: string): string {
  * Anything key-shaped, scrubbed.
  *
  * Provider SDK errors carry the request they failed on, and this app shows
- * error messages to users and writes them to `runs.error`. One of those paths
- * echoing a key back is exactly the kind of leak that only shows up in
- * production logs, so every user-facing error string goes through here.
+ * error messages to users and writes them to `runs.error`. Either path
+ * echoing a key back is a leak that only shows up in production logs, so
+ * every user-facing error string goes through here.
  */
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/sk-ant-[A-Za-z0-9_-]{8,}/g, "sk-ant-***"],

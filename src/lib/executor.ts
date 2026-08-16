@@ -1,5 +1,5 @@
 import { generateText, type ToolSet } from "ai";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runs, runSteps, outputs, workflows } from "@/db/schema";
 import { getToolsFor } from "@/lib/composio";
@@ -35,13 +35,18 @@ import {
   type HarnessState,
 } from "@/lib/agent/wrap-tools";
 import { systemCacheOptions } from "@/lib/agent/prompt-cache";
+import { HISTORY_PROMPT, REPORT_PROMPT } from "@/lib/agent/system-tools";
+import { parseSignalSchema, type Envelope } from "@/lib/outcome/envelope";
+import type { SignalDecl } from "@/lib/outcome/condition";
+import { decideChildren, decideDelivery } from "@/lib/outcome/route";
+import { checkCostCap, type CapVerdict } from "@/lib/cost-cap";
 
 type Workflow = typeof workflows.$inferSelect;
 
 /**
  * Hard ceiling on one run's model+tool loop. Deliberately under the route's
- * `maxDuration` (300s) so a stuck tool call fails as a recorded error with
- * time left to write it, instead of the whole function being killed mid-run.
+ * `maxDuration` (300s) so a stuck tool call fails as a recorded error, with
+ * time left to write it, instead of the function being killed mid-run.
  */
 export const RUN_TIMEOUT_MS = 240_000;
 
@@ -51,6 +56,15 @@ const MAX_STEP_RESULT_CHARS = 8_000;
 /** How much of the previous digest is worth re-reading for context. */
 const MEMORY_CHARS = 4_000;
 
+/**
+ * History lookups one run may make.
+ *
+ * Small on purpose: history is context for the work, not the work. Each call
+ * also re-sends the conversation, so an unbounded budget is a token bill, not
+ * a better digest.
+ */
+const HISTORY_BUDGET = 5;
+
 /** The agent's exact reply when nothing happened since the last digest. */
 export const NO_UPDATES = "NO_UPDATES";
 
@@ -58,11 +72,11 @@ export const NO_UPDATES = "NO_UPDATES";
  * Deliberately static per workflow — every per-run fact (current time,
  * previous digest, event payload) lives in the user prompt instead.
  *
- * That keeps the prompt identical across the steps of a run, which is what
- * makes it cacheable: the run sends a `cache_control` breakpoint on the system
- * message, covering the tool schemas and this prompt in one prefix. See
- * `src/lib/agent/prompt-cache.ts`. A per-run fact in here would silently cost
- * that discount on every step.
+ * That keeps the prompt identical across a run's steps, which is what makes
+ * it cacheable: a `cache_control` breakpoint on the system message covers the
+ * tool schemas and this prompt in one prefix (see
+ * `src/lib/agent/prompt-cache.ts`). A per-run fact in here would silently
+ * cost that discount every step.
  */
 function systemPrompt(workflow: Workflow): string {
   const cadence = workflow.cron
@@ -109,9 +123,13 @@ Rules:
   default — re-check them against a live source rather than repeating them,
   and report only what changed since it. Do not repeat items it already
   covered.
-- If nothing has changed since the previous digest, reply with exactly
-  ${NO_UPDATES} and nothing else, and do not call any delivery tool. Silence
-  is better than a digest that says "no updates" in ten words.${handlesEnabled() ? `\n\n${HANDLE_PROMPT}` : ""}`;
+- If nothing has changed since the previous digest, say so with
+  report({no_updates: true}) and do not call any delivery tool. Silence is
+  better than a digest that says "no updates" in ten words.${handlesEnabled() ? `\n\n${HANDLE_PROMPT}` : ""}
+
+${REPORT_PROMPT}
+
+${HISTORY_PROMPT}`;
 }
 
 type EnqueueResult =
@@ -129,11 +147,11 @@ type EnqueueResult =
 /**
  * Per-user run quotas.
  *
- * Not atomic — it counts and then inserts, so two simultaneous requests can
- * both squeeze past. That's acceptable: the dangerous duplicate (two runs of
- * the *same* workflow) is prevented by a database index, and these ceilings
- * exist to stop sustained abuse, not to be exact to the unit. The atomic
- * version costs an advisory lock per run for no practical gain.
+ * Not atomic — it counts then inserts, so two simultaneous requests can both
+ * squeeze past. Acceptable: the dangerous duplicate (two runs of the *same*
+ * workflow) is prevented by a database index, and these ceilings exist to
+ * stop sustained abuse, not to be exact to the unit. An atomic version costs
+ * an advisory lock per run for no practical gain.
  */
 async function runQuotaExceeded(
   workflowId: string,
@@ -182,15 +200,19 @@ async function runQuotaExceeded(
 }
 
 /**
- * Claims a run slot for a workflow. The `runs_one_active_per_workflow`
- * partial unique index is what actually prevents a double execution when a
- * cron tick and a "Run now" click land together — this just turns the
- * resulting constraint violation into an ordinary "skipped" answer.
+ * Claims a run slot. The `runs_one_active_per_workflow` partial unique index
+ * actually prevents a double execution when a cron tick and a "Run now"
+ * click land together — this just turns the constraint violation into an
+ * ordinary "skipped" answer.
  */
 export async function enqueueRun(
   workflowId: string,
-  trigger: "cron" | "manual" | "event",
-  options: { triggerRef?: string; triggerPayload?: unknown } = {},
+  trigger: "cron" | "manual" | "event" | "workflow",
+  options: {
+    triggerRef?: string;
+    triggerPayload?: unknown;
+    parentRunId?: string;
+  } = {},
 ): Promise<EnqueueResult> {
   const overQuota = await runQuotaExceeded(workflowId);
   if (overQuota) {
@@ -206,11 +228,12 @@ export async function enqueueRun(
         status: "queued",
         triggerRef: options.triggerRef ?? null,
         triggerPayload: (options.triggerPayload as object) ?? null,
+        parentRunId: options.parentRunId ?? null,
       })
       .returning({ id: runs.id });
 
-    // Stamped on the attempt, not on success: a workflow that errors every
-    // time must not stay "due" and re-fire on every tick.
+    // Stamped on the attempt, not success — else a workflow erroring every
+    // time would stay "due" and re-fire every tick.
     await db
       .update(workflows)
       .set({ lastAttemptAt: new Date() })
@@ -278,8 +301,8 @@ export async function runWorkflow(
  * including a crash, is written back to the run row.
  */
 export async function executeRun(runId: string): Promise<RunResult> {
-  // Claiming is a conditional update: only the caller that flips the row out
-  // of `queued` gets to run it.
+  // A conditional update: only the caller that flips the row out of
+  // `queued` gets to run it.
   const [run] = await db
     .update(runs)
     .set({ status: "running", startedAt: new Date() })
@@ -317,6 +340,34 @@ export async function executeRun(runId: string): Promise<RunResult> {
   const ownerId = workflow.userId;
 
   try {
+    /*
+     * Cost cap, before anything that costs money.
+     *
+     * Wrapped because the cap is a guardrail, not a correctness gate: if the
+     * spend query fails, better to run the workflow and lose the cap for one
+     * tick than stop someone's scheduled work over a database hiccup.
+     */
+    let cap: CapVerdict = { state: "uncapped", spent: 0, cap: null };
+    try {
+      cap = await checkCostCap(workflow);
+    } catch (err) {
+      console.error(`[cost] ${workflow.slug} cap check failed`, err);
+    }
+
+    if (cap.state === "over") {
+      const message = `monthly cost cap reached — $${cap.spent.toFixed(2)} spent against a $${cap.cap?.toFixed(2)} cap`;
+
+      // Paused rather than left to fail every tick. `pausedReason` also lets
+      // raising the cap re-enable exactly the workflows it stopped.
+      await db
+        .update(workflows)
+        .set({ enabled: false, pausedReason: "cost_cap" })
+        .where(eq(workflows.id, workflow.id));
+
+      await failRun(runId, startedAt, message, { errorCode: "cost_cap" });
+      return { runId, status: "error", error: message };
+    }
+
     const deliver = (workflow.deliver as DeliverTarget[]) ?? [];
     const toolkits = [
       ...new Set([...workflow.toolkits, ...deliverToolkits(deliver)]),
@@ -324,9 +375,8 @@ export async function executeRun(runId: string): Promise<RunResult> {
 
     /*
      * Preflight. Cheaper than discovering the same thing one failed tool call
-     * at a time, and — more to the point — it produces an honest verdict. A run
-     * that can't reach its apps used to end as `ok` with a digest apologising
-     * for it.
+     * at a time, and it produces an honest verdict — a run that can't reach
+     * its apps used to end as `ok` with a digest apologising for it.
      */
     const required = await requiredToolkits(workflow);
     const gate = await checkConnections(ownerId, required);
@@ -353,10 +403,37 @@ export async function executeRun(runId: string): Promise<RunResult> {
     );
     const store = createResultStore();
     const harness = createHarnessState();
+
+    const declaredSignals = parseSignalSchema(workflow.signalSchema);
+    /*
+     * The run's outcome, deposited by the `report` tool.
+     *
+     * A slot the executor owns rather than a return value, because the agent
+     * loop swallows tool results — the envelope must outlive the loop for the
+     * run to have an outcome at all, even when the loop ended badly.
+     */
+    let envelope: Envelope | null = null;
+
     const runTools = wrapToolsWithHandles(tools, {
       workflowId: workflow.id,
       store,
       state: harness,
+      signals: declaredSignals,
+      setEnvelope: (next) => {
+        // Last call wins — the tool says "exactly once", but a model
+        // correcting itself after a validation error shouldn't be punished.
+        envelope = next;
+      },
+      ownerId,
+      historyBudgetSpent: () => {
+        if (harness.historyCalls >= HISTORY_BUDGET) {
+          return {
+            error: `history budget spent (${HISTORY_BUDGET} calls) — work with what you have`,
+          };
+        }
+        harness.historyCalls++;
+        return null;
+      },
     });
 
     const deliverInstructions = deliver
@@ -371,22 +448,18 @@ export async function executeRun(runId: string): Promise<RunResult> {
     const now = new Date();
     const system = systemPrompt(workflow);
 
-    /*
-     * Toolkits whose credentials the provider rejected mid-run. Collected
-     * during the loop and acted on after it: a run can't be un-started, but it
-     * can be recorded truthfully.
-     */
+    // Toolkits whose credentials the provider rejected mid-run. Collected
+    // during the loop, acted on after: a run can't be un-started, but it can
+    // be recorded truthfully.
     const authFailed = new Set<string>();
 
     const cacheOptions = systemCacheOptions();
 
     const result = await generateText({
       model: await resolveModelForUser(ownerId, workflow.model),
-      /*
-       * The system prompt travels as a message rather than the `system`
-       * option for one reason: a message can carry provider options, and that
-       * is where the cache breakpoint goes. The text is unchanged either way.
-       */
+      // The system prompt travels as a message rather than the `system`
+      // option because a message can carry provider options, and that's
+      // where the cache breakpoint goes. The text is unchanged either way.
       messages: [
         {
           role: "system" as const,
@@ -408,10 +481,10 @@ export async function executeRun(runId: string): Promise<RunResult> {
       ],
       allowSystemInMessages: true,
       tools: runTools,
-      // `maxSteps` is the workflow's budget for *real* tool calls, and it is
-      // what the system prompt tells the agent it has — `query` and `inspect`
-      // read data this run already fetched, so they don't spend it. See
-      // `runLoopExhausted` for why an absolute bound is also needed.
+      // `maxSteps` is the workflow's budget for *real* tool calls — what the
+      // system prompt tells the agent it has. `query`/`inspect` read data
+      // already fetched, so they don't spend it. See `runLoopExhausted` for
+      // why an absolute bound is also needed.
       stopWhen: ({ steps }) => runLoopExhausted(steps, workflow.maxSteps),
       abortSignal: AbortSignal.timeout(RUN_TIMEOUT_MS),
       onStepFinish: async (step) => {
@@ -419,13 +492,12 @@ export async function executeRun(runId: string): Promise<RunResult> {
          * Both lists, not just `toolResults`.
          *
          * Composio's tools arrive through `wrapToolsForProvider` as *dynamic*
-         * tools, and the SDK files their results under `dynamicToolResults`;
-         * `toolResults` carries only the statically-typed ones (here, `query`
-         * and `inspect`). Reading just the latter meant every Composio result
-         * looked like `undefined` — so the trace recorded `null` for the only
-         * calls worth tracing, and the `successful === false` check below could
-         * never fire, which is exactly the dead-connection-looks-green bug the
-         * comment further down says was already fixed once.
+         * tools, so the SDK files their results under `dynamicToolResults`;
+         * `toolResults` carries only the statically-typed ones (`query`,
+         * `inspect`). Reading just the latter made every Composio result look
+         * like `undefined` — the trace recorded `null` for the calls worth
+         * tracing, and the `successful === false` check below could never
+         * fire: the dead-connection-looks-green bug noted further down.
          */
         const stepResults = [
           ...(step.toolResults ?? []),
@@ -441,8 +513,8 @@ export async function executeRun(runId: string): Promise<RunResult> {
           // so a rejected credential arrives here as an ordinary value.
           //
           // A descriptor stands in for the payload in the model's context, but
-          // not here: the auth check below and the trace both need what the
-          // tool actually returned.
+          // not here — the auth check and the trace both need the actual
+          // tool output.
           const output = resolveForTrace(matchingResult?.output, store) as
             { successful?: boolean; error?: string | null } | undefined;
           const failed = isFailure(output);
@@ -457,8 +529,8 @@ export async function executeRun(runId: string): Promise<RunResult> {
             toolSlug: call.toolName,
             argsJson: call.input as object,
             resultJson: truncateForTrace(output),
-            // Previously every tool step was recorded with `error: null`, so a
-            // trace showed a failed call as an ordinary one.
+            // Previously recorded with `error: null` always, so a trace
+            // showed a failed call as an ordinary one.
             error: failed ? (output?.error ?? "tool call failed") : null,
           });
         }
@@ -468,18 +540,67 @@ export async function executeRun(runId: string): Promise<RunResult> {
       },
     });
 
-    const body = result.text.trim();
+    /*
+     * Where the run's outcome comes from.
+     *
+     * `report` is the protocol, but some workflows predate it and some models
+     * occasionally end a turn without calling it. Falling back to the final
+     * text keeps those runs working as before.
+     *
+     * The fallback is only safe when the workflow asks nothing of the
+     * envelope. One that declares signals or an alert condition can't be
+     * routed without a report — delivering anyway would silently skip every
+     * threshold configured — so that case is an error.
+     */
+    const needsEnvelope =
+      declaredSignals.length > 0 || Boolean(workflow.alertCondition?.trim());
+
+    const reported: Envelope | null = envelope;
+    let outcome: Envelope;
+
+    if (reported) {
+      outcome = reported;
+    } else {
+      const text = result.text.trim();
+      if (needsEnvelope) {
+        await db.insert(outputs).values({
+          runId,
+          format: "markdown",
+          body: text,
+          unchanged: false,
+          deliveredTo: [],
+          deliveryLog: [],
+          // Nothing was attempted; left to its default this row would claim
+          // "delivered" — the exact lie deliveryStatus exists to end.
+          deliveryStatus: "skipped",
+        });
+        const message =
+          "the run never called report, so its signals and alert condition could not be evaluated";
+        await failRun(runId, startedAt, message, { errorCode: "no_report" });
+        return { runId, status: "error", error: message };
+      }
+      outcome = {
+        digest: text === NO_UPDATES ? "" : text,
+        signals: {},
+        severity: null,
+        noUpdates: text === NO_UPDATES,
+      };
+    }
+
+    // Kept so paths below that only ever needed the text, including the
+    // NO_UPDATES sentinel they compare against, still read the same way.
+    const body = outcome.noUpdates ? NO_UPDATES : outcome.digest;
 
     /*
-     * The run got past the preflight but a credential was rejected while it
-     * ran — the token expired between the check and the call, or Composio's
-     * status hadn't caught up yet.
+     * The run got past preflight but a credential was rejected while it ran —
+     * the token expired between the check and the call, or Composio's status
+     * hadn't caught up.
      *
-     * This is the case that used to be recorded as a success: the agent is
-     * told to report tool failures in one line, so the run ended `ok` with a
-     * digest saying it couldn't read Slack, and the dashboard showed green.
-     * The digest is still saved as a trace, but the run is an error and the
-     * connection is marked so the next run is blocked at the gate instead.
+     * This used to be recorded as a success: the agent reports tool failures
+     * in one line, so the run ended `ok` with a digest saying it couldn't
+     * read Slack, and the dashboard showed green. The digest is still saved
+     * as a trace, but the run is now an error and the connection is marked so
+     * the next run is blocked at the gate instead.
      */
     if (authFailed.size > 0) {
       const blocked = [...authFailed];
@@ -499,6 +620,7 @@ export async function executeRun(runId: string): Promise<RunResult> {
         unchanged: true,
         deliveredTo: [],
         deliveryLog: [],
+        deliveryStatus: "skipped",
       });
 
       const message = `Authorisation failed for ${blocked.join(", ")} during the run — reconnect it.`;
@@ -514,21 +636,18 @@ export async function executeRun(runId: string): Promise<RunResult> {
 
     /*
      * FINDING 2: an explicit NO_UPDATES is the agent doing its job — it
-     * looked and found nothing worth reporting, and it said so on purpose.
-     * An empty string is not that: the model produced no answer at all, for
-     * a reason this run cannot name. The old check (`body === NO_UPDATES ||
-     * body === ""`) treated the two the same, which recorded an empty reply
-     * as an ordinary quiet `ok` — flushing this run's hashes and leaving
-     * nothing behind to show a human what happened. There is no digest to be
-     * honest about here, so this is an `error`, not a `truncated`:
-     * `truncated` names a bound the system understands (a step cap or a read
-     * budget); an empty reply doesn't have one. Recording it under its own
-     * `empty_response` code — instead of reusing `degraded_reads` — also
-     * keeps it out of the read-budget advice added for FINDING 1 below,
-     * which would be the wrong lesson for a run that may not have had a read
-     * problem at all.
+     * looked and found nothing worth reporting. An empty string isn't that:
+     * the model produced no answer at all, for an unknown reason. The old
+     * check (`body === NO_UPDATES || body === ""`) treated the two the same,
+     * recording an empty reply as an ordinary quiet `ok` — flushing hashes
+     * and leaving nothing to show what happened. There's no digest to be
+     * honest about, so this is an `error`, not `truncated`: that name is for
+     * a bound the system understands (step cap, read budget), which an empty
+     * reply doesn't have. Its own `empty_response` code — not
+     * `degraded_reads` — also keeps it out of FINDING 1's read-budget advice
+     * below, the wrong lesson for a run that may not have had a read problem.
      */
-    if (body === "") {
+    if (!outcome.noUpdates && outcome.digest === "") {
       await db.insert(outputs).values({
         runId,
         format: "markdown",
@@ -536,6 +655,7 @@ export async function executeRun(runId: string): Promise<RunResult> {
         unchanged: false,
         deliveredTo: [],
         deliveryLog: [],
+        deliveryStatus: "skipped",
       });
 
       const message = degraded
@@ -546,68 +666,82 @@ export async function executeRun(runId: string): Promise<RunResult> {
       return { runId, status: "error", error: message };
     }
 
-    const unchanged = body === NO_UPDATES;
+    const unchanged = outcome.noUpdates;
 
     /*
      * The agent asked for data it could not get — a spent query budget or an
-     * evicted handle. It was told to say so, but an unattended run cannot rely
-     * on that: the whole point is that nobody is reading. A clean `ok` run
-     * cannot carry this in `runs.error` (the run page renders any error there
-     * as "Run failed", which a green run is not), so it goes into the digest
-     * itself; a run already ending badly carries it in its error text.
+     * evicted handle. It's told to say so, but an unattended run can't rely
+     * on that; nobody's reading. A clean `ok` run can't carry this in
+     * `runs.error` (the run page renders any error there as "Run failed"),
+     * so it goes into the digest itself; a run already ending badly carries
+     * it in its error text.
      */
 
     /*
      * A degraded run that also produced nothing (`unchanged`) is
      * indistinguishable, downstream, from an ordinary quiet morning: no note
-     * lands in the digest (there is no digest), `runs.error` would stay null,
-     * status would be `ok`, and delivery is skipped as "nothing new to send".
-     * That is the exact failure this finding is named for — a run that could
-     * not read its data, recorded as a clean morning with no trace anywhere.
-     * `truncated` is the honest bucket for "this run did not see everything
-     * it fetched", and the run page renders it as "Run cut short", not
+     * in the digest, `runs.error` stays null, status is `ok`, delivery is
+     * skipped as "nothing new to send". That's the exact failure this finding
+     * names — a run that couldn't read its data, recorded as a clean morning
+     * with no trace anywhere. `truncated` is the honest bucket for "this run
+     * didn't see everything it fetched", rendered as "Run cut short", not
      * "Run failed".
      */
     const degradedBlind = degraded && unchanged;
 
-    // The model ran out of steps mid-task: the digest it produced is a
-    // fragment, and saying "ok" about it would be a lie. A degraded-and-blind
-    // run earns the same verdict for the same reason, even though it stopped
-    // on its own terms rather than hitting the step cap.
+    // The model ran out of steps mid-task: the digest is a fragment, and
+    // saying "ok" would be a lie. A degraded-and-blind run earns the same
+    // verdict, even though it stopped on its own terms rather than hitting
+    // the step cap.
     const truncation = truncationReason(result, workflow);
     const truncated = truncation !== null || degradedBlind;
 
     /*
      * MINOR 5 (revised): a step-cap truncation and a degraded read can
-     * collide, and the note has two homes it could land in — the digest, and
-     * `runs.error`. The digest wins whenever there is one to put it in: the
-     * digest is the artefact a human actually receives (Slack, email,
-     * webhook), while `runs.error` is a dashboard column nobody is watching
-     * at 6am. Filing the disclosure there and only there, for a run that did
-     * ship a digest, hides it from the one place someone would see it. So
-     * every degraded run that produced a digest (`!unchanged`) gets the note
-     * in the body — truncated or not. Only the degraded-BLIND case (no
-     * digest produced at all, see below) has no digest to put it in, so
-     * `runs.error` stays its sole home.
+     * collide, and the note has two possible homes — the digest, and
+     * `runs.error`. The digest wins whenever there is one: it's the artefact
+     * a human actually receives, while `runs.error` is a dashboard column
+     * nobody watches at 6am. Filing the disclosure only there, for a run that
+     * did ship a digest, hides it from the one place someone would see it.
+     * So every degraded run with a digest (`!unchanged`) gets the note in the
+     * body — truncated or not. Only degraded-BLIND (no digest at all) has
+     * nowhere else, so `runs.error` stays its sole home.
      */
     const digest =
       degraded && !unchanged ? `${body}\n\n${degradedNote(harness)}` : body;
 
-    const deliveryLog = await deliverOutput({
-      workflow,
-      deliver,
-      body: digest,
-      unchanged,
-      calledTools: result.toolCalls.map((c) => c.toolName),
-    });
+    // The alert condition decides whether this digest is worth waking
+    // someone for. An unevaluable condition still delivers — see
+    // `decideDelivery` for why silence is the dangerous answer there.
+    const decision = decideDelivery(
+      outcome,
+      workflow.alertCondition,
+      declaredSignals,
+    );
+
+    const deliveryLog = decision.deliver
+      ? await deliverOutput({
+          workflow,
+          deliver,
+          body: digest,
+          unchanged,
+          calledTools: result.toolCalls.map((c) => c.toolName),
+        })
+      : [];
 
     await db.insert(outputs).values({
       runId,
       format: "markdown",
       body: digest,
       unchanged,
+      signals: outcome.signals,
+      severity: outcome.severity,
+      suppressed: decision.suppressed,
+      suppressedReason: decision.suppressedReason,
       deliveredTo: deliveryLog.filter((d) => d.ok).map((d) => d.type),
       deliveryLog,
+      deliveryStatus: deliveryStatusFrom(deliveryLog, decision.deliver),
+      deliveryAttempts: decision.deliver ? 1 : 0,
     });
 
     const usage = result.usage as
@@ -621,12 +755,9 @@ export async function executeRun(runId: string): Promise<RunResult> {
     await db
       .update(runs)
       .set({
-        // MINOR 6 (out of scope, pre-existing, not this feature's to fix):
-        // a delivery target can fail (see `deliverOutput`'s `ok: false`
-        // entries) and the run still lands here as "ok" — the dashboard has
-        // no notion of "delivered green, sent nowhere". Left as-is; noted so
-        // the next reader doesn't mistake it for something this change
-        // should have covered.
+        // Delivery outcome is recorded on the output, not here — see
+        // `deliveryStatusFrom`. The agent did its job either way, which is
+        // what this status is about.
         status: truncated ? "truncated" : "ok",
         finishReason: result.finishReason ?? null,
         finishedAt: new Date(),
@@ -634,27 +765,25 @@ export async function executeRun(runId: string): Promise<RunResult> {
         inputTokens: usage?.inputTokens ?? null,
         outputTokens: usage?.outputTokens ?? null,
         costUsd: toCostColumn(await runCostUsd(workflow.model, usage, ownerId)),
-        // The note itself now lives in the digest for any degraded run that
-        // produced one (see `digest` above) — `runs.error` only needs to
-        // carry it for the degraded-BLIND case, where there is no digest for
-        // it to live in. A truncated-but-not-blind run's error text is just
-        // the truncation reason; duplicating the note here too would show a
-        // reader the same sentence twice.
+        // The note now lives in the digest for any degraded run that
+        // produced one (see `digest` above) — `runs.error` only carries it
+        // for the degraded-BLIND case, which has no digest. A
+        // truncated-but-not-blind run's error is just the truncation reason;
+        // duplicating the note here would repeat the same sentence twice.
         error: degradedBlind
           ? truncation
             ? `${truncation} ${degradedNote(harness, "plain")}`
             : degradedNote(harness, "plain")
           : truncation,
         // FINDING 1 (revised): `degraded_reads` now marks *every* degraded
-        // run, not only the blind ones — including a `total-steps`
-        // truncation, which by definition already spent the read budget
-        // before it could loop that far. Restricting this to `degradedBlind`
-        // left a `total-steps` truncation with `errorCode: null`, so
-        // `previousFailure`/`buildPrompt` took the step-cap branch and told
-        // the next run to fetch less — the wrong lesson for a run whose
-        // fault was reading, not fetching. `previousFailure` already ignores
-        // `ok`-status rows, so tagging a merely-degraded-but-not-truncated
-        // `ok` run with this code here is inert downstream.
+        // run, not only blind ones — including a `total-steps` truncation,
+        // which by definition already spent the read budget. Restricting
+        // this to `degradedBlind` left `total-steps` with `errorCode: null`,
+        // so `previousFailure`/`buildPrompt` took the step-cap branch and
+        // told the next run to fetch less — wrong when the fault was
+        // reading, not fetching. `previousFailure` already ignores
+        // `ok`-status rows, so tagging a degraded-but-not-truncated `ok` run
+        // here is inert downstream.
         errorCode: degraded ? "degraded_reads" : null,
       })
       .where(eq(runs.id, runId));
@@ -671,39 +800,49 @@ export async function executeRun(runId: string): Promise<RunResult> {
        * to record the hashes either. `skipped` entries ("nothing new to
        * send") are the design working, not a failed delivery, so they don't
        * block the flush — only an attempted-and-failed target does.
+       *
+       * A suppressed digest is a third case: an empty `deliveryLog` must not
+       * read as success there — a threshold withheld it, so no reader saw
+       * those bytes. Recording the hashes would mark a later, over-threshold
+       * value as unchanged. `unchanged` runs differ — they had nothing to
+       * deliver, which is why they still flush.
        */
-      const deliveryOk = !deliveryLog.some((d) => !d.ok && !d.skipped);
+      const deliveryOk =
+        !decision.suppressed && !deliveryLog.some((d) => !d.ok && !d.skipped);
       if (!degraded && deliveryOk) {
         try {
           await flushToolHashes(workflow.id, harness);
         } catch {
           // `writeToolHash` already swallows its own errors, so this should
-          // be unreachable — but the run row above is already committed as a
+          // be unreachable — but the run row is already committed as a
           // successful, delivered `ok`, and a flush failure escaping to the
-          // outer `catch` would overwrite that true verdict with `error` and
-          // skip the lastRunAt/connectionFailures reset below. Defence in
-          // depth: a hash-table hiccup must not be able to relabel a run that
-          // genuinely finished and delivered.
+          // outer `catch` would overwrite that verdict with `error` and skip
+          // the reset below. Defence in depth: a hash-table hiccup must not
+          // relabel a run that genuinely finished and delivered.
         }
       }
 
       await db
         .update(workflows)
         // A run that reached its apps clears the connection-failure streak —
-        // otherwise one bad afternoon would eventually pause a workflow that
-        // has been healthy ever since.
+        // else one bad afternoon would eventually pause an otherwise healthy
+        // workflow.
         .set({ lastRunAt: new Date(), connectionFailures: 0 })
         .where(eq(workflows.id, workflow.id));
+
+      // Chained children fire only from a run that finished. A truncated run
+      // produced a fragment, and handing it downstream would spend a model
+      // call per child on a premise the parent doesn't stand behind.
+      await enqueueChildRuns(runId, workflow, outcome, declaredSignals);
     } else if (degradedBlind) {
       /*
-       * MINOR 4: a degraded-blind run still reached its apps — the preflight
-       * passed and every tool call it made succeeded, only the *local*
-       * reads ran out. Leaving `connectionFailures` untouched here would
-       * eventually auto-pause a workflow whose connections are fine, over a
-       * run-loop budget problem that has nothing to do with them.
-       * `lastRunAt` is left alone: that field means "the last time this
-       * workflow completed with output", and a degraded-blind run — by
-       * definition — didn't.
+       * MINOR 4: a degraded-blind run still reached its apps — preflight
+       * passed and every tool call succeeded, only the *local* reads ran
+       * out. Leaving `connectionFailures` untouched would eventually
+       * auto-pause a workflow whose connections are fine, over a run-loop
+       * budget problem unrelated to them. `lastRunAt` is left alone: it
+       * means "the last time this workflow completed with output", which a
+       * degraded-blind run — by definition — didn't.
        */
       await db
         .update(workflows)
@@ -738,6 +877,85 @@ export async function executeRun(runId: string): Promise<RunResult> {
   }
 }
 
+/**
+ * Inserts a queued run for every child whose gate the parent's signals opened.
+ *
+ * Queued rather than executed inline: the tick has one function duration
+ * split across every due workflow, and running a chain here spends another
+ * user's slice of it. The row is durable, so a crash between this insert and
+ * the drain pass costs a delay, not the run.
+ *
+ * Failures are logged and swallowed. A parent that delivered its digest has
+ * succeeded; a child that couldn't be enqueued must not retroactively turn
+ * that run red.
+ */
+export async function enqueueChildRuns(
+  parentRunId: string,
+  workflow: Workflow,
+  envelope: Envelope,
+  declaredSignals: SignalDecl[],
+): Promise<void> {
+  try {
+    const children = await db
+      .select({
+        id: workflows.id,
+        parentCondition: workflows.parentCondition,
+      })
+      .from(workflows)
+      .where(
+        and(
+          eq(workflows.parentWorkflowId, workflow.id),
+          eq(workflows.enabled, true),
+          eq(workflows.triggerType, "workflow"),
+        ),
+      );
+
+    if (children.length === 0) return;
+
+    const { fire } = decideChildren(envelope, declaredSignals, children);
+
+    for (const child of fire) {
+      try {
+        /*
+         * Through `enqueueRun`, not a bare insert.
+         *
+         * A chain multiplies runs, exactly what the per-user hourly/daily
+         * ceilings exist to bound — a bare insert would let a chain walk
+         * straight past the quota that a cron storm can't. It also gets the
+         * constraint handling (already running, duplicate event) every other
+         * caller relies on.
+         */
+        const queued = await enqueueRun(child.id, "workflow", {
+          parentRunId,
+          triggerPayload: {
+            parentSlug: workflow.slug,
+            parentName: workflow.name,
+            digest: envelope.digest,
+            signals: envelope.signals,
+            severity: envelope.severity,
+          },
+        });
+
+        // A refusal is a real outcome — over quota, or already running —
+        // and dropping it silently leaves a chain that "just didn't fire"
+        // with nothing to say why.
+        if (queued.skipped) {
+          console.warn(
+            `[chain] ${workflow.slug} -> ${child.id} not queued: ${queued.reason}`,
+          );
+        }
+      } catch (err) {
+        // `enqueueRun` returns refusals rather than throwing, so reaching
+        // here is a database fault on one child. The parent already
+        // delivered; the rest of the chain still gets a turn.
+        console.error(`[chain] could not enqueue ${child.id}`, err);
+      }
+    }
+  } catch (err) {
+    console.error(`[chain] ${workflow.slug} failed to enqueue children`, err);
+  }
+}
+
 async function failRun(
   runId: string,
   startedAt: number,
@@ -759,11 +977,11 @@ async function failRun(
 
 /**
  * Counts a run lost to a broken connection, and pauses the workflow once
- * that has happened often enough in a row.
+ * that's happened often enough in a row.
  *
  * Without the pause, a workflow whose Slack was revoked in January is still
- * generating one failed run per schedule in March. The `pausedReason` is what
- * lets a later reconnect re-enable exactly these and nothing else.
+ * generating one failed run per schedule in March. `pausedReason` lets a
+ * later reconnect re-enable exactly these and nothing else.
  */
 async function noteConnectionFailure(workflowId: string) {
   const [row] = await db
@@ -784,10 +1002,10 @@ async function noteConnectionFailure(workflowId: string) {
  * Why the run was cut short, phrased for `runs.error`, or null if it finished
  * on its own terms.
  *
- * This string is handed to the *next* run as a "last time you…" hint, so which
- * bound it names matters: telling a run to plan fewer fetches when the real
- * problem was a model looping on local `query` calls makes the next digest
- * thinner for no reason, and hides the actual fault.
+ * Handed to the *next* run as a "last time you…" hint, so which bound it
+ * names matters: telling a run to fetch less when the real problem was a
+ * model looping on local `query` calls thins the next digest for no reason
+ * and hides the actual fault.
  */
 export function truncationReason(
   result: { finishReason: string; steps: unknown[] },
@@ -798,9 +1016,9 @@ export function truncationReason(
   }
   if (result.finishReason !== "tool-calls") return null;
 
-  // Shares `loopBoundHit` with `stopWhen` so the two can never disagree about
-  // when a run hit the cap — a disagreement here means a run that stopped at
-  // the cap gets recorded as a clean `ok`.
+  // Shares `loopBoundHit` with `stopWhen` so the two never disagree about
+  // when a run hit the cap — otherwise a run that stopped at the cap could
+  // get recorded as a clean `ok`.
   const bound = loopBoundHit(
     result.steps as Array<{ toolCalls?: Array<{ toolName: string }> }>,
     workflow.maxSteps,
@@ -816,10 +1034,10 @@ export function truncationReason(
 }
 
 /**
- * Said in the digest, and in the error of a run that was already going badly.
+ * Said in the digest, and in the error of a run already going badly.
  *
- * `runs.error` is rendered inside a `<pre>` on the run page (see
- * `src/app/runs/[id]/page.tsx`), which shows markdown literally rather than
+ * `runs.error` renders inside a `<pre>` on the run page (see
+ * `src/app/runs/[id]/page.tsx`), showing markdown literally rather than
  * interpreting it — so the error-column use needs the plain-text form.
  */
 function degradedNote(
@@ -832,9 +1050,9 @@ function degradedNote(
 }
 
 /**
- * The last digest this workflow actually produced. Feeding it back is what
- * turns a scheduled report into a delta — without it every run re-reports
- * the same open PRs and the same unread mail, every morning.
+ * The last digest this workflow actually produced. Feeding it back turns a
+ * scheduled report into a delta — without it, every run re-reports the same
+ * open PRs and unread mail every morning.
  */
 async function previousDigest(
   workflowId: string,
@@ -857,9 +1075,9 @@ async function previousDigest(
 }
 
 /**
- * What went wrong last time, so this run can route around it instead of
- * repeating it: a truncated run means the plan was too wide for the step
- * budget, an errored one names the tool or timeout that sank it.
+ * What went wrong last time, so this run can route around it: a truncated
+ * run means the plan was too wide for the step budget, an errored one names
+ * the tool or timeout that sank it.
  */
 async function previousFailure(workflowId: string): Promise<{
   status: string;
@@ -867,9 +1085,9 @@ async function previousFailure(workflowId: string): Promise<{
   errorCode: string | null;
   at: Date;
 } | null> {
-  // Only the *immediately preceding* finished run matters: an error three
-  // runs back that later runs sailed past is noise, not guidance. (The run
-  // currently executing is still "running", so it can't match here.)
+  // Only the *immediately preceding* finished run matters — an error three
+  // runs back that later runs sailed past is noise, not guidance. (The
+  // currently executing run is still "running", so it can't match here.)
   const [row] = await db
     .select({
       status: runs.status,
@@ -907,6 +1125,33 @@ function humanizeAge(ms: number): string {
   if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"}`;
   const days = Math.round(hours / 24);
   return `${days} day${days === 1 ? "" : "s"}`;
+}
+
+/**
+ * Recognises the payload a parent hands a chained child.
+ *
+ * A shape check rather than a flag: the same column also carries Composio
+ * event payloads, which are whatever the third party sent.
+ */
+function asChainPayload(payload: unknown): {
+  parentName: string;
+  digest: string;
+  signals: Record<string, unknown>;
+} | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  if (typeof record.digest !== "string" || !record.parentSlug) return null;
+  return {
+    parentName:
+      typeof record.parentName === "string"
+        ? record.parentName
+        : String(record.parentSlug),
+    digest: record.digest,
+    signals:
+      record.signals && typeof record.signals === "object"
+        ? (record.signals as Record<string, unknown>)
+        : {},
+  };
 }
 
 function buildPrompt(
@@ -964,11 +1209,11 @@ function buildPrompt(
     const age = humanizeAge(now.getTime() - failure.at.getTime());
     parts.push(
       // FINDING 1: a degraded-blind run stopped for the opposite reason a
-      // step-cap truncation did — it fetched fine, but ran out of local
-      // `query`/`inspect` budget before it finished reading what it had.
-      // Feeding it the step-cap branch's "fewer, more targeted tool calls"
-      // line tells the next run to fetch less, which is exactly backwards:
-      // the fetches were never the problem, the reading was.
+      // step-cap truncation did — it fetched fine but ran out of local
+      // `query`/`inspect` budget before finishing reading. Feeding it the
+      // step-cap branch's "fewer tool calls" line tells the next run to
+      // fetch less, exactly backwards: the fetches weren't the problem, the
+      // reading was.
       failure.errorCode === "degraded_reads"
         ? `---\nHeads-up: your previous attempt (${age} ago) fetched data it ran out of budget to finish reading — "${failure.error}". The fetching was fine; this time read what you fetch more narrowly — fewer, more targeted \`query\`/\`inspect\` calls per handle — rather than fetching less.`
         : failure.status === "truncated"
@@ -977,7 +1222,34 @@ function buildPrompt(
     );
   }
 
-  if (triggerPayload) {
+  /*
+   * A chained run is handed its parent's digest — markdown a model wrote for
+   * a human, not an event payload.
+   *
+   * Dumping it through `JSON.stringify` escaped every newline and quote,
+   * spent tokens on the escapes, and — since the slice below caps the whole
+   * blob — could cut the JSON mid-string, handing the model something that
+   * doesn't parse. As prose it reads the way the parent wrote it.
+   */
+  const chained = asChainPayload(triggerPayload);
+  if (chained) {
+    parts.push(
+      `---\nThis run was triggered by "${chained.parentName}" finishing. What it reported:\n\n${chained.digest.slice(
+        0,
+        MEMORY_CHARS,
+      )}`,
+    );
+    if (Object.keys(chained.signals).length > 0) {
+      parts.push(
+        `Its measured values:\n${Object.entries(chained.signals)
+          .map(([key, value]) => `- ${key}: ${value}`)
+          .join("\n")}`,
+      );
+    }
+    parts.push(
+      "Build on that rather than repeating it — your job is the next step, not a restatement.",
+    );
+  } else if (triggerPayload) {
     parts.push(
       `---\nThis run was started by an event. Event payload:\n\n\`\`\`json\n${JSON.stringify(
         triggerPayload,
@@ -1011,10 +1283,31 @@ export type DeliveryLogEntry = {
 };
 
 /**
+ * Turns the per-target log into the one word the dashboard shows.
+ *
+ * A `skipped` entry is the design working — "nothing new to send" — so it
+ * never makes a delivery look failed. Only an attempted-and-failed target
+ * does, the same distinction the hash flush already makes.
+ */
+export function deliveryStatusFrom(
+  log: DeliveryLogEntry[],
+  attempted: boolean,
+): "delivered" | "partial" | "failed" | "skipped" {
+  if (!attempted) return "skipped";
+
+  const real = log.filter((entry) => !entry.skipped);
+  if (real.length === 0) return "skipped";
+
+  const failures = real.filter((entry) => !entry.ok).length;
+  if (failures === 0) return "delivered";
+  if (failures === real.length) return "failed";
+  return "partial";
+}
+
+/**
  * Records what actually reached each target. Tool-backed targets (Slack,
- * email) are verified against the calls the model really made; webhooks are
- * POSTed here. A target that failed is written down as failed rather than
- * quietly dropped.
+ * email) are verified against calls the model really made; webhooks are
+ * POSTed here. A failed target is written down as failed, not dropped.
  */
 async function deliverOutput({
   workflow,
@@ -1038,9 +1331,9 @@ async function deliverOutput({
       continue;
     }
 
-    // Nothing new means nothing to send anywhere but the dashboard. That is
-    // the design working, not a delivery failure — the flag is what keeps the
-    // run page from labelling a quiet morning as "slack · failed".
+    // Nothing new means nothing to send but the dashboard — the design
+    // working, not a failure. The flag keeps the run page from labelling a
+    // quiet morning as "slack · failed".
     if (unchanged) {
       log.push({
         type: target.type,
@@ -1066,6 +1359,135 @@ async function deliverOutput({
   }
 
   return log;
+}
+
+/**
+ * Re-sends digests whose delivery failed, one bounded sweep per tick.
+ *
+ * Webhooks only — a real limit, not an oversight. A webhook is the one
+ * target this server actually performs; Slack and email deliveries are made
+ * by the agent calling a tool, and `deliverOutput` only *verifies* that it
+ * did. Re-sending those means running the agent again — a new run and a new
+ * bill, not a retry — so a failed Slack delivery settles as failed.
+ *
+ * Only targets that actually failed are retried, read back from
+ * `deliveryLog`: re-sending an already-succeeded one would deliver the same
+ * digest twice, worse than the failure being retried.
+ */
+export async function retryPendingDeliveries(
+  budgetLeft: () => boolean,
+): Promise<number> {
+  let retried = 0;
+  /** Rows already attempted this sweep — see the note on the query below. */
+  const seen = new Set<string>();
+
+  while (budgetLeft()) {
+    const [row] = await db
+      .select({
+        outputId: outputs.id,
+        body: outputs.body,
+        log: outputs.deliveryLog,
+        attempts: outputs.deliveryAttempts,
+        workflow: workflows,
+      })
+      .from(outputs)
+      .innerJoin(runs, eq(outputs.runId, runs.id))
+      .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+      .where(
+        and(
+          sql`${outputs.deliveryStatus} in ('pending', 'partial', 'failed')`,
+          sql`${outputs.deliveryAttempts} < ${LIMITS.maxDeliveryAttempts}`,
+          /*
+           * One attempt per row per sweep.
+           *
+           * Without this the loop re-picks the row it just retried — still
+           * failed, still under the attempt cap — burning all three attempts
+           * within milliseconds, no time for the endpoint to come back.
+           * Excluding here rather than breaking out keeps other rows moving.
+           */
+          seen.size > 0 ? notInArray(outputs.id, [...seen]) : undefined,
+        ),
+      )
+      .orderBy(outputs.createdAt)
+      .limit(1);
+
+    if (!row) break;
+    seen.add(row.outputId);
+
+    const previous = (row.log ?? []) as DeliveryLogEntry[];
+    const failedTypes = new Set(
+      previous.filter((e) => !e.ok && !e.skipped).map((e) => e.type),
+    );
+
+    const targets = ((row.workflow.deliver as DeliverTarget[]) ?? []).filter(
+      (t) => t.type === "webhook" && failedTypes.has(t.type),
+    );
+
+    const attempts = row.attempts + 1;
+
+    if (targets.length === 0) {
+      /*
+       * Nothing here can be retried — the failures were tool-based, or the
+       * target's since been removed. Settle rather than spin: otherwise the
+       * row gets picked up every tick until it ages out of retention.
+       *
+       * Settled at whatever the log actually says, not at `failed`. A row
+       * whose webhook succeeded earlier and whose Slack send is unretryable
+       * is `partial` — writing `failed` over it would misreport a digest that
+       * did reach a reader.
+       */
+      await db
+        .update(outputs)
+        .set({
+          deliveryStatus: deliveryStatusFrom(previous, true),
+          deliveryAttempts: LIMITS.maxDeliveryAttempts,
+        })
+        .where(eq(outputs.id, row.outputId));
+      continue;
+    }
+
+    /*
+     * `calledTools` is empty and `unchanged` false: neither matters here,
+     * since every target in this set is a webhook, posted directly rather
+     * than verified against what the agent called.
+     *
+     * `postWebhook` re-checks the URL through `safe-url.ts` on every attempt,
+     * so a hostname repointed at a private address since the first send is
+     * refused here too, not trusted because it passed once.
+     */
+    const log = await deliverOutput({
+      workflow: row.workflow,
+      deliver: targets,
+      body: row.body,
+      unchanged: false,
+      calledTools: [],
+    });
+
+    const merged = [
+      ...previous.filter((e) => !log.some((l) => l.type === e.type)),
+      ...log,
+    ];
+    const status = deliveryStatusFrom(merged, true);
+
+    await db
+      .update(outputs)
+      .set({
+        deliveryLog: merged,
+        deliveryAttempts: attempts,
+        deliveredTo: merged.filter((d) => d.ok).map((d) => d.type),
+        deliveryStatus:
+          status === "delivered"
+            ? "delivered"
+            : attempts >= LIMITS.maxDeliveryAttempts
+              ? "failed"
+              : status,
+      })
+      .where(eq(outputs.id, row.outputId));
+
+    retried++;
+  }
+
+  return retried;
 }
 
 async function postWebhook(

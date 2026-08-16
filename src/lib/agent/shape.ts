@@ -2,10 +2,9 @@
  * A one-line description of a JSON value's structure, for showing the model
  * what a stored payload contains without showing it the payload.
  *
- * The point is field discovery: the agent needs to know that `items` exists
- * and that its elements have `from`/`subject`/`date` before it can ask for
- * those fields. Element *values* are deliberately absent — that is the sample's
- * job, and the whole design is about not sending values.
+ * The point is field discovery: the agent needs to know `items` exists and
+ * its elements have `from`/`subject`/`date` before it can ask for those
+ * fields. Element *values* are deliberately absent — that's the sample's job.
  */
 
 export const SAMPLE_CHARS = 400;
@@ -45,8 +44,8 @@ function describeArray(value: unknown[], depth: number): string {
 
   const first = value[0];
   if (first !== null && typeof first === "object" && !Array.isArray(first)) {
-    // Union the keys rather than trusting element 0: paginated APIs routinely
-    // return a first item missing the optional fields later ones carry.
+    // Union the keys rather than trust element 0: a paginated API's first
+    // item often lacks optional fields later ones carry.
     const keys = new Set<string>();
     for (const element of value) {
       if (element === null || typeof element !== "object") continue;
@@ -63,8 +62,7 @@ function describeArray(value: unknown[], depth: number): string {
 
 /**
  * The first `chars` characters of the serialised value, so the model can see
- * what the fields actually look like — an id format, a date format — without
- * receiving the rest.
+ * what fields look like — an id format, a date format — without the rest.
  */
 export function sampleOf(value: unknown, chars = SAMPLE_CHARS): string {
   let json: string;
@@ -80,13 +78,13 @@ export function sampleOf(value: unknown, chars = SAMPLE_CHARS): string {
 /**
  * The first few elements of the payload's biggest array, whole.
  *
- * Every `query` call is a full model round trip — the system prompt, the tool
- * schemas and the whole history are re-sent to ask one question. For the
- * common digest payload (`{ items: [...] }`) the answer is nearly always "the
- * first few rows of the obvious list", so shipping those with the descriptor
- * is cheaper than the round trip it saves. It is a preview, never the data:
- * anything that does not fit `maxChars` is dropped rather than truncated
- * mid-row, because half a row invites the model to report half a fact.
+ * Every `query` call is a full model round trip — system prompt, tool
+ * schemas, and history all re-sent to ask one question. For the common
+ * digest payload (`{ items: [...] }`) the answer is nearly always "the first
+ * few rows of the obvious list", so shipping those with the descriptor is
+ * cheaper than the round trip saved. A preview, never the data: anything
+ * that doesn't fit `maxChars` is dropped rather than truncated mid-row,
+ * because half a row invites the model to report half a fact.
  */
 export function previewRows(
   value: unknown,

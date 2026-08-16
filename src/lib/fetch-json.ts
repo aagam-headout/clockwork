@@ -2,10 +2,10 @@
  * `fetch` + JSON, with the two failure modes the app actually hits.
  *
  * Every caller used to do `const data = await res.json()` *before* checking
- * `res.ok`. That works right up until the response isn't JSON — an expired
- * session redirecting to the sign-in HTML page, a platform 502, a dev-server
- * error page — and then the user is told "Unexpected token '<', "<!DOCTYPE"…",
- * which describes the parser's problem rather than theirs.
+ * `res.ok`. That works until the response isn't JSON — an expired session
+ * redirecting to the sign-in HTML page, a platform 502, a dev-server error
+ * page — and the user is told "Unexpected token '<', "<!DOCTYPE"…", which
+ * describes the parser's problem, not theirs.
  *
  * Rejects with an Error whose message is fit to render: the API's own
  * `{ error }` when there is one, otherwise a plain sentence about the status.
@@ -18,8 +18,8 @@ export async function fetchJson<T>(
   try {
     res = await fetch(input, init);
   } catch (err) {
-    // An aborted request is the caller's own doing — it must stay
-    // distinguishable so `AbortError` handling upstream still works.
+    // An aborted request is the caller's own doing — keep it distinguishable
+    // so `AbortError` handling upstream still works.
     if (err instanceof DOMException && err.name === "AbortError") throw err;
     throw new Error("Couldn't reach the server. Check your connection.");
   }

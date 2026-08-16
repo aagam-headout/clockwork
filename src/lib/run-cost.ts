@@ -8,8 +8,8 @@ export type RunUsage = {
 
 /**
  * Actual USD for one run, from the gateway's live per-token prices. Cached
- * input tokens are billed at the cached rate when the model publishes one
- * and counted as ordinary input otherwise.
+ * input tokens bill at the cached rate when the model publishes one,
+ * otherwise as ordinary input.
  *
  * Returns undefined when the model has no published pricing — a missing
  * number is honest, a zero would read as "this run was free".
@@ -29,8 +29,8 @@ export async function runCostUsd(
   }
 
   const cached = usage.cachedInputTokens ?? 0;
-  // Providers report cached tokens as a subset of input tokens, so the
-  // uncached remainder is what's left after subtracting them.
+  // Cached tokens are reported as a subset of input tokens, so the uncached
+  // remainder is what's left after subtracting them.
   const uncachedInput = Math.max((usage.inputTokens ?? 0) - cached, 0);
   const cachedPerM = model.cachedInputPerM ?? model.inputPerM;
 

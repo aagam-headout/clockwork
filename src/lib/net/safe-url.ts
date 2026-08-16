@@ -4,16 +4,16 @@ import { isIP } from "node:net";
 
 /*
  * Webhook delivery makes this app's server fetch a URL the user chose. With
- * one trusted user that was fine. With open signup it is a server-side request
- * forgery primitive: `http://169.254.169.254/latest/meta-data/` returns cloud
- * instance credentials, `http://metadata.google.internal` the same on GCP, and
+ * one trusted user that was fine; with open signup it's an SSRF primitive:
+ * `http://169.254.169.254/latest/meta-data/` returns cloud instance
+ * credentials, `http://metadata.google.internal` the same on GCP, and
  * anything on the deployment's private network is reachable that a browser
- * could never touch.
+ * never could.
  *
  * So: public, http(s), standard ports, and the resolved address must not be
- * private. Checked when the workflow is saved *and* again at delivery time,
- * because DNS can change between the two (a hostname that resolved publicly at
- * save time can resolve to 127.0.0.1 later — DNS rebinding).
+ * private. Checked at save time *and* again at delivery, because DNS can
+ * change between the two (a hostname resolving publicly at save time can
+ * resolve to 127.0.0.1 later — DNS rebinding).
  */
 
 const BLOCKED_HOSTNAME_SUFFIXES = [
@@ -70,8 +70,8 @@ export class UnsafeUrlError extends Error {
 /**
  * Throws unless `raw` is a URL this server may fetch on a user's behalf.
  *
- * Resolves DNS, so it is async and can fail for a hostname that simply doesn't
- * exist — which is also worth rejecting at save time.
+ * Resolves DNS, so it's async and can fail for a hostname that simply
+ * doesn't exist — also worth rejecting at save time.
  */
 export async function assertSafeWebhookUrl(raw: string): Promise<void> {
   let url: URL;
@@ -102,8 +102,8 @@ export async function assertSafeWebhookUrl(raw: string): Promise<void> {
     );
   }
 
-  // A literal IP needs no lookup, and must not get one — resolving it would
-  // just hand back the same address.
+  // A literal IP needs no lookup, and must not get one — it would just hand
+  // back the same address.
   if (isIP(hostname)) {
     if (isPrivateAddress(hostname)) {
       throw new UnsafeUrlError(
@@ -120,8 +120,8 @@ export async function assertSafeWebhookUrl(raw: string): Promise<void> {
     throw new UnsafeUrlError(`Webhook delivery can't resolve ${url.hostname}.`);
   }
 
-  // Every resolved address must be public: a hostname with one public and one
-  // private A record is a rebinding attack with extra steps.
+  // Every resolved address must be public: one public and one private A
+  // record is a rebinding attack with extra steps.
   if (addresses.some((a) => isPrivateAddress(a.address))) {
     throw new UnsafeUrlError(
       `Webhook delivery can't reach ${url.hostname} — it resolves to a private address.`,

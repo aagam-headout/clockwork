@@ -9,9 +9,9 @@ describe("composio identity", () => {
   });
 
   it("rejects ids from another namespace", () => {
-    // A preview deploy sharing COMPOSIO_API_KEY, or the fixed id this app used
-    // while it was single-user. Both must resolve to null so the webhook fails
-    // closed rather than fanning an event out to the wrong account.
+    // A preview deploy sharing COMPOSIO_API_KEY, or the old fixed id from
+    // single-user days. Both must resolve to null so the webhook fails closed
+    // instead of fanning an event out to the wrong account.
     expect(appUserIdFromComposio(`other_${USER}`)).toBeNull();
     expect(appUserIdFromComposio("aagam")).toBeNull();
   });

@@ -13,16 +13,15 @@ import { providerMeta, type ProviderId } from "@/lib/providers";
  * Anthropic/OpenAI: the provider's own live model list, priced from the table
  * in `provider-pricing.ts` — neither publishes prices over the API.
  *
- * Fetched with the user's own key, because there is no app-wide key to fetch
- * it with — this app is bring-your-own-key, and quietly using the operator's
- * credentials to populate everyone's model picker would be a shared-key path
- * shipped by accident.
+ * Fetched with the user's own key: this app is bring-your-own-key, and
+ * quietly using the operator's credentials to populate everyone's picker
+ * would be a shared-key path shipped by accident.
  *
  * The *cache*, though, stays keyed by provider alone and shared across users.
- * Its contents are a provider-wide model list containing nothing about who
- * asked for it, so whichever user's key triggers the miss populates it for
- * everyone on that provider. Do not "fix" this into a per-user cache — it
- * would multiply the outbound calls by the user count for identical data.
+ * Its contents are a provider-wide model list with nothing about who asked
+ * for it, so whichever user's key triggers the miss populates it for everyone
+ * on that provider. Don't "fix" this into a per-user cache — it would
+ * multiply outbound calls by user count for identical data.
  */
 const TTL_MS = 60 * 60 * 1000;
 const cache = new Map<ProviderId, { at: number; items: ModelInfo[] }>();
@@ -130,12 +129,10 @@ async function anthropicCatalog(apiKey: string): Promise<ModelInfo[]> {
     .sort(byPrice);
 }
 
-/*
- * OpenAI's list is everything the key can reach — embeddings, TTS, image,
- * moderation, realtime. Only the chat-completion families can drive a
- * workflow, so the list is narrowed to those and to their base variants
- * (dated snapshots and `-audio`/`-realtime` cuts are noise in a picker).
- */
+// OpenAI's list is everything the key can reach — embeddings, TTS, image,
+// moderation, realtime. Only chat-completion families can drive a workflow,
+// so it's narrowed to those and their base variants (dated snapshots and
+// `-audio`/`-realtime` cuts are noise in a picker).
 const OPENAI_CHAT = /^(gpt-[45]|o[1345])(-|$)/;
 const OPENAI_NOT_CHAT = /audio|realtime|search|transcribe|tts|image|instruct/;
 const OPENAI_DATED = /-\d{4}-\d{2}-\d{2}$/;
@@ -173,9 +170,9 @@ export async function getModelCatalogForUser(
   const hit = cache.get(provider);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.items;
 
-  // No key means no list to fetch. The picker still needs something routable
-  // to show — a new account should be able to fill in a workflow before it
-  // goes and finds an API key.
+  // No key means no list to fetch. The picker still needs something
+  // routable — a new account should fill in a workflow before hunting down
+  // an API key.
   const apiKey = await loadProviderKey(userId, provider);
   if (!apiKey) return FALLBACK_MODELS[provider];
 

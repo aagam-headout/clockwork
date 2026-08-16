@@ -114,8 +114,7 @@ export function ModelPicker({
 }) {
   const [fetched, setFetched] = useState<ModelInfo[]>(initialModels);
   // One gate for the whole component: every facet, count and row below reads
-  // the narrowed list, so a restricted picker can never surface an id the
-  // caller would reject.
+  // the narrowed list, so a restricted picker can't surface a rejected id.
   const models = useMemo(
     () => (include ? fetched.filter(include) : fetched),
     [fetched, include],
@@ -135,8 +134,8 @@ export function ModelPicker({
   }
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  // A restricted pool is already short and skews expensive; hiding its heavy
-  // models behind "Light + Mid" would open the dialog on a near-empty list.
+  // A restricted pool is short and skews expensive; hiding heavy models
+  // behind "Light + Mid" would open the dialog on a near-empty list.
   const [filter, setFilter] = useState<Filter>(include ? "all" : "recommended");
   const [provider, setProvider] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -151,8 +150,8 @@ export function ModelPicker({
     } as ModelInfo);
 
   // Refresh the catalog on open: the server-rendered list is a snapshot, and
-  // pricing/availability changes without a redeploy. Done in the click handler
-  // rather than an effect so opening doesn't cascade renders.
+  // pricing/availability changes without a redeploy. In the click handler,
+  // not an effect, so opening doesn't cascade renders.
   async function openPicker() {
     setOpen(true);
     setLoading(true);
@@ -191,8 +190,8 @@ export function ModelPicker({
   }, [models, filter, q]);
 
   // A provider the current tier/query no longer offers falls back to "all"
-  // rather than rendering an empty list — but the pick is kept in state, so it
-  // comes back when the tier that had it is reselected.
+  // instead of an empty list — but stays in state, so it returns when the
+  // tier that had it is reselected.
   const activeProvider =
     provider != null && providers.some((p) => p.slug === provider)
       ? provider
@@ -260,9 +259,9 @@ export function ModelPicker({
 
       {/*
        * Portalled to <body>: the form wrapper is a `@container`, and
-       * container-type makes it the containing block for fixed children — the
-       * overlay would otherwise size and centre itself inside the form column
-       * instead of the viewport.
+       * container-type makes it the containing block for fixed children — so
+       * the overlay would otherwise centre inside the form column, not the
+       * viewport.
        */}
       {open &&
         typeof document !== "undefined" &&
@@ -283,9 +282,8 @@ export function ModelPicker({
             >
               <div className="border-border flex h-14 shrink-0 items-center gap-3 border-b px-4">
                 <Search className="text-subtle h-4 w-4 shrink-0" />
-                {/* The dialog itself is the focus surface — a ring around the bare
-                  search field just boxes in the whole header and collides with
-                  the icon beside it. */}
+                {/* The dialog itself is the focus surface — a ring around the
+                  bare search field would box in the whole header. */}
                 <input
                   autoFocus
                   value={query}

@@ -1,11 +1,11 @@
-import type { CSSProperties } from "react";
 import Link from "next/link";
 import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { runSteps, outputs } from "@/db/schema";
+import { runSteps, outputs, runs, workflows } from "@/db/schema";
 import { currentUser, requireUser } from "@/lib/auth/user";
 import { ownedRun, ownedRunOr404 } from "@/lib/data/scope";
+import { traceWindowPassed } from "@/lib/retention";
 import {
   Alert,
   Badge,
@@ -33,9 +33,12 @@ import {
   ListTree,
   Send,
   SquarePen,
+  Gauge,
+  GitBranch,
+  ChevronRight,
 } from "lucide-react";
 import { LiveRun } from "@/components/live-run";
-import { TraceToggleAll, CopyButton } from "@/components/trace-tools";
+import { TraceToggleAll, PayloadView } from "@/components/trace-tools";
 import { Markdown } from "@/components/markdown";
 import { DigestCard } from "@/components/digest-card";
 import { LocalTime } from "@/components/local-time";
@@ -45,8 +48,8 @@ import { SYSTEM_TOOL_NAMES } from "@/lib/agent/system-tools";
 export const dynamic = "force-dynamic";
 
 // `query`/`inspect` are engine-owned reads of an already-fetched payload, not
-// a connector call — the trace marks them distinctly so "why so many steps"
-// doesn't read as "why so many fetches".
+// connector calls — marked distinctly so "why so many steps" doesn't read as
+// "why so many fetches".
 const SYSTEM_TOOLS = new Set<string>(SYSTEM_TOOL_NAMES);
 
 // GH Actions renders step durations as "1m 4s", not raw milliseconds.
@@ -64,11 +67,9 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  /*
-   * Scoped, like the page. `generateMetadata` runs on its own, so an unscoped
-   * lookup here put another user's workflow name and run status into the tab
-   * title even when the page itself 404'd.
-   */
+  // Scoped, like the page: `generateMetadata` runs on its own, so an
+  // unscoped lookup here leaked another user's workflow name and run status
+  // into the tab title even when the page itself 404'd.
   const user = await currentUser();
   const row = user ? await ownedRun(id, user.id) : null;
   if (!row) return { title: "Run" };
@@ -84,9 +85,9 @@ export default async function RunDetailPage({
 
   const { id } = await params;
 
-  // 404 for someone else's run, identical to one that never existed. This is
-  // the worst of the id-taking pages to leave unscoped — the steps and output
-  // below it carry the full digest body and every tool result.
+  // 404 for someone else's run, identical to one that never existed — the
+  // worst page to leave unscoped, since steps and output carry the full
+  // digest body and every tool result.
   const owned = await ownedRunOr404(id, user.id);
   const run = {
     ...owned.run,
@@ -103,12 +104,24 @@ export default async function RunDetailPage({
 
   const [output] = await db.select().from(outputs).where(eq(outputs.runId, id));
 
+  // Where a chained run came from. Scoped through `workflows.userId` like
+  // every other read here — the parent belongs to the same owner by
+  // construction, but the query says so itself rather than inheriting the
+  // check above.
+  const [parentRun] = run.parentRunId
+    ? await db
+        .select({ id: runs.id, workflowName: workflows.name })
+        .from(runs)
+        .innerJoin(workflows, eq(runs.workflowId, workflows.id))
+        .where(and(eq(runs.id, run.parentRunId), eq(workflows.userId, user.id)))
+        .limit(1)
+    : [];
+
   const tone = statusTone(run.status);
   const toolCalls = steps.filter((s) => s.type === "tool").length;
-  // Only connector calls spend the workflow's step budget — see
-  // countExternalSteps in src/lib/agent/wrap-tools.ts. Split out here so a
-  // truncated run's step count doesn't read as "too many fetches" when most
-  // of it was free `query`/`inspect` reads.
+  // Only connector calls spend the step budget (see countExternalSteps in
+  // src/lib/agent/wrap-tools.ts). Split out so a truncated run's count
+  // doesn't read as "too many fetches" when most were free query/inspect reads.
   const systemCalls = steps.filter(
     (s) => s.type === "tool" && SYSTEM_TOOLS.has(s.toolSlug ?? ""),
   ).length;
@@ -121,6 +134,25 @@ export default async function RunDetailPage({
     error?: string;
   }>;
 
+  // A run past the trace window kept its digest but lost its steps — different
+  // from a run that never took any.
+  const tracePruned = steps.length === 0 && traceWindowPassed(run.createdAt);
+
+  const signals = Object.entries(
+    (output?.signals ?? {}) as Record<string, unknown>,
+  );
+
+  // `suppressedReason` does double duty: on a withheld digest it says why; on
+  // a delivered one it carries the "delivered anyway" notes. Only the latter
+  // belongs in a warning next to a digest that went out.
+  const reason = output?.suppressedReason ?? null;
+  const conditionNote =
+    reason === "condition_indeterminate"
+      ? "A signal the condition needs was not reported, so the digest was sent."
+      : reason?.startsWith("condition_error")
+        ? `${reason.replace(/^condition_error: /, "")} — the digest was sent.`
+        : null;
+
   return (
     <PageShell>
       <PageHeader
@@ -128,9 +160,8 @@ export default async function RunDetailPage({
         backLabel="Runs"
         title={run.workflowName ?? "(deleted workflow)"}
         subtitle={
-          // Announced, because LiveRun re-renders this header every 3s while
-          // the run is in flight and the status changing under a screen reader
-          // was otherwise silent.
+          // Announced: LiveRun re-renders this header every 3s in flight, and
+          // the status change was otherwise silent to a screen reader.
           <span
             aria-live="polite"
             className="inline-flex flex-wrap items-center gap-2"
@@ -139,6 +170,15 @@ export default async function RunDetailPage({
               {run.status}
             </Badge>
             <Badge tone="neutral">{run.trigger}</Badge>
+            {parentRun && (
+              <Link
+                href={`/runs/${parentRun.id}`}
+                className="text-muted hover:text-foreground inline-flex items-center gap-1 text-[13px] transition-colors"
+              >
+                <GitBranch className="h-3.5 w-3.5" />
+                after {parentRun.workflowName}
+              </Link>
+            )}
             <span>
               {run.startedAt ? (
                 <LocalTime value={run.startedAt} format="datetime" />
@@ -226,9 +266,8 @@ export default async function RunDetailPage({
       </div>
 
       {run.error &&
-        // A connection problem is the one failure the reader can fix from
-        // here, so it gets its own tone and a link rather than being rendered
-        // as an opaque error string.
+        // A connection problem is the one failure the reader can fix here, so
+        // it gets its own tone and link instead of an opaque error string.
         (run.errorCode === "needs_reconnect" ? (
           <div className="mt-6">
             <Alert tone="warn" title="Connection needs reconnecting">
@@ -281,6 +320,63 @@ export default async function RunDetailPage({
       {output && (
         <section className="mt-8">
           <SectionLabel icon={FileText}>Output</SectionLabel>
+
+          {signals.length > 0 && (
+            <Card className="mb-3 overflow-hidden">
+              <div className="border-border bg-bg-subtle text-subtle flex items-center gap-1.5 border-b px-5 py-2.5 text-xs">
+                <Gauge className="h-3.5 w-3.5" />
+                Signals
+                {output.severity && (
+                  <Badge
+                    tone={
+                      output.severity === "critical"
+                        ? "danger"
+                        : output.severity === "warn"
+                          ? "warn"
+                          : "neutral"
+                    }
+                    className="ml-1"
+                  >
+                    {output.severity}
+                  </Badge>
+                )}
+              </div>
+              <dl className="divide-border divide-y">
+                {signals.map(([key, value]) => (
+                  <div
+                    key={key}
+                    className="flex items-baseline justify-between gap-4 px-5 py-2.5"
+                  >
+                    <dt className="text-muted font-mono text-[13px]">{key}</dt>
+                    <dd className="text-foreground font-mono text-[13px] tabular-nums">
+                      {String(value)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </Card>
+          )}
+
+          {/* A withheld digest is shown, not hidden — otherwise the feature is
+              indistinguishable from the agent finding nothing. */}
+          {output.suppressed && (
+            <div className="mb-3">
+              <Alert tone="neutral" title="Withheld — alert condition not met">
+                {output.suppressedReason ?? "The condition evaluated false."}
+              </Alert>
+            </div>
+          )}
+
+          {/* The threshold did not actually gate this delivery, so say so
+              rather than letting a green run imply the condition held. */}
+          {!output.suppressed && conditionNote && (
+            <div className="mb-3">
+              <Alert tone="warn" title="Alert condition could not be checked">
+                {conditionNote}
+              </Alert>
+            </div>
+          )}
+
           <Card className="overflow-hidden">
             {output.unchanged ? (
               <div className="px-5 py-4.5">
@@ -289,9 +385,8 @@ export default async function RunDetailPage({
                 </span>
               </div>
             ) : (
-              // The body is markdown the agent wrote for Slack/email; the
-              // dashboard renders the same thing rather than showing source.
-              // No `viewRunHref` — this digest's run is the page it's already on.
+              // Body is markdown the agent wrote for Slack/email; rendered as-is
+              // rather than shown as source. No `viewRunHref` — already on it.
               <DigestCard
                 title={run.workflowName ?? "(deleted workflow)"}
                 createdAt={output.createdAt}
@@ -303,6 +398,15 @@ export default async function RunDetailPage({
                 <Send className="h-3.5 w-3.5" />
                 Delivery
               </span>
+              {output.deliveryStatus === "failed" && (
+                <Badge tone="danger">sent nowhere</Badge>
+              )}
+              {output.deliveryStatus === "partial" && (
+                <Badge tone="warn">partly sent</Badge>
+              )}
+              {output.deliveryAttempts > 1 && (
+                <span>{output.deliveryAttempts} attempts</span>
+              )}
               {deliveryLog.length === 0 && <span>—</span>}
               {/* Three states, not two: delivered, deliberately skipped
                   because there was nothing new, and actually failed. */}
@@ -340,18 +444,17 @@ export default async function RunDetailPage({
 
         {steps.length === 0 ? (
           <p className="rounded-container border-border bg-bg-subtle text-muted border px-4 py-8 text-center text-sm">
-            No steps recorded for this run.
+            {/* Traces prune well before the digest — a kept run can outlive its
+                steps by months. Worth saying, or an empty trace on an old
+                successful run reads as "this run did nothing". */}
+            {tracePruned
+              ? "Trace pruned. The digest is kept."
+              : "No steps recorded for this run."}
           </p>
         ) : (
-          /*
-           * Modeled on the GitHub Actions job log: a bordered list of steps,
-           * each a single summary line — status glyph, name, duration — that
-           * expands into a dark terminal panel. The panel stays dark in both
-           * site themes, same as GH's log viewer, so pasted JSON and reasoning
-           * text read like console output rather than another themed card.
-           * Failed steps open themselves, since that's what anyone opening a
-           * trace came for.
-           */
+          // Modeled on the GitHub Actions job log: a bordered list of steps,
+          // each a summary line (status glyph, name, duration) expanding into
+          // a recessed monospace panel. Failed steps open themselves.
           <ListBox as="ol" id="trace">
             {steps.map((step, i) => {
               const isTool = step.type === "tool";
@@ -419,56 +522,34 @@ export default async function RunDetailPage({
                           {formatStepDuration(step.durationMs)}
                         </span>
                       )}
-                      <span className="text-subtle shrink-0 text-xs transition-transform group-open:rotate-90">
-                        ›
-                      </span>
+                      <ChevronRight className="text-subtle h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90" />
                     </summary>
 
-                    {/* Dark terminal panel, fixed colors rather than theme
-                        tokens — pinned to the app's own dark palette (Geist
-                        black surfaces, not GH's) so it reads as this app's log,
-                        not a borrowed one, regardless of site theme. */}
-                    <div className="space-y-2 border-t border-[#2e2e2e] bg-black px-3 py-2.5 pl-[38px] font-mono text-[11px] leading-relaxed">
+                    {/* Theme tokens, not a pinned-dark terminal: a panel that
+                        stays black in a light app is a second theme on one page.
+                        Monospace type and the recessed surface already read as
+                        "this is a log" on their own. */}
+                    <div className="border-border bg-bg-subtle space-y-2 border-t px-3 py-2.5 pl-[38px] font-mono text-[11px] leading-relaxed">
                       {step.error && (
-                        <p className="text-[#ff6166]">
-                          <span className="text-[#888888]">##[error] </span>
+                        <p className="text-danger-text">
+                          <span className="text-subtle">##[error] </span>
                           {step.error}
                         </p>
                       )}
                       {isTool ? (
                         // Two labelled blocks, not one `{args, result}` blob:
-                        // "what did it send" and "what came back" are separate
-                        // questions, and the answers are wanted one at a time.
+                        // "what did it send" and "what came back" are answered
+                        // one at a time.
                         <div className="space-y-2">
-                          <Payload
-                            label="args"
-                            value={JSON.stringify(step.argsJson, null, 2)}
-                          />
-                          <Payload
-                            label="result"
-                            value={JSON.stringify(step.resultJson, null, 2)}
-                          />
+                          <Payload label="args" data={step.argsJson} />
+                          <Payload label="result" data={step.resultJson} />
                         </div>
                       ) : (
-                        // The model's intermediate reasoning is markdown too.
-                        // `.markdown` in globals.css is built on theme CSS
-                        // vars, so it's pinned dark here the same way the
-                        // panel itself is — by overriding those vars locally
-                        // with the app's own dark palette rather than
-                        // fighting the site theme downstream.
-                        <div
-                          style={
-                            {
-                              "--fg": "#eaeaea",
-                              "--fg-muted": "#888888",
-                              "--fg-subtle": "#666666",
-                              "--accent-text": "#52a8ff",
-                              "--border": "#2e2e2e",
-                              "--surface-2": "rgba(255,255,255,0.08)",
-                              "--bg-subtle": "rgba(255,255,255,0.05)",
-                            } as CSSProperties
-                          }
-                        >
+                        // `.markdown` uses the same theme vars as everything
+                        // else, so no local overrides needed. Capped like a
+                        // payload: an uncapped chain of thought would bury
+                        // every step after it.
+                        <div className="max-h-84 overflow-auto">
                           <Markdown>{text}</Markdown>
                         </div>
                       )}
@@ -485,21 +566,41 @@ export default async function RunDetailPage({
 }
 
 /**
- * One labelled block inside the log panel. Its own scroll box, so a 2,000-line
- * result can't push the next step off the screen, and its own copy button —
- * the payload is the thing you paste into an issue.
+ * The plain-text reading of a payload, when it has one.
+ *
+ * A tool returning prose does so as `{ text: "…" }`, and JSON escapes every
+ * newline — so the JSON view of a long answer is one unreadable line of
+ * `\n`s. That text earns its own view; structured data gets no second tab.
  */
-function Payload({ label, value }: { label: string; value: string }) {
+function plainText(data: unknown): string | null {
+  if (typeof data === "string") return data.trim() || null;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const text = (data as { text?: unknown }).text;
+    if (typeof text === "string" && text.trim()) return text;
+  }
+  return null;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * One labelled block inside the log panel — `args` or `result`.
+ *
+ * Serialized here, server-side: `PayloadView` only lays out strings it's
+ * handed, so a 200KB result is stringified once, not on every re-render.
+ */
+function Payload({ label, data }: { label: string; data: unknown }) {
+  const json = JSON.stringify(data, null, 2) ?? "undefined";
   return (
-    <div>
-      <div className="mb-1 flex items-center gap-2">
-        <span className="text-[10px] tracking-wider text-[#888888] uppercase">
-          {label}
-        </span>
-        <span className="h-px flex-1 bg-[#2e2e2e]" />
-        <CopyButton text={value} label={`Copy ${label}`} />
-      </div>
-      <pre className="max-h-72 overflow-auto text-[#eaeaea]">{value}</pre>
-    </div>
+    <PayloadView
+      label={label}
+      json={json}
+      text={plainText(data)}
+      size={formatBytes(Buffer.byteLength(json))}
+    />
   );
 }

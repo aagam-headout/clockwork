@@ -7,14 +7,14 @@ import { RATE_LIMITS, type RateLimitBucket } from "@/lib/limits";
 /*
  * Fixed-window rate limiting, counted in Postgres.
  *
- * Not in memory: this app runs on serverless functions, so a module-level
- * counter is per-instance — it neither shares a limit across the instances
- * serving one user concurrently nor survives a cold start, which makes it a
- * limit in name only. One upsert per guarded call is cheap at this volume.
+ * Not in memory: on serverless functions a module-level counter is
+ * per-instance — it can't share a limit across instances serving one user,
+ * nor survive a cold start. One upsert per guarded call is cheap at this
+ * volume.
  *
- * Fixed windows rather than a sliding log because the failure mode — up to 2×
- * the limit across a window boundary — doesn't matter for what these guard.
- * They exist to stop sustained abuse, not to be exact.
+ * Fixed windows rather than a sliding log: the failure mode — up to 2× the
+ * limit across a window boundary — doesn't matter here. These guard against
+ * sustained abuse, not exactness.
  */
 
 export type RateLimitResult = {
@@ -46,8 +46,8 @@ export async function takeToken(
   } catch (err) {
     /*
      * Fail open. These limits protect shared quota, not correctness or
-     * privacy — refusing every request because the counter table is
-     * unreachable would turn a bookkeeping problem into an outage.
+     * privacy — refusing every request over an unreachable counter table
+     * would turn a bookkeeping problem into an outage.
      */
     console.error("[rate-limit] counter unavailable", err);
     return { ok: true, retryAfterMs, limit };

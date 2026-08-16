@@ -43,6 +43,34 @@
       "when": 1786513257796,
       "tag": "0005_run_tool_hashes",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786818181357,
+      "tag": "0006_clever_stature",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786819774836,
+      "tag": "0007_shiny_vin_gonzales",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786820215483,
+      "tag": "0008_brave_jocasta",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786862841213,
+      "tag": "0009_nostalgic_randall_flagg",
+      "breakpoints": true
     }
   ]
 }

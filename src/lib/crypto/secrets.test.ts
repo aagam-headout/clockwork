@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
 
-// Set before the module reads it — key resolution is lazy, but the test needs
-// a deterministic key regardless of the developer's environment.
+// Set before the module reads it — resolution is lazy, but the test needs a
+// deterministic key regardless of environment.
 beforeAll(() => {
   process.env.ENCRYPTION_KEY = randomBytes(32).toString("base64");
 });
@@ -26,8 +26,8 @@ describe("encryptSecret / decryptSecret", () => {
   });
 
   it("refuses a row moved to another user", () => {
-    // The whole point of binding the AAD to (userId, provider): copying a row
-    // into someone else's record must fail, not hand over a working key.
+    // The point of binding AAD to (userId, provider): a copied row must fail,
+    // not hand over a working key.
     const sealed = encryptSecret(SECRET, AAD);
     expect(() => decryptSecret(sealed, "user-2:anthropic")).toThrow();
   });

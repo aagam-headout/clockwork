@@ -5,11 +5,10 @@ import { Sparkles, X } from "lucide-react";
 import { buttonClass } from "@/components/ui";
 
 /*
- * The toggle button lives in the page header, beside "Run now" — but the
- * thing it toggles (the agent chat pane) renders inside `EditWorkflowClient`,
- * further down the page and outside the header's own component tree. A
- * context is the shortest path between the two without threading the state
- * through the server-rendered page as props.
+ * The toggle button lives in the page header, beside "Run now", but what it
+ * toggles (the agent chat pane) renders inside `EditWorkflowClient` — outside
+ * the header's tree. Context is the shortest path between the two, avoiding
+ * threading state through the server-rendered page as props.
  */
 const EditAgentContext = createContext<{
   open: boolean;
@@ -37,8 +36,7 @@ export function useEditAgent() {
 
 /**
  * One button, one style, both states — "Edit with agent" and "Close agent"
- * are the same element with its label and icon swapped, not two differently
- * styled buttons standing in for each other.
+ * are the same element with label and icon swapped, not two buttons.
  */
 export function EditAgentButton() {
   const { open, toggle } = useEditAgent();

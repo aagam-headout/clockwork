@@ -8,9 +8,9 @@ import { hasAnyProviderKey } from "@/lib/provider-keys";
  * What a new account still has to do before anything can actually run.
  *
  * Three cheap reads, all indexed. Deliberately not a wizard: a checklist that
- * dissolves as it completes lets someone look around first, which matters
- * because the API-key step is the one that surprises people and it lands better
- * once they've seen what the app is for.
+ * dissolves as it completes lets someone look around first — the API-key
+ * step surprises people, and lands better once they've seen what the app is
+ * for.
  */
 export type OnboardingState = {
   hasProviderKey: boolean;

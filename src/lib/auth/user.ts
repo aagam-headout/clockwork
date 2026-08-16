@@ -11,9 +11,9 @@ import { LOCAL_AUTH_BYPASS, LOCAL_OWNER_EMAIL } from "@/lib/auth/local";
 /**
  * The signed-in user, as the rest of the app sees them.
  *
- * `id` is this app's own identity — a `users.id` uuid — and it is what every
- * owned row, and the per-user Composio namespace, key off. Neon Auth's user id
- * stays inside this module.
+ * `id` is this app's own identity — a `users.id` uuid — and what every owned
+ * row and the per-user Composio namespace key off. Neon Auth's user id stays
+ * inside this module.
  */
 export type AppUser = {
   id: string;
@@ -38,10 +38,9 @@ function toAppUser(row: UserRow, emailVerified: boolean): AppUser {
 /**
  * Auth ids this process has already ensured a row for.
  *
- * The point is to make the write in `ensureUser` happen once per user per
- * server instance rather than once per request. The *read* still happens every
- * time, so a suspension or an email change takes effect on the next navigation
- * instead of whenever an instance recycles.
+ * Makes the write in `ensureUser` happen once per user per server instance,
+ * not per request. The *read* still runs every time, so a suspension or email
+ * change takes effect next navigation, not on instance recycle.
  */
 const ensured = new Set<string>();
 
@@ -59,15 +58,14 @@ class EmailTakenError extends Error {
 /**
  * Finds or creates the `users` row for an authenticated session.
  *
- * Three cases, in order, and the ordering is what makes the existing
- * single-user data survive:
+ * Three cases, in order — the ordering is what makes existing single-user
+ * data survive:
  *
  *  1. Known auth id — the hot path, one indexed read.
  *  2. *Claim* an unclaimed row with this email. This is how the account the
  *     backfill seeded from OWNER_EMAIL adopts its workflows on the owner's
  *     first real sign-in. `auth_user_id IS NULL` in the WHERE makes the claim
- *     unstealable: once a row has an auth id, a second account with the same
- *     email cannot take it.
+ *     unstealable: once a row has an auth id, no other account can take it.
  *  3. Create.
  */
 async function ensureUser(input: {
@@ -139,9 +137,9 @@ async function ensureUser(input: {
     return toAppUser(created, input.emailVerified);
   } catch (err) {
     /*
-     * The functional unique index on lower(email) fired: a row with this email
-     * exists and is claimed by a *different* auth account. Step 2 already tried
-     * and failed to claim it, so this is genuinely a second signup for an
+     * The functional unique index on lower(email) fired: a row with this
+     * email exists, claimed by a *different* auth account. Step 2 already
+     * tried and failed to claim it, so this is a genuine second signup for an
      * address someone else is signed in with — not something to silently merge.
      */
     if (isEmailUniqueViolation(err)) throw new EmailTakenError();
@@ -157,20 +155,19 @@ function isEmailUniqueViolation(err: unknown): boolean {
 /**
  * The signed-in user, or null.
  *
- * Memoized per request with React `cache()`, so a layout, its page and three
+ * Memoized per request with React `cache()`, so a layout, its page, and three
  * server components calling this cost one session read and one row read.
  *
- * The row upsert lives here rather than in a layout deliberately: route
- * handlers and server actions never run the layout, and those are exactly the
- * requests that need a `users.id` to scope by. Putting it here makes it
- * unskippable.
+ * The row upsert lives here, not in a layout, deliberately: route handlers
+ * and server actions never run the layout, yet need a `users.id` to scope by.
+ * Putting it here makes it unskippable.
  */
 export const currentUser = cache(async (): Promise<AppUser | null> => {
   if (LOCAL_AUTH_BYPASS) {
     /*
      * The bypass has no auth id, so it can't use the `ensured` fast path and
-     * would otherwise write on every single request. The local user never
-     * changes, so one lookup per process is enough.
+     * would otherwise write on every request. The local user never changes,
+     * so one lookup per process is enough.
      */
     if (!localUser) {
       localUser = await ensureUser({

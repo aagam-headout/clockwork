@@ -3,16 +3,14 @@
 /**
  * A three-control schedule picker that writes a cron expression.
  *
- * The form used to offer four fixed presets (weekdays 8am, daily 9am, hourly,
- * Fridays 5pm). Anything outside that set — "Tuesdays at 6:30", "the 1st of the
- * month" — meant hand-writing five fields, which is the one part of this form
- * people get wrong. The presets covered four schedules; these combos cover
- * every schedule anyone sets an unattended digest to.
+ * Replaces four fixed presets (weekdays 8am, daily 9am, hourly, Fridays 5pm).
+ * Anything outside that set meant hand-writing five fields — the part people
+ * got wrong. These combos cover every schedule an unattended digest needs.
  *
- * State lives in the cron string itself, not beside it: the builder parses the
- * current value on every render and writes a new one on every change. So the
- * raw cron field below stays the source of truth and the two can never drift —
- * type `0 6 * * 2` by hand and the combos follow.
+ * State lives in the cron string itself: the builder parses the current value
+ * every render and writes a new one on every change, so the raw cron field
+ * stays the source of truth and can't drift from the combos — type
+ * `0 6 * * 2` by hand and the combos follow.
  */
 
 export type CronParts = {
@@ -54,9 +52,9 @@ const FREQUENCIES: Array<{ value: CronParts["freq"]; label: string }> = [
 const int = (s: string) => (/^\d{1,2}$/.test(s) ? Number(s) : null);
 
 /**
- * The subset of cron this builder can round-trip. Anything else — step values,
- * lists, ranges other than the weekday one, a month restriction — parses to
- * null, and the UI says so rather than silently rewriting someone's expression.
+ * The subset of cron this builder can round-trip. Step values, lists, ranges
+ * other than the weekday one, or a month restriction parse to null — the UI
+ * says so rather than silently rewriting the expression.
  */
 export function parseCron(expr: string): CronParts | null {
   const parts = expr.trim().split(/\s+/);
@@ -112,11 +110,10 @@ export function buildCron(p: CronParts): string {
 /**
  * The expression in plain English — "Every weekday at 8:00 AM".
  *
- * The cron field used to explain itself only by showing the next fire time,
- * which answers "when next" but not "what does this mean": `0 8 * * 1-5` and
- * `0 8 * * 1` both read as "Next: Mon 8:00" on a Sunday. Returns null for
- * expressions outside the builder's grammar, where the caller falls back to the
- * next-run preview.
+ * The next-fire-time display alone answers "when next" but not "what does
+ * this mean": `0 8 * * 1-5` and `0 8 * * 1` both read "Next: Mon 8:00" on a
+ * Sunday. Returns null outside the builder's grammar, where the caller falls
+ * back to that next-run preview.
  */
 export function describeCron(expr: string): string | null {
   const p = parseCron(expr);
@@ -153,16 +150,16 @@ export function CronBuilder({
   onChange: (cron: string) => void;
 }) {
   const parsed = parseCron(value);
-  // An unparseable expression still gets working controls — they start from the
-  // defaults, and touching one commits that schedule over the custom string.
+  // Unparseable expressions still get working controls from the defaults;
+  // touching one commits that schedule over the custom string.
   const p = parsed ?? DEFAULTS;
   const set = (patch: Partial<CronParts>) =>
     onChange(buildCron({ ...p, ...patch }));
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Wraps rather than scrolls: the rail this sits in is ~344px, so on a
-          narrow pane each control takes its own line. */}
+      {/* Wraps rather than scrolls: rail is ~344px, so a narrow pane puts
+          each control on its own line. */}
       <div className="flex flex-wrap items-center gap-2">
         <select
           aria-label="How often"
@@ -230,8 +227,7 @@ export function CronBuilder({
               aria-label="Time of day"
               value={`${pad(p.hour)}:${pad(p.minute)}`}
               onChange={(e) => {
-                // An emptied time input reports "", which would otherwise write
-                // NaN into the expression.
+                // An emptied time input reports "", which would write NaN.
                 const [h, m] = e.target.value.split(":").map(Number);
                 if (Number.isFinite(h) && Number.isFinite(m))
                   set({ hour: h, minute: m });

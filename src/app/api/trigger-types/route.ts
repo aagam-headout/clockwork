@@ -16,9 +16,9 @@ export async function GET(req: NextRequest) {
   try {
     return NextResponse.json({ items: await listTriggerTypes(toolkits) });
   } catch (err) {
-    // Composio being down here means the picker has nothing to offer; an
-    // unhandled throw made that a 500 HTML page, which the form then failed to
-    // parse as JSON. A stated reason is what lets it say why the list is empty.
+    // If Composio is down the picker has nothing to offer; an unhandled throw
+    // made that a 500 HTML page the form failed to parse as JSON. A stated
+    // reason lets it say why the list is empty.
     console.error("[trigger-types]", err);
     return NextResponse.json(
       { error: composioErrorMessage(err) },

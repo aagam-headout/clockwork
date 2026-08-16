@@ -1,15 +1,16 @@
+import { ChevronRight } from "lucide-react";
 import { Mono } from "@/components/ui";
 
 /**
  * The one panel behind every dead end — 404, a thrown server error, a failed
  * root layout. Two rules it exists to enforce:
  *
- *  - The person reads plain English first. A stack trace or a `digest` string
- *    is an answer to "what do I paste to whoever can fix this", not to "what
- *    happened", so it starts collapsed.
- *  - It's a `<details>`, not state — this renders inside `global-error`, where
- *    the app's providers may be the thing that broke, so it must work with no
- *    JavaScript beyond React itself.
+ *  - Plain English first. A stack trace or `digest` string answers "what do
+ *    I paste to whoever fixes this", not "what happened" — so it starts
+ *    collapsed.
+ *  - `<details>`, not state — this renders inside `global-error`, where the
+ *    app's providers may be what broke, so it must work with no JS beyond
+ *    React itself.
  */
 export function ErrorState({
   code,
@@ -55,9 +56,7 @@ export function ErrorState({
         {shown.length > 0 && (
           <details className="group mt-8 text-left">
             <summary className="text-subtle hover:text-foreground inline-flex cursor-pointer list-none items-center gap-1.5 text-xs transition-colors">
-              <span className="transition-transform group-open:rotate-90">
-                ›
-              </span>
+              <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
               Technical details
             </summary>
             <dl className="rounded-container border-border bg-bg-subtle mt-2.5 divide-y divide-[var(--border)] border">

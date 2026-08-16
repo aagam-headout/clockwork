@@ -24,10 +24,9 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Overview" };
 
 /**
- * A row's teaser: the digest's first real line of prose, with the markdown
- * furniture (headings, bullets, emphasis, links) stripped so it reads as one
- * plain sentence at 12.5px. Cheap and approximate on purpose — it's a hint
- * about which digest to open, not a rendering.
+ * A row's teaser: the digest's first real line of prose, with markdown
+ * furniture (headings, bullets, emphasis, links) stripped to one plain
+ * sentence. Cheap and approximate on purpose — a hint, not a rendering.
  */
 function previewOf(body: string): string {
   for (const line of body.split("\n")) {
@@ -44,8 +43,8 @@ function previewOf(body: string): string {
 export default async function TodayPage() {
   const user = await requireUser();
 
-  // The app's day, not the host's: on Vercel `setHours(0,0,0,0)` was UTC
-  // midnight, so "today" didn't start until 05:30 for an IST reader.
+  // App's day, not the host's: on Vercel `setHours(0,0,0,0)` was UTC
+  // midnight, so "today" started at 05:30 for an IST reader.
   const startOfToday = startOfDay();
 
   const [feed, runStats, workflowStats, onboarding] = await Promise.all([
@@ -67,6 +66,16 @@ export default async function TodayPage() {
           eq(workflows.userId, user.id),
           eq(runs.status, "ok"),
           gte(outputs.createdAt, startOfToday),
+          /*
+           * The feed is what workflows actually told you today, so both
+           * "nothing was sent" states stay out: `unchanged` rows store the
+           * NO_UPDATES sentinel as their body (else the card would literally
+           * read "NO_UPDATES"), and `suppressed` rows hold a real digest a
+           * threshold withheld — showing it here would contradict the run
+           * page, which calls it withheld.
+           */
+          eq(outputs.unchanged, false),
+          eq(outputs.suppressed, false),
         ),
       )
       .orderBy(desc(outputs.createdAt)),
@@ -80,8 +89,8 @@ export default async function TodayPage() {
           ),
       })
       .from(runs)
-      // Runs carry no owner of their own — they reach one through their
-      // workflow, so the stat has to join rather than read `runs` alone.
+      // Runs have no owner of their own — they reach one through their
+      // workflow, hence the join instead of reading `runs` alone.
       .innerJoin(workflows, eq(runs.workflowId, workflows.id))
       .where(
         and(eq(workflows.userId, user.id), gte(runs.createdAt, startOfToday)),
@@ -137,9 +146,9 @@ export default async function TodayPage() {
           label="Active"
           value={activeWorkflows}
           hint={`of ${totalWorkflows}`}
-          // Amber only when there is something to warn about — workflows exist
-          // but none of them are running. A fresh install with no workflows at
-          // all isn't a fault, and the tile used to read as one.
+          // Amber only when workflows exist but none are running — a fresh
+          // install with none at all isn't a fault, though the tile used to
+          // read as one.
           tone={
             activeWorkflows > 0
               ? "success"
@@ -150,8 +159,8 @@ export default async function TodayPage() {
         />
       </div>
 
-      {/* Dissolves step by step and disappears entirely once setup is done —
-          a permanent banner would be noise for every returning visit. */}
+      {/* Dissolves step by step, gone once setup is done — a permanent
+          banner would be noise on every return visit. */}
       {!onboarding.complete && (
         <div className="mt-6">
           <SetupChecklist state={onboarding} />
@@ -180,8 +189,8 @@ export default async function TodayPage() {
           />
         ) : (
           /* One row per digest, not one card: the feed's job is "what ran
-             today", and a dozen clamped card bodies buried that under half a
-             screen of prose each. The body is one click away in the dialog. */
+             today", and a dozen clamped card bodies buried that in prose.
+             The body is one click away in the dialog. */
           <Card className="rise overflow-hidden">
             {feed.map((item) => (
               <DigestRow
