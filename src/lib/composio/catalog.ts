@@ -59,6 +59,7 @@ export async function getToolkitCatalog(): Promise<ToolkitSummary[]> {
   const res = (await composio.toolkits.get({
     limit: 1000,
     sortBy: "usage",
+    managedBy: "all",
   })) as unknown as ToolkitListItem[];
 
   const items: ToolkitSummary[] = res.map((item) => ({
