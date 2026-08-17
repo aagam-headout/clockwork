@@ -14,6 +14,7 @@ export {
   invalidateToolkitCatalog,
   searchToolkits,
   toolkitIsNoAuth,
+  toolkitManagedAuthScheme,
   toolkitExists,
   noAuthToolkitSlugs,
   type ToolkitSummary,

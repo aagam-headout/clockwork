@@ -1,5 +1,6 @@
 import { composio, composioErrorMessage } from "./client";
 import { composioUserId } from "./identity";
+import { toolkitManagedAuthScheme } from "./catalog";
 
 /**
  * Finds an existing Composio-managed auth config for a toolkit, or creates
@@ -26,6 +27,18 @@ export async function getOrCreateAuthConfigId(
   const pending = (async () => {
     const found = await composio.authConfigs.list({ toolkit });
     if (found.items[0]?.id) return found.items[0].id;
+
+    // Composio only holds shared credentials for some of a toolkit's auth
+    // schemes (often just OAUTH2, sometimes none at all — e.g. a custom
+    // toolkit's API_KEY). Asking it to auto-create a managed config outside
+    // that set is a 400 ("Composio does not have managed credentials for
+    // this toolkit"), so this is checked up front for a clear error instead.
+    const managedScheme = await toolkitManagedAuthScheme(toolkit);
+    if (!managedScheme) {
+      throw new Error(
+        `${toolkit} has no Composio-managed auth — it needs its own credentials, which this connect flow doesn't collect yet.`,
+      );
+    }
 
     const created = await composio.authConfigs.create(toolkit, {
       type: "use_composio_managed_auth",

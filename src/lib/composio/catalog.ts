@@ -9,6 +9,12 @@ export type ToolkitSummary = {
   categories: string[];
   toolsCount?: number;
   noAuth: boolean;
+  /** Every auth scheme the toolkit accepts (OAUTH2, API_KEY, BEARER_TOKEN, ...). */
+  authSchemes: string[];
+  /** Subset of `authSchemes` Composio holds shared credentials for — an auth
+   * config can only be auto-created for one of these; anything else needs the
+   * caller's own credentials. */
+  managedAuthSchemes: string[];
 };
 
 /*
@@ -33,6 +39,8 @@ type ToolkitListItem = {
   slug: string;
   name: string;
   noAuth?: boolean;
+  authSchemes?: string[];
+  composioManagedAuthSchemes?: string[];
   meta?: {
     description?: string;
     logo?: string;
@@ -70,6 +78,8 @@ export async function getToolkitCatalog(): Promise<ToolkitSummary[]> {
     categories: (item.meta?.categories ?? []).map((c) => c.name),
     toolsCount: item.meta?.toolsCount,
     noAuth: Boolean(item.noAuth),
+    authSchemes: item.authSchemes ?? [],
+    managedAuthSchemes: item.composioManagedAuthSchemes ?? [],
   }));
 
   catalogCache = { at: Date.now(), items };
@@ -115,6 +125,20 @@ export async function searchToolkits(
 export async function toolkitIsNoAuth(slug: string): Promise<boolean> {
   const catalog = await getToolkitCatalog();
   return Boolean(catalog.find((t) => t.slug === slug)?.noAuth);
+}
+
+/**
+ * The auth scheme (if any) Composio can auto-create a managed auth config
+ * for. `undefined` means the toolkit only accepts schemes Composio has no
+ * shared credentials for (e.g. a custom toolkit's API_KEY, or a service that
+ * requires the caller's own OAuth app) — connecting it needs the caller's own
+ * credentials, which the managed-auth connect flow can't supply.
+ */
+export async function toolkitManagedAuthScheme(
+  slug: string,
+): Promise<string | undefined> {
+  const catalog = await getToolkitCatalog();
+  return catalog.find((t) => t.slug === slug)?.managedAuthSchemes[0];
 }
 
 /**
