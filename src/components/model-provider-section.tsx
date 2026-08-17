@@ -102,7 +102,7 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
                 <span
                   className={`rounded-control flex h-9 w-9 shrink-0 items-center justify-center border ${
                     isActive
-                      ? "border-accent/25 bg-accent-soft text-accent-text"
+                      ? "border-accent-line bg-accent-soft text-accent-text"
                       : "border-border bg-surface-2 text-subtle"
                   }`}
                 >
@@ -110,8 +110,16 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
                 </span>
 
                 <div className="min-w-0 flex-1">
-                  <span className="text-foreground text-sm font-medium">
-                    {p.label}
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="text-foreground text-sm font-medium">
+                      {p.label}
+                    </span>
+                    {isActive && (
+                      <span className="text-success-text inline-flex items-center gap-1 text-[12px] font-medium">
+                        <Check className="h-3.5 w-3.5" />
+                        In use
+                      </span>
+                    )}
                   </span>
                   <p className="text-subtle mt-1 flex flex-wrap items-center gap-1.5 text-[12px]">
                     {key ? (
@@ -144,19 +152,14 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
 
                 {/* One action slot, same place in every row. */}
                 <div className="flex shrink-0 items-center gap-1.5">
-                  {isActive ? (
-                    <span className="text-success-text inline-flex items-center gap-1.5 text-[13px] font-medium">
-                      <Check className="h-4 w-4" />
-                      In use
-                    </span>
-                  ) : key ? (
+                  {!isActive && key && (
                     <form action={switchProvider}>
                       <input type="hidden" name="provider" value={p.id} />
                       <SubmitButton variant="primary" pendingLabel="Switching…">
                         Use this
                       </SubmitButton>
                     </form>
-                  ) : null}
+                  )}
 
                   {key && (
                     <form action={removeProviderKey}>
@@ -167,7 +170,7 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
                         icon={<Trash2 className="h-3.5 w-3.5" />}
                         title={`Remove ${p.label} key`}
                         size="sm"
-                        variant="danger"
+                        variant="outline"
                       >
                         {`Remove ${p.label} key`}
                       </ConfirmSubmitButton>
@@ -176,15 +179,18 @@ export async function ModelProviderSection({ user }: { user: AppUser }) {
                 </div>
               </div>
 
+              {/* Indented to sit under the name/meta column, not the icon —
+                  flush left made it read as a new row instead of this
+                  provider's own disclosure. */}
               {key ? (
-                <details className="group mt-3">
+                <details className="group mt-3 pl-12">
                   <summary className="text-muted hover:text-foreground w-fit cursor-pointer text-[13px] select-none">
                     Replace key
                   </summary>
                   <div className="mt-2">{keyForm}</div>
                 </details>
               ) : (
-                <div className="mt-3">{keyForm}</div>
+                <div className="mt-3 pl-12">{keyForm}</div>
               )}
             </li>
           );

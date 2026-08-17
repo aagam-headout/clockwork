@@ -29,7 +29,7 @@ export async function WorkflowDefaultsSection({ user }: { user: AppUser }) {
             </SubmitButton>
           }
         >
-          <div className="grid gap-4 sm:max-w-sm">
+          <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-1.5">
               <span className="text-foreground text-[13px] font-medium">
                 Timezone
@@ -46,6 +46,9 @@ export async function WorkflowDefaultsSection({ user }: { user: AppUser }) {
                   </option>
                 ))}
               </select>
+              <span className="text-subtle text-[12px]">
+                Leave blank to default to {DEFAULT_TIMEZONE}.
+              </span>
             </label>
 
             <label className="grid gap-1.5">

@@ -12,7 +12,7 @@ export default function Loading() {
       <span className="sr-only">Loading…</span>
 
       <Skeleton className="h-8 w-56" />
-      <Skeleton className="mt-2 h-5 w-80" />
+      <Skeleton className="mt-1.5 h-5 w-80" />
 
       <div className="mt-6 grid min-h-0 gap-5 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_344px] xl:grid-cols-[minmax(0,1fr)_380px] xl:gap-6">
         {/* Chat pane: header strip, then composer pinned to the bottom —

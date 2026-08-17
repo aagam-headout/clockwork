@@ -13,7 +13,7 @@ export default function Loading() {
 
       {/* 32px title + 20px subtitle, the exact block PageHeader renders. */}
       <Skeleton className="h-8 w-48" />
-      <Skeleton className="mt-2 h-5 w-72" />
+      <Skeleton className="mt-1.5 h-5 w-72" />
 
       {/* Same grid and 92px floor as the Stat row, so real tiles land where
           the eye already fixed. */}
