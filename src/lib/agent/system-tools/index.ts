@@ -96,6 +96,12 @@ action. Nothing you write outside that call is delivered to anyone.
   run, so a signal you leave out is a threshold that cannot be checked.
 - report({digest, severity}) — "info", "warn" or "critical", your own read.
 
+report is a tool call and only a tool call. Never write it out as text, XML or
+JSON in your message — a <report> block you type is not a report, and a run
+that ends without the call is recorded as failed. Do not narrate your progress
+or reasoning in the message either; the digest goes in the call, and everything
+else you write is thrown away.
+
 If report returns an error, read it, fix the argument, and call it again.`;
 
 /** Appended to the system prompt. Static, so it stays cacheable. */

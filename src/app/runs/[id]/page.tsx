@@ -390,7 +390,7 @@ export default async function RunDetailPage({
               <DigestCard
                 title={run.workflowName ?? "(deleted workflow)"}
                 createdAt={output.createdAt}
-                rendered={<Markdown>{output.body}</Markdown>}
+                rendered={<Markdown digest>{output.body}</Markdown>}
               />
             )}
             <div className="border-border bg-bg-subtle text-subtle flex flex-wrap items-center gap-2 border-t px-5 py-2.5 text-xs">
@@ -549,7 +549,11 @@ export default async function RunDetailPage({
                         // else, so no local overrides needed. Capped like a
                         // payload: an uncapped chain of thought would bury
                         // every step after it.
-                        <div className="max-h-84 overflow-auto">
+                        // The negative margin plus matching padding keeps the
+                        // text where it was while giving the scrollport room
+                        // for a list marker, which is painted left of the
+                        // content and was otherwise sheared at this edge.
+                        <div className="-ml-4 max-h-84 overflow-auto pl-4">
                           <Markdown>{text}</Markdown>
                         </div>
                       )}

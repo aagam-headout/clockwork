@@ -424,10 +424,26 @@ async function assertOutcomeConfig(
         `Signal name "${decl.key}" must be lowercase letters, digits and underscores, starting with a letter.`,
       );
     }
+    if (decl.key.length > LIMITS.maxSignalKeyChars) {
+      throw new Error(
+        `Signal name "${decl.key}" is longer than ${LIMITS.maxSignalKeyChars} characters.`,
+      );
+    }
     if (seen.has(decl.key)) {
       throw new Error(`Duplicate signal name "${decl.key}".`);
     }
     seen.add(decl.key);
+    // The description rides into every run's tool schema, so it is bounded
+    // here and not only by the input's maxLength — a paste can arrive by any
+    // path that reaches this action.
+    if (
+      decl.description &&
+      decl.description.length > LIMITS.maxSignalDescriptionChars
+    ) {
+      throw new Error(
+        `Description for signal "${decl.key}" is longer than ${LIMITS.maxSignalDescriptionChars} characters.`,
+      );
+    }
   }
 
   if (input.alertCondition?.trim()) {

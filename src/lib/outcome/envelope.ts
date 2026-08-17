@@ -39,11 +39,16 @@ export function parseSignalSchema(raw: unknown): SignalDecl[] {
     if (typeof type !== "string" || !TYPES.includes(type as SignalType)) {
       continue;
     }
+    // A blank description is no description: `?? ` in `buildReportSchema`
+    // wouldn't catch `""`, and the model would get an empty instruction
+    // instead of falling back to the key name.
+    const description =
+      typeof record.description === "string" ? record.description.trim() : "";
+
     out.push({
       key,
       type: type as SignalType,
-      description:
-        typeof record.description === "string" ? record.description : undefined,
+      description: description || undefined,
     });
   }
   return out;

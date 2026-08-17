@@ -41,6 +41,13 @@ export const LIMITS = {
   maxChildrenPerWorkflow: num("MAX_CHILDREN_PER_WORKFLOW", 3),
   /** Signals one workflow may declare — each one is prompt surface. */
   maxSignalsPerWorkflow: num("MAX_SIGNALS_PER_WORKFLOW", 10),
+  /** A signal name, bounded because it is also a condition token. */
+  maxSignalKeyChars: 40,
+  /**
+   * A signal's description. It is `.describe()`d into the report schema on
+   * every run of the workflow, so an unbounded one is unbounded prompt.
+   */
+  maxSignalDescriptionChars: 200,
   /** Fraction of a workflow's monthly cap at which the UI starts warning. */
   costCapWarnRatio: 0.8,
   /** Delivery attempts, including the first, before a digest is given up on. */

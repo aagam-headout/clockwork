@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { prepareDigest } from "@/lib/outcome/digest-view";
 
 /**
  * Agent output is markdown. Rendered as text, headings arrived as literal
@@ -18,6 +19,7 @@ import remarkGfm from "remark-gfm";
 export function Markdown({
   children,
   size = "base",
+  digest = false,
   className = "",
 }: {
   children: string;
@@ -27,12 +29,33 @@ export function Markdown({
    * can't drift on what a heading or code chip looks like.
    */
   size?: "base" | "sm";
+  /**
+   * The body is a stored run digest, so a typed `<report>` block in it is a
+   * mis-typed tool call worth reading back. Off everywhere else: a workflow
+   * goal teaching that format, or a chat turn quoting it, means the shape
+   * literally, and salvaging it would replace what the author wrote.
+   */
+  digest?: boolean;
   className?: string;
 }) {
+  /*
+   * The body is model output, so it isn't always the markdown it claims to
+   * be: a report typed as `<report>{...}</report>` used to lose its tags and
+   * spill JSON into the page. `prepareDigest` reads the digest back out of
+   * that shape and escapes any other tag-like text so nothing renders as
+   * nothing.
+   */
+  const { markdown, salvaged } = prepareDigest(children, { salvage: digest });
+
   return (
     <div
       className={`markdown ${size === "sm" ? "markdown-sm" : ""} ${className}`}
     >
+      {salvaged && (
+        <p className="text-muted mb-2 text-[12px]">
+          Recovered from a report the agent wrote as text instead of calling.
+        </p>
+      )}
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -43,11 +66,22 @@ export function Markdown({
               <table>{cells}</table>
             </div>
           ),
-          a: ({ children: label, href }) => (
-            <a href={href} target="_blank" rel="noopener noreferrer">
-              {label}
-            </a>
-          ),
+          // A digest links out to a PR, a dashboard, a thread — all of which
+          // should open beside the run, not replace it. An in-page anchor is
+          // the exception: a new tab there lands on a fresh, unscrolled page.
+          a: ({ children: label, href, title }) => {
+            const inPage = href?.startsWith("#");
+            return (
+              <a
+                href={href}
+                title={title}
+                target={inPage ? undefined : "_blank"}
+                rel={inPage ? undefined : "noopener noreferrer"}
+              >
+                {label}
+              </a>
+            );
+          },
           // A digest can carry a chart or screenshot the agent linked to.
           // Lazy and async-decoded, so a long one doesn't block the panel
           // for images below the fold.
@@ -64,7 +98,7 @@ export function Markdown({
           ),
         }}
       >
-        {children}
+        {markdown}
       </ReactMarkdown>
     </div>
   );

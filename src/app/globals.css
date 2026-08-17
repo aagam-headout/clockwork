@@ -817,15 +817,24 @@ body {
   color: var(--fg-muted);
 }
 
-.markdown ul,
-.markdown ol {
-  padding-left: 1.25rem;
-}
+/*
+ * An outside marker is painted to the *left* of the item, inside the list's
+ * padding — so the padding has to be wide enough to hold it or the number
+ * spills out of the list box and any scrolling ancestor shears it in half.
+ * A digest that reaches step 10 doubles its marker width, so the ordered list
+ * gets the wider reserve; a disc never grows.
+ */
 .markdown ul {
+  --md-list-pad: 1.25rem;
   list-style: disc;
 }
 .markdown ol {
+  --md-list-pad: 1.75rem;
   list-style: decimal;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: var(--md-list-pad);
 }
 .markdown li + li {
   margin-top: 0.25rem;
@@ -933,7 +942,8 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
-  margin-left: -1.25rem;
+  /* Reclaims exactly the marker reserve its list set aside. */
+  margin-left: calc(-1 * var(--md-list-pad));
   list-style: none;
 }
 

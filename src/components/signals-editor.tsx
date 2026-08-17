@@ -13,6 +13,11 @@ import { LIMITS } from "@/lib/limits";
  * above it, and the helper text under the condition field is the only place
  * those names are listed for the person typing it.
  *
+ * A row's description is the field's only prose instruction to the agent: it
+ * becomes the zod `.describe()` on that key in the `report` tool schema, and
+ * without one the model sees nothing but the key name. Optional, but the
+ * difference between `errors` meaning anything and meaning one thing.
+ *
  * The rows travel as one JSON hidden field. Individual `name="signal.0.key"`
  * inputs would need the server to reassemble an array from flat FormData and
  * guess at gaps from deleted rows; one field is parsed once, by
@@ -63,32 +68,52 @@ export function SignalsEditor({
             threshold — a count, a percentage, an age in days.
           </p>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-3">
             {signals.map((signal, i) => (
+              // Remove sits outside the field column rather than in the top
+              // row: both fields belong to one signal, so tabbing goes name,
+              // type, description, and only then reaches the destructive
+              // control — and the description ends where the row does without
+              // hardcoding the button's width as a margin.
               <div key={i} className="flex items-start gap-2">
-                <input
-                  value={signal.key}
-                  onChange={(e) =>
-                    update(i, { key: e.target.value.toLowerCase() })
-                  }
-                  placeholder="open_prs_stale"
-                  aria-label={`Signal ${i + 1} name`}
-                  className="input min-w-0 flex-1 font-mono text-[13px]"
-                />
-                <select
-                  value={signal.type}
-                  onChange={(e) =>
-                    update(i, { type: e.target.value as SignalType })
-                  }
-                  aria-label={`Signal ${i + 1} type`}
-                  className="input w-[104px] shrink-0 text-[13px]"
-                >
-                  {TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <div className="flex items-start gap-2">
+                    <input
+                      value={signal.key}
+                      onChange={(e) =>
+                        update(i, { key: e.target.value.toLowerCase() })
+                      }
+                      placeholder="open_prs_stale"
+                      maxLength={LIMITS.maxSignalKeyChars}
+                      aria-label={`Signal ${i + 1} name`}
+                      className="input min-w-0 flex-1 font-mono text-[13px]"
+                    />
+                    <select
+                      value={signal.type}
+                      onChange={(e) =>
+                        update(i, { type: e.target.value as SignalType })
+                      }
+                      aria-label={`Signal ${i + 1} type`}
+                      className="input w-[104px] shrink-0 text-[13px]"
+                    >
+                      {TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <input
+                    value={signal.description ?? ""}
+                    onChange={(e) =>
+                      update(i, { description: e.target.value || undefined })
+                    }
+                    placeholder="What to measure — count only P1, exclude auto-resolved"
+                    maxLength={LIMITS.maxSignalDescriptionChars}
+                    aria-label={`Signal ${i + 1} description`}
+                    className="input min-w-0 text-[13px]"
+                  />
+                </div>
                 <button
                   type="button"
                   onClick={() =>

@@ -39,6 +39,18 @@ describe("parseSignalSchema", () => {
       parseSignalSchema([{ key: "a", type: "number", description: 7 }]),
     ).toEqual([{ key: "a", type: "number", description: undefined }]);
   });
+
+  it("treats a blank description as absent so the key name is the fallback", () => {
+    expect(
+      parseSignalSchema([{ key: "a", type: "number", description: "   " }]),
+    ).toEqual([{ key: "a", type: "number", description: undefined }]);
+  });
+
+  it("trims a description it keeps", () => {
+    expect(
+      parseSignalSchema([{ key: "a", type: "number", description: " d " }]),
+    ).toEqual([{ key: "a", type: "number", description: "d" }]);
+  });
 });
 
 describe("normalizeEnvelope", () => {

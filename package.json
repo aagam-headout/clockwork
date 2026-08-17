@@ -12,6 +12,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "pre-ship": "npm run lint && npm run format && npm run test && npm run build",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed-owner": "node --experimental-strip-types --env-file-if-exists=.env.local scripts/seed-owner.ts",

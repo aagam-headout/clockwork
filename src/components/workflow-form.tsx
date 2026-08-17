@@ -1,8 +1,15 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useActionState,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { CronExpressionParser } from "cron-parser";
-import { useFormStatus } from "react-dom";
+import { createPortal, useFormStatus } from "react-dom";
 import type { WorkflowFormState } from "@/lib/actions";
 import Link from "next/link";
 import { TOOLKIT_LABELS } from "@/lib/toolkit-labels";
@@ -25,6 +32,7 @@ import {
   TriangleAlert,
   ChevronsUpDown,
   Gauge,
+  Info,
 } from "lucide-react";
 import { CronBuilder, describeCron } from "@/components/cron-builder";
 import { SignalsEditor } from "@/components/signals-editor";
@@ -327,7 +335,15 @@ export function WorkflowForm({
           fillHeight ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto" : ""
         }`}
       >
-        <Section title="Basics" icon={FileText}>
+        <Section
+          title="Basics"
+          icon={FileText}
+          info={[
+            "Name identifies the workflow across its runs and digests.",
+            "Goal is the prompt run every time — say what to fetch, what to skip, what the output looks like.",
+            "Markdown supported; longer goals cost more per run.",
+          ]}
+        >
           <Field label="Name">
             <input
               name="name"
@@ -354,7 +370,14 @@ export function WorkflowForm({
           </div>
         </Section>
 
-        <Section title="Trigger" icon={CalendarClock}>
+        <Section
+          title="Trigger"
+          icon={CalendarClock}
+          info={[
+            "What starts a run — one mode: a cron schedule, a connected app's event, or a parent workflow finishing.",
+            "Timezone drives the schedule and the monthly budget reset, so it is saved in every mode.",
+          ]}
+        >
           <input type="hidden" name="triggerType" value={triggerType} />
           {/*
            * Timezone picker lives in the cron branch since a schedule is the
@@ -461,14 +484,30 @@ export function WorkflowForm({
           )}
         </Section>
 
-        <Section title="Signals & alerts" icon={Gauge}>
+        <Section
+          title="Signals & alerts"
+          icon={Gauge}
+          info={[
+            "Signals are named values each run extracts — a count, a percent, an age in days. Charted across runs.",
+            "Only alert when: a condition over them, comparisons plus && || ! only.",
+            "Empty condition delivers every digest; false records signals but sends nothing.",
+          ]}
+        >
           <SignalsEditor
             defaultSignals={defaultValues?.signalSchema ?? []}
             defaultCondition={defaultValues?.alertCondition ?? ""}
           />
         </Section>
 
-        <Section title="Tools" icon={Wrench}>
+        <Section
+          title="Tools"
+          icon={Wrench}
+          info={[
+            "Which connected apps the agent may call. Web search needs no connection.",
+            "Fewer toolkits, fewer tools loaded — cheaper and less chance of a wrong call.",
+            "Amber means reconnect on Connections first; disconnected picks stay selected, not dropped.",
+          ]}
+        >
           <div className="grid grid-cols-2 gap-2">
             {options.map((toolkit) => {
               const on = selectedToolkits.has(toolkit.slug);
@@ -568,7 +607,15 @@ export function WorkflowForm({
           )}
         </Section>
 
-        <Section title="Model" icon={Cpu}>
+        <Section
+          title="Model"
+          icon={Cpu}
+          info={[
+            "Stronger models cost more per step. Writes off means read-only; on allows post, send, update — never delete.",
+            "Budget pauses the workflow at that month's spend; the crossing run still finishes.",
+            "Max steps caps model-call rounds — at the cap the run saves what it had, marked truncated.",
+          ]}
+        >
           {/* Stacked, not side by side: model names want the full width, and
               step count needs none of it. */}
           <div className="flex flex-col gap-4">
@@ -624,7 +671,15 @@ export function WorkflowForm({
           </div>
         </Section>
 
-        <Section title="Delivery" icon={Send}>
+        <Section
+          title="Delivery"
+          icon={Send}
+          info={[
+            "Where the digest goes; dashboard always keeps it, extra targets are optional.",
+            "Slack needs Slack connected, email goes through your Gmail, webhook is POSTed as JSON.",
+            "An alert condition still gates these — only passing runs deliver.",
+          ]}
+        >
           <DeliveryPicker
             defaults={{
               deliverSlack: defaultValues?.deliverSlack,
@@ -638,7 +693,15 @@ export function WorkflowForm({
           />
         </Section>
 
-        <Section title="Tool filters" icon={Filter}>
+        <Section
+          title="Tool filters"
+          icon={Filter}
+          info={[
+            "Optional narrowing inside the picked toolkits — blank means no filtering.",
+            "Allow only loads nothing else; Never use wins on any conflict.",
+            "Comma-separated, trailing * matches a prefix; deletes need their exact name.",
+          ]}
+        >
           {/* Comma-separated tool globs need width; two columns only earn
               their keep once the card is genuinely wide. */}
           <div className="grid gap-4 @2xl:grid-cols-2">
@@ -1164,11 +1227,14 @@ function Section({
   title,
   description,
   icon: Icon,
+  info,
   children,
 }: {
   title: string;
   description?: string;
   icon?: React.ComponentType<{ className?: string }>;
+  /** Bullets shown by the heading's info button; omit for no button. */
+  info?: string[];
   children: React.ReactNode;
 }) {
   return (
@@ -1177,6 +1243,7 @@ function Section({
         <h2 className="heading-14 text-foreground flex items-center gap-2">
           {Icon && <Icon className="text-subtle h-4 w-4 shrink-0" />}
           {title}
+          {info && <SectionInfo title={title} points={info} />}
         </h2>
         {description && (
           <p className="text-subtle mt-1 hidden text-xs leading-relaxed @xl:block">
@@ -1186,6 +1253,107 @@ function Section({
       </div>
       <div className="flex min-w-0 flex-col gap-4">{children}</div>
     </section>
+  );
+}
+
+const TIP_WIDTH = 300;
+
+/**
+ * Info marker beside a section heading; hover or keyboard focus shows a short
+ * bulleted explainer. Portalled and fixed-positioned off the marker's rect,
+ * not an in-flow popover: the form card is `overflow-clip` and its section
+ * list scrolls, so a panel in the tree would be cut off at the card edge.
+ */
+function SectionInfo({ title, points }: { title: string; points: string[] }) {
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const tipId = useId();
+
+  function show() {
+    setRect(anchorRef.current?.getBoundingClientRect() ?? null);
+  }
+  const hide = () => setRect(null);
+
+  useEffect(() => {
+    if (!rect) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && hide();
+    window.addEventListener("keydown", onKey);
+    // Rect is a viewport measurement, so it goes stale the moment anything
+    // moves under it — cheaper to drop the tip than to re-measure on a scroll.
+    window.addEventListener("scroll", hide, true);
+    window.addEventListener("resize", hide);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", hide, true);
+      window.removeEventListener("resize", hide);
+    };
+  }, [rect]);
+
+  // Left-aligned to the marker, flipped back inside on the right edge; below
+  // it unless the viewport bottom is closer than the tip is tall.
+  const left = rect
+    ? Math.max(8, Math.min(rect.left, window.innerWidth - TIP_WIDTH - 8))
+    : 0;
+  const below = rect ? rect.bottom + 8 : 0;
+  const flip = rect ? window.innerHeight - rect.bottom < 220 : false;
+
+  return (
+    <>
+      {/*
+       * A real button, not a span with role="button": it is inside a form, so
+       * it needs the explicit type either way, and the native element brings
+       * the focus and activation behaviour the role only claims. Click toggles
+       * because hover is not available on touch.
+       */}
+      <button
+        ref={anchorRef}
+        type="button"
+        aria-label={`About ${title}`}
+        aria-expanded={rect !== null}
+        aria-describedby={rect ? tipId : undefined}
+        onClick={() => (rect ? hide() : show())}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        // Only keyboard focus opens the tip. A tap focuses the button before
+        // it clicks it, so an unconditional onFocus would open the tip and
+        // leave the click handler to immediately close it again — the tip
+        // would flash and never stay on exactly the devices the click toggle
+        // is here for.
+        onFocus={(e) => e.target.matches(":focus-visible") && show()}
+        onBlur={hide}
+        className="text-subtle hover:text-foreground focus-visible:text-foreground inline-flex shrink-0 cursor-help transition-colors outline-none"
+      >
+        <Info className="h-3.5 w-3.5" />
+      </button>
+
+      {rect &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            id={tipId}
+            role="tooltip"
+            style={{
+              left,
+              width: TIP_WIDTH,
+              ...(flip
+                ? { bottom: window.innerHeight - rect.top + 8 }
+                : { top: below }),
+            }}
+            className="rounded-container border-border bg-surface shadow-pop pointer-events-none fixed z-50 border px-3.5 py-3"
+          >
+            <p className="heading-14 text-foreground mb-2">{title}</p>
+            <ul className="text-muted flex flex-col gap-1.5 text-[12.5px] leading-relaxed">
+              {points.map((point) => (
+                <li key={point} className="flex gap-2">
+                  <span className="bg-border-strong mt-[7px] h-1 w-1 shrink-0 rounded-full" />
+                  <span className="min-w-0">{point}</span>
+                </li>
+              ))}
+            </ul>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 

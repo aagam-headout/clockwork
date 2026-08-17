@@ -281,8 +281,21 @@ afterEach(() => {
  * Runs the loop with a stub model that calls the fetch tool once (populating
  * the buffered hash), then finishes however the test says.
  */
+/**
+ * @param finish.report set false for a run that ends without calling report.
+ *
+ * A real run ends by calling `report`, so the stub does too: unless the test
+ * drives it itself, the final text is reported as the digest. Tests that care
+ * about a *missing* report opt out rather than relying on a text fallback the
+ * executor no longer has.
+ */
 function stubModel(
-  finish: { text?: string; finishReason?: string; steps?: unknown[] },
+  finish: {
+    text?: string;
+    finishReason?: string;
+    steps?: unknown[];
+    report?: boolean;
+  },
   duringRun?: (
     tools: Record<
       string,
@@ -295,10 +308,26 @@ function stubModel(
       string,
       { execute: (a: unknown, c: unknown) => Promise<unknown> }
     >;
+    const report = tools.report.execute.bind(tools.report);
+    let reported = false;
+    tools.report.execute = async (args: unknown, ctx: unknown) => {
+      reported = true;
+      return report(args, ctx);
+    };
+
     await tools.GMAIL_FETCH_EMAILS.execute({}, {});
     await duringRun?.(tools);
+
+    const text = finish.text ?? "## Digest\n- one thing";
+    // Empty text is a model that said nothing — it has no report to make.
+    if (finish.report !== false && !reported && text) {
+      await report(
+        text === NO_UPDATES ? { no_updates: true } : { digest: text },
+        {},
+      );
+    }
     return {
-      text: finish.text ?? "## Digest\n- one thing",
+      text,
       finishReason: finish.finishReason ?? "stop",
       steps: finish.steps ?? externalSteps(1),
       toolCalls: [],
@@ -1041,6 +1070,7 @@ function outputRow() {
         severity: string | null;
         suppressed: boolean;
         suppressedReason: string | null;
+        deliveryStatus: string;
       }
     | undefined;
 }
@@ -1218,28 +1248,24 @@ describe("alert conditions", () => {
   });
 });
 
-describe("report fallback", () => {
-  it("falls back to the final text when nothing is configured", async () => {
-    stubModel({ text: "## Plain digest" });
+describe("a run that never calls report", () => {
+  it("errors rather than publishing the final text as the digest", async () => {
+    // The transcript is thinking narration, not a digest — publishing it is
+    // how raw reasoning reached the reader.
+    stubModel({ text: "I now have confirmation of 18 emails.", report: false });
 
     const result = await executeRun(RUN_ID);
 
-    expect(result.status).toBe("ok");
-    expect(outputRow()?.body).toBe("## Plain digest");
-  });
-
-  it("still honours a NO_UPDATES text fallback", async () => {
-    stubModel({ text: NO_UPDATES });
-
-    const result = await executeRun(RUN_ID);
-
-    expect(result.status).toBe("ok");
-    expect(outputRow()?.unchanged).toBe(true);
+    expect(result.status).toBe("error");
+    expect(runVerdict().errorCode).toBe("no_report");
+    // The text is still written down, undelivered, so the run isn't a mystery.
+    expect(outputRow()?.body).toBe("I now have confirmation of 18 emails.");
+    expect(outputRow()?.deliveryStatus).toBe("skipped");
   });
 
   it("errors when a workflow declaring signals gets no report", async () => {
     queueWorkflow({ signalSchema: NUMERIC_SIGNAL });
-    stubModel({ text: "## Digest with no signals" });
+    stubModel({ text: "## Digest with no signals", report: false });
 
     const result = await executeRun(RUN_ID);
 
@@ -1249,11 +1275,48 @@ describe("report fallback", () => {
 
   it("errors when a workflow with an alert condition gets no report", async () => {
     queueWorkflow({ alertCondition: "n > 3", signalSchema: NUMERIC_SIGNAL });
-    stubModel({ text: "## Digest" });
+    stubModel({ text: "## Digest", report: false });
 
     const result = await executeRun(RUN_ID);
 
     // Delivering here would silently skip the threshold the user configured.
+    expect(result.status).toBe("error");
+    expect(runVerdict().errorCode).toBe("no_report");
+  });
+});
+
+describe("a report written as text instead of called", () => {
+  it("salvages the digest out of a <report> block", async () => {
+    stubModel({
+      text: 'Compiling now.\n\n<report> { "digest": "## 18 emails", "severity": "info" } </report>',
+      report: false,
+    });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+    // The narration around the block never reaches the reader.
+    expect(outputRow()?.body).toBe("## 18 emails");
+  });
+
+  it("salvages signals, so thresholds are still evaluated", async () => {
+    queueWorkflow({ signalSchema: NUMERIC_SIGNAL, alertCondition: "n > 3" });
+    stubModel({
+      text: '<report>{"digest": "## Digest", "signals": {"n": 9}}</report>',
+      report: false,
+    });
+
+    const result = await executeRun(RUN_ID);
+
+    expect(result.status).toBe("ok");
+    expect(outputRow()?.signals).toEqual({ n: 9 });
+  });
+
+  it("still fails when the block is not a valid report", async () => {
+    stubModel({ text: "<report>{ not json }</report>", report: false });
+
+    const result = await executeRun(RUN_ID);
+
     expect(result.status).toBe("error");
     expect(runVerdict().errorCode).toBe("no_report");
   });

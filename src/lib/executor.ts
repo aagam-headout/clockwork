@@ -37,6 +37,7 @@ import {
 import { systemCacheOptions } from "@/lib/agent/prompt-cache";
 import { HISTORY_PROMPT, REPORT_PROMPT } from "@/lib/agent/system-tools";
 import { parseSignalSchema, type Envelope } from "@/lib/outcome/envelope";
+import { salvageEnvelope } from "@/lib/outcome/salvage";
 import type { SignalDecl } from "@/lib/outcome/condition";
 import { decideChildren, decideDelivery } from "@/lib/outcome/route";
 import { checkCostCap, type CapVerdict } from "@/lib/cost-cap";
@@ -543,53 +544,35 @@ export async function executeRun(runId: string): Promise<RunResult> {
     /*
      * Where the run's outcome comes from.
      *
-     * `report` is the protocol, but some workflows predate it and some models
-     * occasionally end a turn without calling it. Falling back to the final
-     * text keeps those runs working as before.
+     * `report` is the only protocol. A run that ends without calling it has
+     * no outcome — not a digest we can guess at from the transcript, which is
+     * how raw thinking narration and literal `<report>` tags used to reach
+     * the reader as the digest.
      *
-     * The fallback is only safe when the workflow asks nothing of the
-     * envelope. One that declares signals or an alert condition can't be
-     * routed without a report — delivering anyway would silently skip every
-     * threshold configured — so that case is an error.
+     * The one thing worth rescuing is a model that wrote the report instead
+     * of calling it: the arguments are right there and unambiguous, so
+     * `salvageEnvelope` parses them back into the same validated envelope the
+     * tool would have produced. Anything else is an error, whether or not the
+     * workflow declares signals.
      */
-    const needsEnvelope =
-      declaredSignals.length > 0 || Boolean(workflow.alertCondition?.trim());
-
     const reported: Envelope | null = envelope;
-    let outcome: Envelope;
+    const text = result.text.trim();
+    const outcome: Envelope | null =
+      reported ?? salvageEnvelope(text, declaredSignals);
 
-    if (reported) {
-      outcome = reported;
-    } else {
-      const text = result.text.trim();
-      if (needsEnvelope) {
-        await db.insert(outputs).values({
-          runId,
-          format: "markdown",
-          body: text,
-          unchanged: false,
-          deliveredTo: [],
-          deliveryLog: [],
-          // Nothing was attempted; left to its default this row would claim
-          // "delivered" — the exact lie deliveryStatus exists to end.
-          deliveryStatus: "skipped",
-        });
-        const message =
-          "the run never called report, so its signals and alert condition could not be evaluated";
-        await failRun(runId, startedAt, message, { errorCode: "no_report" });
-        return { runId, status: "error", error: message };
-      }
-      outcome = {
-        digest: text === NO_UPDATES ? "" : text,
-        signals: {},
-        severity: null,
-        noUpdates: text === NO_UPDATES,
-      };
-    }
-
-    // Kept so paths below that only ever needed the text, including the
-    // NO_UPDATES sentinel they compare against, still read the same way.
-    const body = outcome.noUpdates ? NO_UPDATES : outcome.digest;
+    /*
+     * Kept so paths below that only ever needed the text, including the
+     * NO_UPDATES sentinel they compare against, still read the same way.
+     *
+     * With no outcome it holds the raw final text: nothing is delivered from
+     * here on, but the two failure paths below still record what the model
+     * said, so a failed run isn't a mystery.
+     */
+    const body = outcome
+      ? outcome.noUpdates
+        ? NO_UPDATES
+        : outcome.digest
+      : text;
 
     /*
      * The run got past preflight but a credential was rejected while it ran —
@@ -647,7 +630,7 @@ export async function executeRun(runId: string): Promise<RunResult> {
      * `degraded_reads` — also keeps it out of FINDING 1's read-budget advice
      * below, the wrong lesson for a run that may not have had a read problem.
      */
-    if (!outcome.noUpdates && outcome.digest === "") {
+    if (!outcome?.noUpdates && body === "") {
       await db.insert(outputs).values({
         runId,
         format: "markdown",
@@ -663,6 +646,34 @@ export async function executeRun(runId: string): Promise<RunResult> {
         : "the model returned no text this run — nothing to report or deliver";
 
       await failRun(runId, startedAt, message, { errorCode: "empty_response" });
+      return { runId, status: "error", error: message };
+    }
+
+    /*
+     * The model said something, but never called `report` and never wrote a
+     * salvageable one either. That leaves narration, and narration is not a
+     * digest — it goes in the output row as a trace and nowhere else.
+     */
+    if (!outcome) {
+      await db.insert(outputs).values({
+        runId,
+        format: "markdown",
+        body,
+        unchanged: false,
+        deliveredTo: [],
+        deliveryLog: [],
+        // Nothing was attempted; left to its default this row would claim
+        // "delivered" — the exact lie deliveryStatus exists to end.
+        deliveryStatus: "skipped",
+      });
+
+      const needsEnvelope =
+        declaredSignals.length > 0 || Boolean(workflow.alertCondition?.trim());
+      const message = needsEnvelope
+        ? "the run never called report, so its signals and alert condition could not be evaluated"
+        : "the run never called report, so it produced no digest to deliver";
+
+      await failRun(runId, startedAt, message, { errorCode: "no_report" });
       return { runId, status: "error", error: message };
     }
 

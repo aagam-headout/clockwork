@@ -209,7 +209,7 @@ export default async function TodayPage() {
                     : undefined
                 }
                 viewRunHref={`/runs/${item.runId}`}
-                rendered={<Markdown>{item.body}</Markdown>}
+                rendered={<Markdown digest>{item.body}</Markdown>}
               />
             ))}
           </Card>
